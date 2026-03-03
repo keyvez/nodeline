@@ -1599,11 +1599,26 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
                         drawingObjectIds: canvasState.drawingObjects.keys.toSet(),
                       ));
                     },
+                    const SingleActivator(LogicalKeyboardKey.keyV): () =>
+                      _toolBloc.add(const ToolSelected(EditorTool.arrow)),
+                    const SingleActivator(LogicalKeyboardKey.keyR): () =>
+                      _toolBloc.add(const ToolSelected(EditorTool.square)),
+                    const SingleActivator(LogicalKeyboardKey.keyO): () =>
+                      _toolBloc.add(const ToolSelected(EditorTool.circle)),
+                    const SingleActivator(LogicalKeyboardKey.keyA): () =>
+                      _toolBloc.add(const ToolSelected(EditorTool.arrowTopRight)),
+                    const SingleActivator(LogicalKeyboardKey.keyL): () =>
+                      _toolBloc.add(const ToolSelected(EditorTool.line)),
+                    const SingleActivator(LogicalKeyboardKey.keyD): () =>
+                      _toolBloc.add(const ToolSelected(EditorTool.pencil)),
+                    const SingleActivator(LogicalKeyboardKey.keyT): () =>
+                      _toolBloc.add(const ToolSelected(EditorTool.text)),
+                    const SingleActivator(LogicalKeyboardKey.keyF): () =>
+                      _toolBloc.add(const ToolSelected(EditorTool.figure)),
                   },
                   child: Focus(
                     autofocus: true,
-                    child: _buildToolShortcutHandler(
-                      child: MouseRegion(
+                    child: MouseRegion(
                     cursor: _getCursor(toolState.activeTool),
                     onHover: (event) {
                       if (!_isDrawing &&
@@ -1638,44 +1653,13 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
                       ),
                     ),
                   ),
-                )),
+                ),
                 );
               },
             );
           },
         );
       },
-    );
-  }
-
-  Widget _buildToolShortcutHandler({required Widget child}) {
-    return Focus(
-      onKeyEvent: (node, event) {
-        if (event is! KeyDownEvent) return KeyEventResult.ignored;
-        // Don't handle tool shortcuts when a modifier key is pressed
-        if (HardwareKeyboard.instance.isMetaPressed ||
-            HardwareKeyboard.instance.isControlPressed) {
-          return KeyEventResult.ignored;
-        }
-        final key = event.logicalKey;
-        final toolMap = {
-          LogicalKeyboardKey.keyV: EditorTool.arrow,
-          LogicalKeyboardKey.keyR: EditorTool.square,
-          LogicalKeyboardKey.keyO: EditorTool.circle,
-          LogicalKeyboardKey.keyA: EditorTool.arrowTopRight,
-          LogicalKeyboardKey.keyL: EditorTool.line,
-          LogicalKeyboardKey.keyD: EditorTool.pencil,
-          LogicalKeyboardKey.keyT: EditorTool.text,
-          LogicalKeyboardKey.keyF: EditorTool.figure,
-        };
-        final tool = toolMap[key];
-        if (tool != null) {
-          _toolBloc.add(ToolSelected(tool));
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: child,
     );
   }
 
