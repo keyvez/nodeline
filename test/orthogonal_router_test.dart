@@ -510,6 +510,30 @@ void main() {
       }
     });
 
+    test('left-edge exit with nearby target: simple path around source', () {
+      // Source left, target right and close — arrow exits left, wraps around
+      const sourceRect = Rect.fromLTWH(-103.9, -276.3, 220.8, 185.0);
+      const targetRect = Rect.fromLTWH(168.1, -212.2, 193.4, 127.4);
+
+      final start = Offset(sourceRect.left, sourceRect.top + sourceRect.height * 0.536);
+      final end = Offset(targetRect.left + targetRect.width * 0.002, targetRect.top + targetRect.height * 0.493);
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [],
+        startObjectRect: sourceRect,
+        endObjectRect: targetRect,
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Nearby target path: $fullPath');
+      _verifyAxisAligned(fullPath);
+
+      // Should be a reasonably simple path — not more than 5 waypoints
+      expect(waypoints.length, lessThanOrEqualTo(5),
+          reason: 'Path too complex: ${waypoints.length} waypoints');
+    });
+
     test('boxes far apart: left-edge to left-edge takes simple 2-turn path', () {
       // Top box center-right, bottom box far to the left and below
       const topRect = Rect.fromLTWH(-103.9, -276.3, 220.8, 185.0);
@@ -536,6 +560,32 @@ void main() {
           reason: 'Path should be simple (2 turns max), got ${waypoints.length} waypoints');
     });
   });
+
+    test('overlapping boxes: left-edge exit should not loop near target', () {
+      // Boxes overlap — right edge of left box is inside right box
+      // Arrow from left edge of left box to left edge of right box
+      const sourceRect = Rect.fromLTWH(-103.9, -276.3, 220.8, 185.0);
+      // Target overlaps with source — its left edge is inside source
+      const targetRect = Rect.fromLTWH(50.0, -260.0, 193.4, 127.4);
+
+      final start = Offset(sourceRect.left, sourceRect.top + sourceRect.height * 0.536);
+      final end = Offset(targetRect.left + targetRect.width * 0.002, targetRect.top + targetRect.height * 0.493);
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [],
+        startObjectRect: sourceRect,
+        endObjectRect: targetRect,
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Overlapping boxes path: $fullPath');
+      _verifyAxisAligned(fullPath);
+
+      // Should not be overly complex — at most 5 waypoints
+      expect(waypoints.length, lessThanOrEqualTo(5),
+          reason: 'Path too complex for overlapping boxes: ${waypoints.length} waypoints');
+    });
 
   group('edge cases', () {
     test('start equals end returns empty', () {

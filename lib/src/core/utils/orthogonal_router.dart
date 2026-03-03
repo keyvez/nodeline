@@ -37,22 +37,15 @@ class OrthogonalRouter {
     // Wider inflation for candidate waypoints — routes maintain visible gap from objects
     final candidateInflated = relevantObstacles.map((r) => r.inflate(_padding + 5.0)).toList();
 
-    // Build routing obstacle lists that include source/target so the inner
-    // path avoids crossing through them. Use full padding when objects are
-    // far apart, but fall back to raw rects when they overlap (inflated
-    // rects would block all paths between closely-spaced objects).
+    // Add the source object as a routing obstacle so the inner path avoids
+    // cutting through it after the exit stub. Use the raw (uninflated) rect
+    // — the exit stub already provides visual clearance beyond the edge.
+    // Candidate generation uses a small inflation for waypoint spacing.
     final routingInflated = List<Rect>.from(inflated);
     final routingCandidateInflated = List<Rect>.from(candidateInflated);
-    final bool objectsClose = startObjectRect != null && endObjectRect != null &&
-        startObjectRect.inflate(_padding).overlaps(endObjectRect.inflate(_padding));
-    final double objPad = objectsClose ? 0.0 : _padding;
     if (startObjectRect != null) {
-      routingInflated.add(startObjectRect.inflate(objPad));
-      routingCandidateInflated.add(startObjectRect.inflate(objPad + 5.0));
-    }
-    if (endObjectRect != null) {
-      routingInflated.add(endObjectRect.inflate(objPad));
-      routingCandidateInflated.add(endObjectRect.inflate(objPad + 5.0));
+      routingInflated.add(startObjectRect);
+      routingCandidateInflated.add(startObjectRect.inflate(_padding));
     }
 
     // Build obstacle lists for exit/entry computation that exclude the
@@ -174,7 +167,10 @@ class OrthogonalRouter {
     }
 
     // Expand U-turns (fold-backs) into visible loops with offset
-    final expanded = _expandUTurns(result);
+    // Skip expansion when the path is already complex (>6 points) —
+    // the A* pathfinder has already routed around obstacles and
+    // expansion would add unnecessary complexity.
+    final expanded = result.length <= 6 ? _expandUTurns(result) : result;
 
     // Return only the intermediate waypoints (strip start and end)
     if (expanded.length <= 2) return const [];
@@ -372,8 +368,15 @@ class OrthogonalRouter {
     final pathEnd = path.last;
     final result = <Offset>[path[0]];
 
+    int skipUntil = -1;
     for (int i = 1; i < path.length - 1; i++) {
-      final prev = result.last;
+      if (i < skipUntil) {
+        continue;
+      }
+      // Use the original path point (not result.last) to detect U-turns.
+      // Using result.last would cause cascading — an expansion at i inserts
+      // extra points into result, making i+1 see wrong geometry.
+      final prev = path[i - 1];
       final curr = path[i];
       final next = path[i + 1];
 
@@ -387,13 +390,27 @@ class OrthogonalRouter {
           // U-turn on horizontal axis — offset perpendicular (vertical)
           // Choose offset direction toward the overall end of the path
           final toEnd = pathEnd.dy - curr.dy;
-          final offsetY = toEnd >= 0 ? uTurnOffset : -uTurnOffset;
+          var offsetY = toEnd >= 0 ? uTurnOffset : -uTurnOffset;
+          // Snap offset to a nearby subsequent path point's Y to avoid
+          // creating a tiny segment (e.g. 0.1 units) between the expansion
+          // endpoint and the next waypoint.
+          final expandedY = curr.dy + offsetY;
+          for (int j = i + 2; j < path.length; j++) {
+            final dy = (path[j].dy - expandedY).abs();
+            if (dy > 0.01 && dy < uTurnOffset) {
+              offsetY = path[j].dy - curr.dy;
+              break;
+            }
+          }
           // Preserve curr to maintain axis-alignment with prev, then add
           // perpendicular offset waypoints.
           result.add(curr);
           result.add(Offset(curr.dx, curr.dy + offsetY));
           result.add(Offset(next.dx, curr.dy + offsetY));
-          // next will be added normally in the next iteration (or as path.last)
+          // Skip the fold-back point (next) — the expansion already routes
+          // to next.dx at the offset Y. Continuing from next would create
+          // a bounce back through the original Y.
+          skipUntil = i + 2;
           continue;
         }
       }
@@ -407,10 +424,19 @@ class OrthogonalRouter {
         if (dirIn != 0 && dirOut != 0 && dirIn == -dirOut) {
           // U-turn on vertical axis — offset perpendicular (horizontal)
           final toEnd = pathEnd.dx - curr.dx;
-          final offsetX = toEnd >= 0 ? uTurnOffset : -uTurnOffset;
+          var offsetX = toEnd >= 0 ? uTurnOffset : -uTurnOffset;
+          final expandedX = curr.dx + offsetX;
+          for (int j = i + 2; j < path.length; j++) {
+            final dx = (path[j].dx - expandedX).abs();
+            if (dx > 0.01 && dx < uTurnOffset) {
+              offsetX = path[j].dx - curr.dx;
+              break;
+            }
+          }
           result.add(curr);
           result.add(Offset(curr.dx + offsetX, curr.dy));
           result.add(Offset(curr.dx + offsetX, next.dy));
+          skipUntil = i + 2;
           continue;
         }
       }
