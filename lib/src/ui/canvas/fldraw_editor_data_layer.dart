@@ -101,6 +101,8 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
   double _scaleStartZoom = 1.0;
   bool _isScaling = false;
   double _totalDragDelta = 0.0;
+  DateTime? _lastClickTime;
+  Offset? _lastClickPosition;
 
   Offset get offset => _canvasBloc.state.viewportOffset;
 
@@ -367,6 +369,20 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
     );
     if (worldPos == null) return;
 
+    // Double-click detection
+    final now = DateTime.now();
+    if (_lastClickTime != null &&
+        _lastClickPosition != null &&
+        now.difference(_lastClickTime!) < const Duration(milliseconds: 300) &&
+        (event.position - _lastClickPosition!).distance < 10) {
+      _lastClickTime = null;
+      _lastClickPosition = null;
+      _onDoubleClick();
+      return;
+    }
+    _lastClickTime = now;
+    _lastClickPosition = event.position;
+
     if (_checkAndHandleQuickAction(worldPos)) {
       return;
     }
@@ -511,13 +527,23 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
     );
     if (worldPos == null) return;
 
-    final hitObject = _findHitObject(worldPos);
-    if (hitObject != null &&
-        _canvasBloc.state.drawingObjects[hitObject] is TextObject) {
-      _beginTextEditing(
-        existingObject:
-            _canvasBloc.state.drawingObjects[hitObject] as TextObject,
-      );
+    final hitObjectId = _findHitObject(worldPos);
+    if (hitObjectId == null) return;
+
+    final hitObject = _canvasBloc.state.drawingObjects[hitObjectId];
+    if (hitObject == null) return;
+
+    // Double-click on existing text → edit it
+    if (hitObject is TextObject) {
+      _beginTextEditing(existingObject: hitObject);
+      return;
+    }
+
+    // Double-click inside a closed shape → create centered text
+    if (hitObject is RectangleObject || hitObject is CircleObject) {
+      final center = hitObject.rect.center;
+      _beginTextEditing(at: center);
+      return;
     }
   }
 
@@ -635,7 +661,11 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
         }
 
         // Recompute waypoints
-        final obstacles = _collectObstacles(excludeId: objectId);
+        final obstacles = _collectObstacles(excludeIds: {
+          objectId,
+          if (object.startAttachment != null) object.startAttachment!.objectId,
+          if (object.endAttachment != null) object.endAttachment!.objectId,
+        });
         final startObjRect = _getAttachedObjectRect(object.startAttachment);
         final endObjRect = _getAttachedObjectRect(object.endAttachment);
         final waypoints = OrthogonalRouter.route(
@@ -753,12 +783,13 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
     }
   }
 
-  List<Rect> _collectObstacles({String? excludeId}) {
+  List<Rect> _collectObstacles({String? excludeId, Set<String>? excludeIds}) {
     final canvasState = _canvasBloc.state;
     final obstacles = <Rect>[];
 
     for (final obj in canvasState.drawingObjects.values) {
       if (obj.id == excludeId) continue;
+      if (excludeIds != null && excludeIds.contains(obj.id)) continue;
       // Skip arrows, lines, pencil strokes — only solid objects are obstacles
       if (obj is ArrowObject || obj is LineObject || obj is PencilStrokeObject) {
         continue;
@@ -768,6 +799,7 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
 
     for (final node in canvasState.nodes.values) {
       if (node.id == excludeId) continue;
+      if (excludeIds != null && excludeIds.contains(node.id)) continue;
       final bounds = getNodeBoundsInWorld(node);
       if (bounds != null) {
         obstacles.add(bounds);
@@ -830,7 +862,10 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
       if (_tempDrawingObject != null) {
         List<Offset>? waypoints;
         if (pathType == LinkPathType.orthogonal) {
-          final obstacles = _collectObstacles();
+          final excludeIds = <String>{};
+          if (_startSnapPoint != null) excludeIds.add(_startSnapPoint!.objectId);
+          if (_hoveredSnapPoint != null) excludeIds.add(_hoveredSnapPoint!.objectId);
+          final obstacles = _collectObstacles(excludeIds: excludeIds.isNotEmpty ? excludeIds : null);
           final startObjRect = _getAttachedObjectRect(
             _startSnapPoint != null
                 ? ObjectAttachment(
@@ -1041,6 +1076,19 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
     final endAttachment = objectWithEndpoints.endAttachment as ObjectAttachment?;
     final canvasState = _canvasBloc.state;
 
+    // For orthogonal arrows with both attachments, use smart attachment points
+    if (obj is ArrowObject &&
+        obj.pathType == LinkPathType.orthogonal &&
+        startAttachment != null &&
+        endAttachment != null) {
+      final startObjRect = _getAttachedObjectRect(startAttachment);
+      final endObjRect = _getAttachedObjectRect(endAttachment);
+      if (startObjRect != null && endObjRect != null) {
+        return OrthogonalRouter.computeSmartAttachmentPoints(
+            startObjRect, endObjRect);
+      }
+    }
+
     if (startAttachment != null) {
       final targetNode = canvasState.nodes[startAttachment.objectId];
       final targetObject = canvasState.drawingObjects[startAttachment.objectId];
@@ -1086,7 +1134,27 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
 
         Path path;
         if (obj.pathType == LinkPathType.orthogonal) {
-          final allPoints = [start, ...?obj.waypoints, end];
+          // Recompute waypoints dynamically for hit testing
+          List<Offset>? waypoints = obj.waypoints;
+          if (obj.startAttachment != null && obj.endAttachment != null) {
+            final startObjRect = _getAttachedObjectRect(obj.startAttachment);
+            final endObjRect = _getAttachedObjectRect(obj.endAttachment);
+            if (startObjRect != null && endObjRect != null) {
+              final obstacles = _collectObstacles(excludeIds: {
+                obj.id,
+                obj.startAttachment!.objectId,
+                obj.endAttachment!.objectId,
+              });
+              waypoints = OrthogonalRouter.route(
+                start: start,
+                end: end,
+                obstacles: obstacles,
+                startObjectRect: startObjRect,
+                endObjectRect: endObjRect,
+              );
+            }
+          }
+          final allPoints = [start, ...?waypoints, end];
           path = Path();
           path.moveTo(allPoints[0].dx, allPoints[0].dy);
           for (int i = 1; i < allPoints.length; i++) {
@@ -1362,10 +1430,11 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
 
       final initialSize = textPainter.size;
 
+      final w = initialSize.width + 4;
+      final h = initialSize.height + 4;
       object = TextObject(
         id: const Uuid().v4(),
-        rect: Rect.fromLTWH(
-            at!.dx, at.dy, initialSize.width + 4, initialSize.height + 4),
+        rect: Rect.fromLTWH(at!.dx - w / 2, at.dy - h / 2, w, h),
         text: initialText,
         style: initialStyle,
       );

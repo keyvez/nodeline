@@ -4,6 +4,7 @@ import 'dart:ui';
 
 import 'package:fldraw/fldraw.dart';
 import 'package:fldraw/src/core/utils/json_extensions.dart';
+import 'package:fldraw/src/core/utils/orthogonal_router.dart';
 import 'package:fldraw/src/core/utils/renderbox.dart';
 import 'package:fldraw/src/core/utils/spatial_hash_grid.dart';
 import 'package:fldraw/src/models/drawing_entities.dart';
@@ -491,48 +492,83 @@ class FlDrawEditorRenderBox extends RenderBox
         continue;
       } else if (obj is ArrowObject) {
         final paint = obj.isSelected ? selectedArrowPaint : objectPaint;
+        final pathType = obj.pathType;
 
-        var start = (obj).start;
+        // Resolve attached object rects
+        Rect? startObjRect;
+        Rect? endObjRect;
         final startAttachment = obj.startAttachment;
+        final endAttachment = obj.endAttachment;
+
         if (startAttachment != null) {
           final targetNode = canvasState.nodes[startAttachment.objectId];
           final targetObject =
           canvasState.drawingObjects[startAttachment.objectId];
-          final Rect? targetRect = targetNode != null
+          startObjRect = targetNode != null
               ? getNodeBoundsInWorld(targetNode)
               : targetObject?.rect;
-
-          if (targetRect != null) {
-            final relPos = startAttachment.relativePosition;
-            start = targetRect.topLeft +
-                Offset(
-                  targetRect.width * relPos.dx,
-                  targetRect.height * relPos.dy,
-                );
-          }
         }
 
-        var end = (obj).end;
-        final endAttachment = obj.endAttachment;
         if (endAttachment != null) {
           final targetNode = canvasState.nodes[endAttachment.objectId];
           final targetObject =
           canvasState.drawingObjects[endAttachment.objectId];
-          final Rect? targetRect = targetNode != null
+          endObjRect = targetNode != null
               ? getNodeBoundsInWorld(targetNode)
               : targetObject?.rect;
+        }
 
-          if (targetRect != null) {
+        var start = obj.start;
+        var end = obj.end;
+        List<Offset>? waypoints = obj.waypoints;
+
+        // For orthogonal arrows with both attachments, use smart attachment points
+        // and recompute waypoints dynamically based on current object positions
+        if (pathType == LinkPathType.orthogonal &&
+            startObjRect != null && endObjRect != null) {
+          final (smartStart, smartEnd) =
+              OrthogonalRouter.computeSmartAttachmentPoints(startObjRect, endObjRect);
+          start = smartStart;
+          end = smartEnd;
+
+          // Collect obstacles for routing (exclude attached objects)
+          final excludeIds = <String>{
+            if (startAttachment != null) startAttachment.objectId,
+            if (endAttachment != null) endAttachment.objectId,
+          };
+          final obstacles = <Rect>[];
+          for (final o in canvasState.drawingObjects.values) {
+            if (o.id == obj.id || excludeIds.contains(o.id)) continue;
+            if (o is ArrowObject || o is LineObject || o is PencilStrokeObject) continue;
+            obstacles.add(o.rect);
+          }
+          for (final node in canvasState.nodes.values) {
+            if (excludeIds.contains(node.id)) continue;
+            final bounds = getNodeBoundsInWorld(node);
+            if (bounds != null) obstacles.add(bounds);
+          }
+
+          waypoints = OrthogonalRouter.route(
+            start: start,
+            end: end,
+            obstacles: obstacles,
+            startObjectRect: startObjRect,
+            endObjectRect: endObjRect,
+          );
+        } else {
+          // Non-orthogonal or single attachment: resolve endpoints from relativePosition
+          if (startObjRect != null && startAttachment != null) {
+            final relPos = startAttachment.relativePosition;
+            start = startObjRect.topLeft +
+                Offset(startObjRect.width * relPos.dx, startObjRect.height * relPos.dy);
+          }
+          if (endObjRect != null && endAttachment != null) {
             final relPos = endAttachment.relativePosition;
-            end = targetRect.topLeft +
-                Offset(
-                  targetRect.width * relPos.dx,
-                  targetRect.height * relPos.dy,
-                );
+            end = endObjRect.topLeft +
+                Offset(endObjRect.width * relPos.dx, endObjRect.height * relPos.dy);
           }
         }
 
-        final pathType = obj.pathType;
         var controlPoint = obj.midPoint ?? (start + end) / 2;
 
         final dx = end.dx - start.dx;
@@ -545,7 +581,7 @@ class FlDrawEditorRenderBox extends RenderBox
         }
 
         if (pathType == LinkPathType.orthogonal) {
-          _paintOrthogonalPath(canvas, start, end, paint, waypoints: obj.waypoints);
+          _paintOrthogonalPath(canvas, start, end, paint, waypoints: waypoints);
         } else {
           final path = Path()
             ..moveTo(start.dx, start.dy)
@@ -560,8 +596,8 @@ class FlDrawEditorRenderBox extends RenderBox
 
         if (pathType == LinkPathType.orthogonal) {
           // Determine arrow head direction from the last segment
-          if (obj.waypoints != null && obj.waypoints!.isNotEmpty) {
-            controlPoint = obj.waypoints!.last;
+          if (waypoints != null && waypoints.isNotEmpty) {
+            controlPoint = waypoints.last;
           } else {
             final dx = end.dx - start.dx;
             final dy = end.dy - start.dy;
@@ -582,7 +618,7 @@ class FlDrawEditorRenderBox extends RenderBox
 
           // For orthogonal arrows with waypoints, only show start/end handles
           final List<Offset> handles;
-          if (pathType == LinkPathType.orthogonal && obj.waypoints != null && obj.waypoints!.isNotEmpty) {
+          if (pathType == LinkPathType.orthogonal && waypoints != null && waypoints.isNotEmpty) {
             handles = [start, end];
           } else {
             handles = [
@@ -901,6 +937,13 @@ class FlDrawEditorRenderBox extends RenderBox
         (next.dy - curr.dy) / segNext,
       );
 
+      // Check if points are collinear (no actual turn) — skip arc
+      final cross = dirIn.dx * dirOut.dy - dirIn.dy * dirOut.dx;
+      if (cross.abs() < 0.01) {
+        path.lineTo(curr.dx, curr.dy);
+        continue;
+      }
+
       // Points where the arc starts/ends
       final arcStart = Offset(
         curr.dx - dirIn.dx * r,
@@ -914,8 +957,6 @@ class FlDrawEditorRenderBox extends RenderBox
       // Draw line to arc start
       path.lineTo(arcStart.dx, arcStart.dy);
 
-      // Determine clockwise vs counter-clockwise using cross product
-      final cross = dirIn.dx * dirOut.dy - dirIn.dy * dirOut.dx;
       final clockwise = cross > 0;
 
       path.arcToPoint(

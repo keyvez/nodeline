@@ -68,9 +68,65 @@ class OrthogonalRouter {
     // Ensure every consecutive pair is axis-aligned
     final aligned = _ensureAxisAligned(fullPath);
 
+    // Remove collinear intermediate points from the full path
+    final simplified = _simplifyFullPath(aligned);
+
     // Return only the intermediate waypoints (strip start and end)
-    if (aligned.length <= 2) return const [];
-    return aligned.sublist(1, aligned.length - 1);
+    if (simplified.length <= 2) return const [];
+    return simplified.sublist(1, simplified.length - 1);
+  }
+
+  /// Computes optimal attachment points on two connected object rects.
+  ///
+  /// Returns (startPoint, endPoint) positioned on the edges of each rect
+  /// that make the most sense given the relative positions of the objects.
+  /// Prefers connections through clear gaps between objects.
+  static (Offset, Offset) computeSmartAttachmentPoints(
+      Rect sourceRect, Rect targetRect) {
+    final sc = sourceRect.center;
+    final tc = targetRect.center;
+
+    // Check for clear gaps on each axis
+    final verticalGapBelow = targetRect.top - sourceRect.bottom; // positive = target below with gap
+    final verticalGapAbove = sourceRect.top - targetRect.bottom; // positive = target above with gap
+    final horizontalGapRight = targetRect.left - sourceRect.right; // positive = target right with gap
+    final horizontalGapLeft = sourceRect.left - targetRect.right; // positive = target left with gap
+
+    final hasVerticalGap = verticalGapBelow > -_padding || verticalGapAbove > -_padding;
+    final hasHorizontalGap = horizontalGapRight > -_padding || horizontalGapLeft > -_padding;
+
+    // If there's a clear vertical gap, prefer vertical connection
+    if (hasVerticalGap && (!hasHorizontalGap || (tc.dy - sc.dy).abs() >= (tc.dx - sc.dx).abs())) {
+      if (tc.dy > sc.dy) {
+        return (sourceRect.bottomCenter, targetRect.topCenter);
+      } else {
+        return (sourceRect.topCenter, targetRect.bottomCenter);
+      }
+    }
+
+    // If there's a clear horizontal gap, prefer horizontal connection
+    if (hasHorizontalGap) {
+      if (tc.dx > sc.dx) {
+        return (sourceRect.centerRight, targetRect.centerLeft);
+      } else {
+        return (sourceRect.centerLeft, targetRect.centerRight);
+      }
+    }
+
+    // Objects overlap on both axes — use center-to-center direction
+    if ((tc.dx - sc.dx).abs() > (tc.dy - sc.dy).abs()) {
+      if (tc.dx > sc.dx) {
+        return (sourceRect.centerRight, targetRect.centerLeft);
+      } else {
+        return (sourceRect.centerLeft, targetRect.centerRight);
+      }
+    } else {
+      if (tc.dy > sc.dy) {
+        return (sourceRect.bottomCenter, targetRect.topCenter);
+      } else {
+        return (sourceRect.topCenter, targetRect.bottomCenter);
+      }
+    }
   }
 
   /// Projects [point] outward from the nearest edge of [objectRect] by [_padding].
@@ -301,6 +357,26 @@ class OrthogonalRouter {
     if (expanded.length <= 2) return const [];
     final waypoints = expanded.sublist(1, expanded.length - 1);
     return _simplify(waypoints);
+  }
+
+  /// Removes collinear intermediate points from the full path
+  /// (including start and end as context for collinearity checks).
+  static List<Offset> _simplifyFullPath(List<Offset> path) {
+    if (path.length <= 2) return path;
+    final result = <Offset>[path.first];
+    for (int i = 1; i < path.length - 1; i++) {
+      final prev = result.last;
+      final curr = path[i];
+      final next = path[i + 1];
+      final sameX = (prev.dx - curr.dx).abs() < 0.5 &&
+          (curr.dx - next.dx).abs() < 0.5;
+      final sameY = (prev.dy - curr.dy).abs() < 0.5 &&
+          (curr.dy - next.dy).abs() < 0.5;
+      if (sameX || sameY) continue;
+      result.add(curr);
+    }
+    result.add(path.last);
+    return result;
   }
 
   static List<Offset> _simplify(List<Offset> waypoints) {

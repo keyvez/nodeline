@@ -1,6 +1,7 @@
 import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:fldraw/src/core/node_editor/clipboard.dart';
+import 'package:fldraw/src/core/utils/orthogonal_router.dart';
 import 'package:fldraw/src/core/utils/snackbar.dart';
 import 'package:fldraw/src/models/drawing_entities.dart';
 import 'package:fldraw/src/models/entities.dart';
@@ -466,12 +467,41 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       return;
     }
 
+    final finalStartAttachment = startAttachment.copyWith(objectId: sourceObject.id);
+    final finalEndAttachment = endAttachment.copyWith(objectId: newShape.id);
+
+    // Compute actual attachment points on object edges
+    final startRelPos = finalStartAttachment.relativePosition;
+    final arrowStart = sourceRect.topLeft +
+        Offset(sourceRect.width * startRelPos.dx, sourceRect.height * startRelPos.dy);
+    final endRelPos = finalEndAttachment.relativePosition;
+    final arrowEnd = newObjectRect.topLeft +
+        Offset(newObjectRect.width * endRelPos.dx, newObjectRect.height * endRelPos.dy);
+
+    // Collect obstacles (solid objects only, exclude the two connected objects)
+    final obstacles = <Rect>[];
+    for (final obj in state.drawingObjects.values) {
+      if (obj.id == sourceObject.id) continue;
+      if (obj is ArrowObject || obj is LineObject || obj is PencilStrokeObject) continue;
+      obstacles.add(obj.rect);
+    }
+
+    final waypoints = OrthogonalRouter.route(
+      start: arrowStart,
+      end: arrowEnd,
+      obstacles: obstacles,
+      startObjectRect: sourceRect,
+      endObjectRect: newObjectRect,
+    );
+
     final newArrow = ArrowObject(
       id: const Uuid().v4(),
-      start: sourceRect.center,
-      end: newShape.rect.center,
-      startAttachment: startAttachment.copyWith(objectId: sourceObject.id),
-      endAttachment: endAttachment.copyWith(objectId: newShape.id),
+      start: arrowStart,
+      end: arrowEnd,
+      pathType: LinkPathType.orthogonal,
+      startAttachment: finalStartAttachment,
+      endAttachment: finalEndAttachment,
+      waypoints: waypoints,
     );
 
     final newDrawingObjects = Map<String, DrawingObject>.from(state.drawingObjects)
