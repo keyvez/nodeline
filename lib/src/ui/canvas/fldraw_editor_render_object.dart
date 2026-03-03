@@ -328,10 +328,16 @@ class FlDrawEditorRenderBox extends RenderBox
     if (!style.gridStyle.showGrid) return;
     gridShader.setFloat(2, startX);
     gridShader.setFloat(3, startY);
+    // Scale down dots and lines when zoomed out (half size at zoom <= 0.5, full at zoom >= 1.0)
+    final double z = canvasState.viewportZoom;
+    final double scale = z >= 1.0 ? 1.0 : (0.5 + 0.5 * ((z - 0.5) / 0.5).clamp(0.0, 1.0));
+    gridShader.setFloat(4, style.gridStyle.lineWidth * scale);
+    gridShader.setFloat(9, style.gridStyle.intersectionRadius * scale);
     gridShader.setFloat(14, viewport.left);
     gridShader.setFloat(15, viewport.top);
     gridShader.setFloat(16, viewport.right);
     gridShader.setFloat(17, viewport.bottom);
+    gridShader.setFloat(18, z);
     canvas.drawRect(viewport, Paint()..shader = gridShader);
   }
 
@@ -409,7 +415,7 @@ class FlDrawEditorRenderBox extends RenderBox
           canvas.drawOval(obj.rect, objectPaint);
         } else if (obj is RectangleObject) {
           final rrect =
-          RRect.fromRectAndRadius(obj.rect, const Radius.circular(4.0));
+          RRect.fromRectAndRadius(obj.rect, const Radius.circular(24.0));
           canvas.drawRRect(rrect, objectPaint);
         } else if (obj is SvgObject) {
           canvas.save();
@@ -539,7 +545,7 @@ class FlDrawEditorRenderBox extends RenderBox
         }
 
         if (pathType == LinkPathType.orthogonal) {
-          _paintOrthogonalPath(canvas, start, end, paint);
+          _paintOrthogonalPath(canvas, start, end, paint, waypoints: obj.waypoints);
         } else {
           final path = Path()
             ..moveTo(start.dx, start.dy)
@@ -553,12 +559,17 @@ class FlDrawEditorRenderBox extends RenderBox
         }
 
         if (pathType == LinkPathType.orthogonal) {
-          final dx = end.dx - start.dx;
-          final dy = end.dy - start.dy;
-          if (dx.abs() > dy.abs()) {
-            controlPoint = Offset(end.dx, start.dy);
+          // Determine arrow head direction from the last segment
+          if (obj.waypoints != null && obj.waypoints!.isNotEmpty) {
+            controlPoint = obj.waypoints!.last;
           } else {
-            controlPoint = Offset(start.dx, end.dy);
+            final dx = end.dx - start.dx;
+            final dy = end.dy - start.dy;
+            if (dx.abs() > dy.abs()) {
+              controlPoint = Offset(end.dx, start.dy);
+            } else {
+              controlPoint = Offset(start.dx, end.dy);
+            }
           }
         }
         _paintArrowHead(canvas, controlPoint, end, paint);
@@ -569,11 +580,17 @@ class FlDrawEditorRenderBox extends RenderBox
           final onCurveMidPoint =
               (start * 0.25) + (controlPoint * 0.5) + (end * 0.25);
 
-          final handles = [
-            start,
-            end,
-            pathType == LinkPathType.orthogonal ? cornerPoint : onCurveMidPoint,
-          ];
+          // For orthogonal arrows with waypoints, only show start/end handles
+          final List<Offset> handles;
+          if (pathType == LinkPathType.orthogonal && obj.waypoints != null && obj.waypoints!.isNotEmpty) {
+            handles = [start, end];
+          } else {
+            handles = [
+              start,
+              end,
+              pathType == LinkPathType.orthogonal ? cornerPoint : onCurveMidPoint,
+            ];
+          }
           for (final handlePos in handles) {
             canvas.drawCircle(
               handlePos,
@@ -809,23 +826,7 @@ class FlDrawEditorRenderBox extends RenderBox
     final double arrowSize = 12.0 / zoom;
     const double arrowAngle = 25 * (pi / 180);
 
-    // For orthogonal lines, the "control point" is the corner, not the start.
-    // We need to determine the final segment's direction.
-    Offset effectiveControlPoint = controlPoint;
-    if (tempDrawingObject?.pathType == LinkPathType.orthogonal) {
-      final start = tempDrawingObject!.start;
-      final dx = end.dx - start.dx;
-      final dy = end.dy - start.dy;
-      if (dx.abs() > dy.abs()) {
-        // Horizontal-then-Vertical, so the final segment is vertical.
-        effectiveControlPoint = Offset(end.dx, start.dy);
-      } else {
-        // Vertical-then-Horizontal, so the final segment is horizontal.
-        effectiveControlPoint = Offset(start.dx, end.dy);
-      }
-    }
-
-    final lineVector = end - effectiveControlPoint;
+    final lineVector = end - controlPoint;
     if (lineVector.distanceSquared == 0)
       return; // Avoid errors if start and end are the same
     final angle = lineVector.direction;
@@ -845,27 +846,87 @@ class FlDrawEditorRenderBox extends RenderBox
     Canvas canvas,
     Offset start,
     Offset end,
-    Paint paint,
-  ) {
-    final double dx = end.dx - start.dx;
-    final double dy = end.dy - start.dy;
+    Paint paint, {
+    List<Offset>? waypoints,
+  }) {
+    final allPoints = [start, ...?waypoints, end];
 
-    final Path path = Path();
-    path.moveTo(start.dx, start.dy);
-
-    // OrthogonalPath logic:
-    // Determine the corner point based on the dominant direction of the drag.
-    // If the drag is mostly horizontal, the first segment is horizontal.
-    // If the drag is mostly vertical, the first segment is vertical.
-    if (dx.abs() > dy.abs()) {
-      // Horizontal-then-Vertical
-      path.lineTo(end.dx, start.dy); // Horizontal segment
-      path.lineTo(end.dx, end.dy); // Vertical segment
-    } else {
-      // Vertical-then-Horizontal
-      path.lineTo(start.dx, end.dy); // Vertical segment
-      path.lineTo(end.dx, end.dy); // Horizontal segment
+    if (allPoints.length == 2) {
+      // Simple L-path fallback
+      final double dx = end.dx - start.dx;
+      final double dy = end.dy - start.dy;
+      final Path path = Path();
+      path.moveTo(start.dx, start.dy);
+      if (dx.abs() > dy.abs()) {
+        path.lineTo(end.dx, start.dy);
+        path.lineTo(end.dx, end.dy);
+      } else {
+        path.lineTo(start.dx, end.dy);
+        path.lineTo(end.dx, end.dy);
+      }
+      canvas.drawPath(path, paint);
+      return;
     }
+
+    // Multi-segment path with rounded corners
+    final double cornerRadius = 24.0 / zoom;
+    final Path path = Path();
+    path.moveTo(allPoints[0].dx, allPoints[0].dy);
+
+    for (int i = 1; i < allPoints.length - 1; i++) {
+      final prev = allPoints[i - 1];
+      final curr = allPoints[i];
+      final next = allPoints[i + 1];
+
+      // Compute segment lengths
+      final segPrev = (curr - prev).distance;
+      final segNext = (next - curr).distance;
+
+      // Clamp radius to half the shorter adjacent segment
+      final r = min(cornerRadius, min(segPrev / 2, segNext / 2));
+
+      if (r < 1.0) {
+        // Too tight, just draw straight
+        path.lineTo(curr.dx, curr.dy);
+        continue;
+      }
+
+      // Direction vectors (normalized)
+      final dirIn = Offset(
+        (curr.dx - prev.dx) / segPrev,
+        (curr.dy - prev.dy) / segPrev,
+      );
+      final dirOut = Offset(
+        (next.dx - curr.dx) / segNext,
+        (next.dy - curr.dy) / segNext,
+      );
+
+      // Points where the arc starts/ends
+      final arcStart = Offset(
+        curr.dx - dirIn.dx * r,
+        curr.dy - dirIn.dy * r,
+      );
+      final arcEnd = Offset(
+        curr.dx + dirOut.dx * r,
+        curr.dy + dirOut.dy * r,
+      );
+
+      // Draw line to arc start
+      path.lineTo(arcStart.dx, arcStart.dy);
+
+      // Determine clockwise vs counter-clockwise using cross product
+      final cross = dirIn.dx * dirOut.dy - dirIn.dy * dirOut.dx;
+      final clockwise = cross > 0;
+
+      path.arcToPoint(
+        arcEnd,
+        radius: Radius.circular(r),
+        clockwise: clockwise,
+      );
+    }
+
+    // Final segment to end
+    path.lineTo(allPoints.last.dx, allPoints.last.dy);
 
     canvas.drawPath(path, paint);
   }
@@ -889,12 +950,27 @@ class FlDrawEditorRenderBox extends RenderBox
         break;
       case EditorTool.arrowTopRight:
         if (tempDrawingObject!.pathType == LinkPathType.orthogonal) {
-          _paintOrthogonalPath(canvas, start, end, tempPaint);
+          _paintOrthogonalPath(canvas, start, end, tempPaint, waypoints: tempDrawingObject!.waypoints);
         } else {
           canvas.drawLine(start, end, tempPaint);
         }
-        _paintArrowHead(canvas, start, end, tempPaint);
-        break;
+        // Compute arrow head direction from last waypoint if available
+        Offset arrowHeadControl = start;
+        if (tempDrawingObject!.pathType == LinkPathType.orthogonal) {
+          final wps = tempDrawingObject!.waypoints;
+          if (wps != null && wps.isNotEmpty) {
+            arrowHeadControl = wps.last;
+          } else {
+            final dx = end.dx - start.dx;
+            final dy = end.dy - start.dy;
+            if (dx.abs() > dy.abs()) {
+              arrowHeadControl = Offset(end.dx, start.dy);
+            } else {
+              arrowHeadControl = Offset(start.dx, end.dy);
+            }
+          }
+        }
+        _paintArrowHead(canvas, arrowHeadControl, end, tempPaint);
         break;
       case EditorTool.line:
         canvas.drawLine(start, end, tempPaint);

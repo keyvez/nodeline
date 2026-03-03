@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:fldraw/fldraw.dart';
 import 'package:fldraw/src/core/node_editor/clipboard.dart';
 import 'package:fldraw/src/core/utils/json_extensions.dart';
+import 'package:fldraw/src/core/utils/orthogonal_router.dart';
 import 'package:fldraw/src/core/utils/renderbox.dart';
 import 'package:fldraw/src/models/drawing_entities.dart';
 import 'package:fldraw/src/ui/canvas/fldraw_editor_render_object.dart';
@@ -15,7 +16,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_shaders/flutter_shaders.dart';
-import 'package:keymap/keymap.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
 import 'package:uuid/uuid.dart';
 
@@ -618,25 +618,11 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
         Offset newStart = start;
         Offset newEnd = end;
 
-        if (handle == Handle.arrowStart || handle == Handle.arrowEnd) {
-          final referencePoint = handle == Handle.arrowStart ? start : end;
-          final dragDelta = worldPos - referencePoint;
-          if (dragDelta.dx.abs() > dragDelta.dy.abs()) {
-            if (handle == Handle.arrowStart) {
-              newStart = Offset(worldPos.dx, start.dy);
-            } else {
-              newEnd = Offset(worldPos.dx, end.dy);
-            }
-          } else {
-            if (handle == Handle.arrowStart) {
-              newStart = Offset(start.dx, worldPos.dy);
-            } else {
-              newEnd = Offset(end.dx, worldPos.dy);
-            }
-          }
-        }
-
-        else if (handle == Handle.midPoint) {
+        if (handle == Handle.arrowStart) {
+          newStart = _hoveredSnapPoint?.worldPosition ?? worldPos;
+        } else if (handle == Handle.arrowEnd) {
+          newEnd = _hoveredSnapPoint?.worldPosition ?? worldPos;
+        } else if (handle == Handle.midPoint) {
           final dx = end.dx - start.dx;
           final dy = end.dy - start.dy;
           if (dx.abs() > dy.abs()) {
@@ -648,7 +634,23 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
           }
         }
 
-        final updatedObject = object.copyWith(start: newStart, end: newEnd);
+        // Recompute waypoints
+        final obstacles = _collectObstacles(excludeId: objectId);
+        final startObjRect = _getAttachedObjectRect(object.startAttachment);
+        final endObjRect = _getAttachedObjectRect(object.endAttachment);
+        final waypoints = OrthogonalRouter.route(
+          start: newStart,
+          end: newEnd,
+          obstacles: obstacles,
+          startObjectRect: startObjRect,
+          endObjectRect: endObjRect,
+        );
+
+        final updatedObject = object.copyWith(
+          start: newStart,
+          end: newEnd,
+          waypoints: waypoints,
+        );
         _canvasBloc.add(DrawingObjectUpdated(updatedObject));
 
       }  else {
@@ -751,6 +753,39 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
     }
   }
 
+  List<Rect> _collectObstacles({String? excludeId}) {
+    final canvasState = _canvasBloc.state;
+    final obstacles = <Rect>[];
+
+    for (final obj in canvasState.drawingObjects.values) {
+      if (obj.id == excludeId) continue;
+      // Skip arrows, lines, pencil strokes — only solid objects are obstacles
+      if (obj is ArrowObject || obj is LineObject || obj is PencilStrokeObject) {
+        continue;
+      }
+      obstacles.add(obj.rect);
+    }
+
+    for (final node in canvasState.nodes.values) {
+      if (node.id == excludeId) continue;
+      final bounds = getNodeBoundsInWorld(node);
+      if (bounds != null) {
+        obstacles.add(bounds);
+      }
+    }
+
+    return obstacles;
+  }
+
+  Rect? _getAttachedObjectRect(ObjectAttachment? attachment) {
+    if (attachment == null) return null;
+    final canvasState = _canvasBloc.state;
+    final targetNode = canvasState.nodes[attachment.objectId];
+    final targetObject = canvasState.drawingObjects[attachment.objectId];
+    if (targetNode != null) return getNodeBoundsInWorld(targetNode);
+    return targetObject?.rect;
+  }
+
   void _handleObjectDrawing(Offset worldPos, double pressure) {
     final tool = _toolBloc.state.activeTool;
     final endPos = _hoveredSnapPoint?.worldPosition ?? worldPos;
@@ -770,7 +805,9 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
       final bool isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
       final bool isCtrlPressed = HardwareKeyboard.instance.isControlPressed;
       Offset finalPos = endPos;
-      LinkPathType pathType = LinkPathType.straight;
+      LinkPathType pathType = tool == EditorTool.arrowTopRight
+          ? LinkPathType.orthogonal
+          : LinkPathType.straight;
 
       if (isShiftPressed) {
         if (tool == EditorTool.square ||
@@ -786,21 +823,45 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
         } else if (tool == EditorTool.line) {
           finalPos = _snapPointToAngle(_drawingStart, worldPos);
         } else if (tool == EditorTool.arrowTopRight) {
-          if (isCtrlPressed) {
-            pathType = LinkPathType.orthogonal;
-            finalPos = worldPos;
-          } else {
-            finalPos = _snapPointToAngle(_drawingStart, worldPos);
-          }
+          pathType = LinkPathType.orthogonal;
+          finalPos = worldPos;
         }
       }
       if (_tempDrawingObject != null) {
+        List<Offset>? waypoints;
+        if (pathType == LinkPathType.orthogonal) {
+          final obstacles = _collectObstacles();
+          final startObjRect = _getAttachedObjectRect(
+            _startSnapPoint != null
+                ? ObjectAttachment(
+                    objectId: _startSnapPoint!.objectId,
+                    relativePosition: _startSnapPoint!.relativePosition,
+                  )
+                : null,
+          );
+          final endObjRect = _getAttachedObjectRect(
+            _hoveredSnapPoint != null
+                ? ObjectAttachment(
+                    objectId: _hoveredSnapPoint!.objectId,
+                    relativePosition: _hoveredSnapPoint!.relativePosition,
+                  )
+                : null,
+          );
+          waypoints = OrthogonalRouter.route(
+            start: _tempDrawingObject!.start,
+            end: finalPos,
+            obstacles: obstacles,
+            startObjectRect: startObjRect,
+            endObjectRect: endObjRect,
+          );
+        }
         _tempDrawingObject = TempDrawingObject(
           tool: _tempDrawingObject!.tool,
           start: _tempDrawingObject!.start,
           end: finalPos,
           pathType: pathType,
           points: _tempDrawingObject!.points,
+          waypoints: waypoints,
         );
       }
       setState(() {});
@@ -865,6 +926,7 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
         pathType: _tempDrawingObject!.pathType,
         startAttachment: startAttachment,
         endAttachment: endAttachment,
+        waypoints: _tempDrawingObject!.waypoints,
       );
     } else if (tool == EditorTool.pencil) {
       if (_currentPencilPoints.length > 1) {
@@ -914,6 +976,8 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
 
     if (newObject != null) {
       _canvasBloc.add(DrawingObjectAdded(newObject));
+    } else {
+      _selectionBloc.add(SelectionCleared());
     }
 
     setState(() {
@@ -1022,16 +1086,11 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
 
         Path path;
         if (obj.pathType == LinkPathType.orthogonal) {
-          final dx = end.dx - start.dx;
-          final dy = end.dy - start.dy;
+          final allPoints = [start, ...?obj.waypoints, end];
           path = Path();
-          path.moveTo(start.dx, start.dy);
-          if (dx.abs() > dy.abs()) {
-            path.lineTo(end.dx, start.dy);
-            path.lineTo(end.dx, end.dy);
-          } else {
-            path.lineTo(start.dx, end.dy);
-            path.lineTo(end.dx, end.dy);
+          path.moveTo(allPoints[0].dx, allPoints[0].dy);
+          for (int i = 1; i < allPoints.length; i++) {
+            path.lineTo(allPoints[i].dx, allPoints[i].dy);
           }
         } else {
           path = Path()
@@ -1193,13 +1252,22 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
         final onCurveMidPoint =
             (start * 0.25) + (midPoint * 0.5) + (end * 0.25);
 
-        final handles = {
-          Handle.arrowStart: start,
-          Handle.arrowEnd: end,
-          Handle.midPoint: obj.pathType == LinkPathType.orthogonal
-              ? cornerPoint
-              : onCurveMidPoint,
-        };
+        // For orthogonal arrows with waypoints, hide midpoint handle
+        final Map<Handle, Offset> handles;
+        if (obj.pathType == LinkPathType.orthogonal && obj.waypoints != null && obj.waypoints!.isNotEmpty) {
+          handles = {
+            Handle.arrowStart: start,
+            Handle.arrowEnd: end,
+          };
+        } else {
+          handles = {
+            Handle.arrowStart: start,
+            Handle.arrowEnd: end,
+            Handle.midPoint: obj.pathType == LinkPathType.orthogonal
+                ? cornerPoint
+                : onCurveMidPoint,
+          };
+        }
         for (final entry in handles.entries) {
           if ((worldPos - entry.value).distance < handleHitAreaRadius) {
             if (_hoveredHandle.objectId != objectId ||
@@ -1445,138 +1513,97 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
                   ),
                 );
 
-                return KeyboardWidget(
-                  bindings: [
-                    KeyAction(
-                      LogicalKeyboardKey.delete,
-                      "Remove selected items",
-                          () => _canvasBloc.add(
-                        ObjectsRemoved(
+                return CallbackShortcuts(
+                  bindings: {
+                    const SingleActivator(LogicalKeyboardKey.delete): () =>
+                      _canvasBloc.add(ObjectsRemoved(
+                        nodeIds: selectionState.selectedNodeIds,
+                        drawingObjectIds: selectionState.selectedDrawingObjectIds,
+                      )),
+                    const SingleActivator(LogicalKeyboardKey.backspace): () =>
+                      _canvasBloc.add(ObjectsRemoved(
+                        nodeIds: selectionState.selectedNodeIds,
+                        drawingObjectIds: selectionState.selectedDrawingObjectIds,
+                      )),
+                    const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () async {
+                      await ClipboardService.copySelection(
+                        allNodes: canvasState.nodes,
+                        selectedNodeIds: selectionState.selectedNodeIds,
+                      );
+                    },
+                    const SingleActivator(LogicalKeyboardKey.keyC, control: true): () async {
+                      await ClipboardService.copySelection(
+                        allNodes: canvasState.nodes,
+                        selectedNodeIds: selectionState.selectedNodeIds,
+                      );
+                    },
+                    const SingleActivator(LogicalKeyboardKey.keyV, meta: true): () {
+                      final worldPos = screenToWorld(
+                        _lastFocalPoint,
+                        canvasState.viewportOffset,
+                        canvasState.viewportZoom,
+                      ) ?? Offset.zero;
+                      _canvasBloc.add(SelectionPasted(pastePosition: worldPos));
+                    },
+                    const SingleActivator(LogicalKeyboardKey.keyV, control: true): () {
+                      final worldPos = screenToWorld(
+                        _lastFocalPoint,
+                        canvasState.viewportOffset,
+                        canvasState.viewportZoom,
+                      ) ?? Offset.zero;
+                      _canvasBloc.add(SelectionPasted(pastePosition: worldPos));
+                    },
+                    const SingleActivator(LogicalKeyboardKey.keyX, meta: true): () async {
+                      final copied = await ClipboardService.copySelection(
+                        allNodes: canvasState.nodes,
+                        selectedNodeIds: selectionState.selectedNodeIds,
+                      );
+                      if (copied != null) {
+                        _canvasBloc.add(ObjectsRemoved(
                           nodeIds: selectionState.selectedNodeIds,
-                          drawingObjectIds:
-                          selectionState.selectedDrawingObjectIds,
-                        ),
-                      ),
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.backspace,
-                      "Remove selected items",
-                      () => _canvasBloc.add(
-                        ObjectsRemoved(
+                          drawingObjectIds: selectionState.selectedDrawingObjectIds,
+                        ));
+                      }
+                    },
+                    const SingleActivator(LogicalKeyboardKey.keyX, control: true): () async {
+                      final copied = await ClipboardService.copySelection(
+                        allNodes: canvasState.nodes,
+                        selectedNodeIds: selectionState.selectedNodeIds,
+                      );
+                      if (copied != null) {
+                        _canvasBloc.add(ObjectsRemoved(
                           nodeIds: selectionState.selectedNodeIds,
-                          drawingObjectIds:
-                              selectionState.selectedDrawingObjectIds,
-                        ),
-                      ),
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyC,
-                      "Copy selection",
-                      () async {
-                        await ClipboardService.copySelection(
-                          allNodes: canvasState.nodes,
-                          selectedNodeIds: selectionState.selectedNodeIds,
-                        );
-                      },
-                      isControlPressed: true,
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyV,
-                      "Paste selection",
-                      () {
-                        final worldPos =
-                            screenToWorld(
-                              _lastFocalPoint,
-                              canvasState.viewportOffset,
-                              canvasState.viewportZoom,
-                            ) ??
-                            Offset.zero;
-                        _canvasBloc.add(
-                          SelectionPasted(pastePosition: worldPos),
-                        );
-                      },
-                      isControlPressed: true,
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyX,
-                      "Cut selection",
-                      () async {
-                        final copied = await ClipboardService.copySelection(
-                          allNodes: canvasState.nodes,
-                          selectedNodeIds: selectionState.selectedNodeIds,
-                        );
-                        if (copied != null) {
-                          _canvasBloc.add(
-                            ObjectsRemoved(
-                              nodeIds: selectionState.selectedNodeIds,
-                              drawingObjectIds:
-                                  selectionState.selectedDrawingObjectIds,
-                            ),
-                          );
-                        }
-                      },
-                      isControlPressed: true,
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyZ,
-                      "Undo",
-                      () => _canvasBloc.add(UndoRequested()),
-                      isControlPressed: true,
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyY,
-                      "Redo",
-                      () => _canvasBloc.add(RedoRequested()),
-                      isControlPressed: true,
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyV,
-                      "Select Arrow Tool",
-                      () => _toolBloc.add(const ToolSelected(EditorTool.arrow)),
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyR,
-                      "Select Rectangle Tool",
-                      () =>
-                          _toolBloc.add(const ToolSelected(EditorTool.square)),
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyO,
-                      "Select Circle Tool",
-                      () =>
-                          _toolBloc.add(const ToolSelected(EditorTool.circle)),
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyA,
-                      "Select Arrow Drawing Tool",
-                      () => _toolBloc.add(
-                        const ToolSelected(EditorTool.arrowTopRight),
-                      ),
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyL,
-                      "Select Line Tool",
-                      () => _toolBloc.add(const ToolSelected(EditorTool.line)),
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyD,
-                      "Select Pencil (Draw) Tool",
-                      () =>
-                          _toolBloc.add(const ToolSelected(EditorTool.pencil)),
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyT,
-                      "Select Text Tool",
-                      () => _toolBloc.add(const ToolSelected(EditorTool.text)),
-                    ),
-                    KeyAction(
-                      LogicalKeyboardKey.keyF,
-                      "Select Figure Tool",
-                          () =>
-                          _toolBloc.add(const ToolSelected(EditorTool.figure)),
-                    ),
-                  ],
-                  child: MouseRegion(
+                          drawingObjectIds: selectionState.selectedDrawingObjectIds,
+                        ));
+                      }
+                    },
+                    const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): () =>
+                      _canvasBloc.add(UndoRequested()),
+                    const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () =>
+                      _canvasBloc.add(UndoRequested()),
+                    const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true): () =>
+                      _canvasBloc.add(RedoRequested()),
+                    const SingleActivator(LogicalKeyboardKey.keyY, control: true): () =>
+                      _canvasBloc.add(RedoRequested()),
+                    const SingleActivator(LogicalKeyboardKey.keyA, meta: true): () {
+                      final canvasState = _canvasBloc.state;
+                      _selectionBloc.add(SelectionReplaced(
+                        nodeIds: canvasState.nodes.keys.toSet(),
+                        drawingObjectIds: canvasState.drawingObjects.keys.toSet(),
+                      ));
+                    },
+                    const SingleActivator(LogicalKeyboardKey.keyA, control: true): () {
+                      final canvasState = _canvasBloc.state;
+                      _selectionBloc.add(SelectionReplaced(
+                        nodeIds: canvasState.nodes.keys.toSet(),
+                        drawingObjectIds: canvasState.drawingObjects.keys.toSet(),
+                      ));
+                    },
+                  },
+                  child: Focus(
+                    autofocus: true,
+                    child: _buildToolShortcutHandler(
+                      child: MouseRegion(
                     cursor: _getCursor(toolState.activeTool),
                     onHover: (event) {
                       if (!_isDrawing &&
@@ -1609,15 +1636,46 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
                         onPointerSignal: _onPointerSignal,
                         child: canvasChild,
                       ),
-
                     ),
                   ),
+                )),
                 );
               },
             );
           },
         );
       },
+    );
+  }
+
+  Widget _buildToolShortcutHandler({required Widget child}) {
+    return Focus(
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        // Don't handle tool shortcuts when a modifier key is pressed
+        if (HardwareKeyboard.instance.isMetaPressed ||
+            HardwareKeyboard.instance.isControlPressed) {
+          return KeyEventResult.ignored;
+        }
+        final key = event.logicalKey;
+        final toolMap = {
+          LogicalKeyboardKey.keyV: EditorTool.arrow,
+          LogicalKeyboardKey.keyR: EditorTool.square,
+          LogicalKeyboardKey.keyO: EditorTool.circle,
+          LogicalKeyboardKey.keyA: EditorTool.arrowTopRight,
+          LogicalKeyboardKey.keyL: EditorTool.line,
+          LogicalKeyboardKey.keyD: EditorTool.pencil,
+          LogicalKeyboardKey.keyT: EditorTool.text,
+          LogicalKeyboardKey.keyF: EditorTool.figure,
+        };
+        final tool = toolMap[key];
+        if (tool != null) {
+          _toolBloc.add(ToolSelected(tool));
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: child,
     );
   }
 

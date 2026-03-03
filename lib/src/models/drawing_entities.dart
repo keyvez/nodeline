@@ -137,6 +137,7 @@ class ArrowObject extends DrawingObject {
   final LinkPathType pathType;
   final ObjectAttachment? startAttachment;
   final ObjectAttachment? endAttachment;
+  List<Offset>? waypoints;
 
   ArrowObject({
     required super.id,
@@ -148,11 +149,27 @@ class ArrowObject extends DrawingObject {
     this.pathType = LinkPathType.straight,
     this.startAttachment,
     this.endAttachment,
+    this.waypoints,
   });
 
   @override
   Rect get rect {
     if (pathType == LinkPathType.orthogonal) {
+      if (waypoints != null && waypoints!.isNotEmpty) {
+        double minX = start.dx, minY = start.dy;
+        double maxX = start.dx, maxY = start.dy;
+        for (final wp in waypoints!) {
+          minX = min(minX, wp.dx);
+          minY = min(minY, wp.dy);
+          maxX = max(maxX, wp.dx);
+          maxY = max(maxY, wp.dy);
+        }
+        minX = min(minX, end.dx);
+        minY = min(minY, end.dy);
+        maxX = max(maxX, end.dx);
+        maxY = max(maxY, end.dy);
+        return Rect.fromLTRB(minX, minY, maxX, maxY);
+      }
       return Rect.fromPoints(start, end).normalize;
     }
 
@@ -236,6 +253,7 @@ class ArrowObject extends DrawingObject {
     ObjectAttachment? startAttachment,
     ObjectAttachment? endAttachment,
     double? angle,
+    List<Offset>? waypoints,
   }) {
     return ArrowObject(
       id: id,
@@ -247,6 +265,7 @@ class ArrowObject extends DrawingObject {
       startAttachment: startAttachment ?? this.startAttachment,
       endAttachment: endAttachment ?? this.endAttachment,
       angle: angle ?? this.angle,
+      waypoints: waypoints ?? this.waypoints,
     );
   }
 }
@@ -640,6 +659,7 @@ class TempDrawingObject {
   final Offset end;
   final LinkPathType pathType;
   final List<PointVector> points;
+  final List<Offset>? waypoints;
 
   TempDrawingObject({
     required this.tool,
@@ -647,12 +667,14 @@ class TempDrawingObject {
     required this.end,
     this.points = const [],
     this.pathType = LinkPathType.straight,
+    this.waypoints,
   });
 
   TempDrawingObject copyWith({
     Offset? end,
     List<PointVector>? points,
     LinkPathType? pathType,
+    List<Offset>? waypoints,
   }) {
     return TempDrawingObject(
       tool: tool,
@@ -660,6 +682,7 @@ class TempDrawingObject {
       end: end ?? this.end,
       points: points ?? this.points,
       pathType: pathType ?? this.pathType,
+      waypoints: waypoints ?? this.waypoints,
     );
   }
 }
