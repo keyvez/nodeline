@@ -4,7 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 class OrthogonalRouter {
-  static const double _padding = 20.0;
+  static const double _padding = 25.0;
   static const double _searchInflation = 300.0;
   static const int _maxObstacles = 20;
 
@@ -20,18 +20,7 @@ class OrthogonalRouter {
     Rect? startObjectRect,
     Rect? endObjectRect,
   }) {
-    // Compute exit/entry stubs if attached to objects
-    final startExit = startObjectRect != null
-        ? _computeExitPoint(start, startObjectRect)
-        : null;
-    final endEntry = endObjectRect != null
-        ? _computeExitPoint(end, endObjectRect)
-        : null;
-
-    final routeStart = startExit ?? start;
-    final routeEnd = endEntry ?? end;
-
-    // Filter and inflate obstacles
+    // Filter and inflate obstacles first (needed for obstacle-aware exit stubs)
     final searchArea = Rect.fromPoints(start, end).inflate(_searchInflation);
     var relevantObstacles = obstacles.where((r) => searchArea.overlaps(r)).toList();
 
@@ -46,17 +35,39 @@ class OrthogonalRouter {
 
     final inflated = relevantObstacles.map((r) => r.inflate(_padding)).toList();
 
+    // Compute exit/entry stubs if attached to objects
+    // Use obstacle-aware version to avoid landing inside another obstacle
+    final startExit = startObjectRect != null
+        ? _computeExitPoint(start, startObjectRect, inflated, end)
+        : null;
+    final endEntry = endObjectRect != null
+        ? _computeExitPoint(end, endObjectRect, inflated, start)
+        : null;
+
+    final routeStart = startExit ?? start;
+    final routeEnd = endEntry ?? end;
+
     // Try to find a clean path between routeStart and routeEnd
     List<Offset> innerWaypoints;
-    if (inflated.isEmpty || _isLPathClear(routeStart, routeEnd, inflated)) {
+    if (inflated.isEmpty) {
       innerWaypoints = const [];
     } else {
-      final candidates = _generateCandidates(routeStart, routeEnd, inflated);
-      innerWaypoints = _findPath(routeStart, routeEnd, candidates, inflated);
+      // Check if a simple L-path works, and if so, use the correct corner
+      final clearCorner = _findClearLCorner(routeStart, routeEnd, inflated);
+      if (clearCorner != null) {
+        // clearCorner == routeStart is sentinel for "direct axis-aligned segment is clear"
+        if (clearCorner == routeStart) {
+          innerWaypoints = const [];
+        } else {
+          innerWaypoints = [clearCorner];
+        }
+      } else {
+        final candidates = _generateCandidates(routeStart, routeEnd, inflated);
+        innerWaypoints = _findPath(routeStart, routeEnd, candidates, inflated);
+      }
     }
 
-    // Assemble full waypoint list: startExit + inner + endEntry
-    // Then ensure all segments are axis-aligned by inserting L-corners
+    // Assemble full waypoint list: start + exitStub + inner + entryStub + end
     final fullPath = <Offset>[start];
     if (startExit != null) fullPath.add(startExit);
     for (final wp in innerWaypoints) {
@@ -68,12 +79,38 @@ class OrthogonalRouter {
     // Ensure every consecutive pair is axis-aligned
     final aligned = _ensureAxisAligned(fullPath);
 
-    // Remove collinear intermediate points from the full path
-    final simplified = _simplifyFullPath(aligned);
+    // Build set of protected points (by value) that must not be simplified away
+    final protectedPoints = <Offset>{start, end};
+    if (startExit != null) protectedPoints.add(startExit);
+    if (endEntry != null) protectedPoints.add(endEntry);
+
+    bool isProtected(Offset p) {
+      return protectedPoints.any((pp) =>
+          (pp.dx - p.dx).abs() < 0.5 && (pp.dy - p.dy).abs() < 0.5);
+    }
+
+    // Remove collinear intermediate points, preserving protected points
+    final result = <Offset>[aligned.first];
+    for (int i = 1; i < aligned.length - 1; i++) {
+      if (isProtected(aligned[i])) {
+        result.add(aligned[i]);
+        continue;
+      }
+      final prev = result.last;
+      final curr = aligned[i];
+      final next = aligned[i + 1];
+      final sameX = (prev.dx - curr.dx).abs() < 0.5 &&
+          (curr.dx - next.dx).abs() < 0.5;
+      final sameY = (prev.dy - curr.dy).abs() < 0.5 &&
+          (curr.dy - next.dy).abs() < 0.5;
+      if (sameX || sameY) continue;
+      result.add(aligned[i]);
+    }
+    result.add(aligned.last);
 
     // Return only the intermediate waypoints (strip start and end)
-    if (simplified.length <= 2) return const [];
-    return simplified.sublist(1, simplified.length - 1);
+    if (result.length <= 2) return const [];
+    return result.sublist(1, result.length - 1);
   }
 
   /// Computes optimal attachment points on two connected object rects.
@@ -129,23 +166,62 @@ class OrthogonalRouter {
     }
   }
 
-  /// Projects [point] outward from the nearest edge of [objectRect] by [_padding].
-  static Offset _computeExitPoint(Offset point, Rect objectRect) {
-    final distLeft = (point.dx - objectRect.left).abs();
-    final distRight = (point.dx - objectRect.right).abs();
-    final distTop = (point.dy - objectRect.top).abs();
-    final distBottom = (point.dy - objectRect.bottom).abs();
-    final minDist = [distLeft, distRight, distTop, distBottom].reduce(min);
+  /// Projects [point] outward from [objectRect], clearing the inflated zone.
+  /// Determines exit direction from which edge the point is on, with fallback
+  /// to target-directed exits if the natural edge exit is blocked.
+  static Offset _computeExitPoint(Offset point, Rect objectRect,
+      [List<Rect> inflatedObstacles = const [], Offset? target]) {
+    final exitDist = _padding + 5.0;
 
-    if (minDist == distLeft) {
-      return Offset(objectRect.left - _padding, point.dy);
-    } else if (minDist == distRight) {
-      return Offset(objectRect.right + _padding, point.dy);
-    } else if (minDist == distTop) {
-      return Offset(point.dx, objectRect.top - _padding);
-    } else {
-      return Offset(point.dx, objectRect.bottom + _padding);
+    // Generate all 4 possible exit points (projecting outward from each edge)
+    final left = Offset(objectRect.left - exitDist, point.dy);
+    final right = Offset(objectRect.right + exitDist, point.dy);
+    final top = Offset(point.dx, objectRect.top - exitDist);
+    final bottom = Offset(point.dx, objectRect.bottom + exitDist);
+
+    bool isClear(Offset p) {
+      return !inflatedObstacles.any(
+        (r) => p.dx > r.left && p.dx < r.right &&
+               p.dy > r.top && p.dy < r.bottom,
+      );
     }
+
+    // Determine which edge the point is closest to — that's the natural exit
+    final distToLeft = (point.dx - objectRect.left).abs();
+    final distToRight = (point.dx - objectRect.right).abs();
+    final distToTop = (point.dy - objectRect.top).abs();
+    final distToBottom = (point.dy - objectRect.bottom).abs();
+    final minEdgeDist = min(min(distToLeft, distToRight), min(distToTop, distToBottom));
+
+    Offset naturalExit;
+    if ((minEdgeDist - distToBottom).abs() < 1.0) {
+      naturalExit = bottom;
+    } else if ((minEdgeDist - distToTop).abs() < 1.0) {
+      naturalExit = top;
+    } else if ((minEdgeDist - distToRight).abs() < 1.0) {
+      naturalExit = right;
+    } else {
+      naturalExit = left;
+    }
+
+    // Try the natural exit first
+    if (isClear(naturalExit)) return naturalExit;
+
+    // Natural exit is blocked — try target-directed fallback
+    double score(Offset exitPt) {
+      if (target == null) return 0;
+      return (exitPt.dx - target.dx).abs() + (exitPt.dy - target.dy).abs();
+    }
+
+    final exits = [left, right, top, bottom];
+    exits.sort((a, b) => score(a).compareTo(score(b)));
+
+    for (final exit in exits) {
+      if (isClear(exit)) return exit;
+    }
+
+    // All blocked — return the natural exit anyway
+    return naturalExit;
   }
 
   /// Inserts corner points between any non-axis-aligned consecutive pairs
@@ -180,18 +256,28 @@ class OrthogonalRouter {
     return result;
   }
 
-  static bool _isLPathClear(Offset start, Offset end, List<Rect> obstacles) {
+  /// Returns the clear L-corner between [start] and [end], or null if both
+  /// L-paths are blocked. This ensures we use the actual clear corner rather
+  /// than letting _ensureAxisAligned pick one that might be blocked.
+  static Offset? _findClearLCorner(Offset start, Offset end, List<Rect> obstacles) {
+    // If start and end are already axis-aligned, no corner needed
+    if ((start.dx - end.dx).abs() < 0.5 || (start.dy - end.dy).abs() < 0.5) {
+      // Check the direct segment
+      if (!_segmentHitsAny(start, end, obstacles)) return start; // sentinel: path is clear
+      return null;
+    }
+
     final corner1 = Offset(end.dx, start.dy);
     if (!_segmentHitsAny(start, corner1, obstacles) &&
         !_segmentHitsAny(corner1, end, obstacles)) {
-      return true;
+      return corner1;
     }
     final corner2 = Offset(start.dx, end.dy);
     if (!_segmentHitsAny(start, corner2, obstacles) &&
         !_segmentHitsAny(corner2, end, obstacles)) {
-      return true;
+      return corner2;
     }
-    return false;
+    return null;
   }
 
   static bool _segmentHitsAny(Offset a, Offset b, List<Rect> obstacles) {
@@ -357,26 +443,6 @@ class OrthogonalRouter {
     if (expanded.length <= 2) return const [];
     final waypoints = expanded.sublist(1, expanded.length - 1);
     return _simplify(waypoints);
-  }
-
-  /// Removes collinear intermediate points from the full path
-  /// (including start and end as context for collinearity checks).
-  static List<Offset> _simplifyFullPath(List<Offset> path) {
-    if (path.length <= 2) return path;
-    final result = <Offset>[path.first];
-    for (int i = 1; i < path.length - 1; i++) {
-      final prev = result.last;
-      final curr = path[i];
-      final next = path[i + 1];
-      final sameX = (prev.dx - curr.dx).abs() < 0.5 &&
-          (curr.dx - next.dx).abs() < 0.5;
-      final sameY = (prev.dy - curr.dy).abs() < 0.5 &&
-          (curr.dy - next.dy).abs() < 0.5;
-      if (sameX || sameY) continue;
-      result.add(curr);
-    }
-    result.add(path.last);
-    return result;
   }
 
   static List<Offset> _simplify(List<Offset> waypoints) {
