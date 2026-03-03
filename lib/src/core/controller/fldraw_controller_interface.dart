@@ -76,6 +76,10 @@ abstract class FlDrawControllerInterface {
 
   void saveProject(Function(Map<String, dynamic>) onSave);
 
+  // --- View Settings ---
+
+  void toggleGrid();
+
   // --- Lifecycle ---
 
   void dispose();

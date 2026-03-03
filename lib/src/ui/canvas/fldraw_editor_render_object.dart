@@ -326,7 +326,7 @@ class FlDrawEditorRenderBox extends RenderBox
   get drawingObjects => canvasState.drawingObjects;
 
   void _paintGrid(Canvas canvas, Rect viewport, double startX, double startY) {
-    if (!style.gridStyle.showGrid) return;
+    if (!canvasState.showGrid) return;
     gridShader.setFloat(2, startX);
     gridShader.setFloat(3, startY);
     // Scale down dots and lines when zoomed out (half size at zoom <= 0.5, full at zoom >= 1.0)
@@ -522,28 +522,27 @@ class FlDrawEditorRenderBox extends RenderBox
         var end = obj.end;
         List<Offset>? waypoints = obj.waypoints;
 
-        // For orthogonal arrows with both attachments, use smart attachment points
-        // and recompute waypoints dynamically based on current object positions
-        if (pathType == LinkPathType.orthogonal &&
-            startObjRect != null && endObjRect != null) {
-          final (smartStart, smartEnd) =
-              OrthogonalRouter.computeSmartAttachmentPoints(startObjRect, endObjRect);
-          start = smartStart;
-          end = smartEnd;
+        // Resolve endpoints from relativePosition (always respect stored attachments)
+        if (startObjRect != null && startAttachment != null) {
+          final relPos = startAttachment.relativePosition;
+          start = startObjRect.topLeft +
+              Offset(startObjRect.width * relPos.dx, startObjRect.height * relPos.dy);
+        }
+        if (endObjRect != null && endAttachment != null) {
+          final relPos = endAttachment.relativePosition;
+          end = endObjRect.topLeft +
+              Offset(endObjRect.width * relPos.dx, endObjRect.height * relPos.dy);
+        }
 
-          // Collect obstacles for routing (exclude attached objects)
-          final excludeIds = <String>{
-            if (startAttachment != null) startAttachment.objectId,
-            if (endAttachment != null) endAttachment.objectId,
-          };
+        // For orthogonal arrows, dynamically recompute waypoints for routing
+        if (pathType == LinkPathType.orthogonal) {
           final obstacles = <Rect>[];
           for (final o in canvasState.drawingObjects.values) {
-            if (o.id == obj.id || excludeIds.contains(o.id)) continue;
+            if (o.id == obj.id) continue;
             if (o is ArrowObject || o is LineObject || o is PencilStrokeObject) continue;
             obstacles.add(o.rect);
           }
           for (final node in canvasState.nodes.values) {
-            if (excludeIds.contains(node.id)) continue;
             final bounds = getNodeBoundsInWorld(node);
             if (bounds != null) obstacles.add(bounds);
           }
@@ -555,18 +554,6 @@ class FlDrawEditorRenderBox extends RenderBox
             startObjectRect: startObjRect,
             endObjectRect: endObjRect,
           );
-        } else {
-          // Non-orthogonal or single attachment: resolve endpoints from relativePosition
-          if (startObjRect != null && startAttachment != null) {
-            final relPos = startAttachment.relativePosition;
-            start = startObjRect.topLeft +
-                Offset(startObjRect.width * relPos.dx, startObjRect.height * relPos.dy);
-          }
-          if (endObjRect != null && endAttachment != null) {
-            final relPos = endAttachment.relativePosition;
-            end = endObjRect.topLeft +
-                Offset(endObjRect.width * relPos.dx, endObjRect.height * relPos.dy);
-          }
         }
 
         var controlPoint = obj.midPoint ?? (start + end) / 2;

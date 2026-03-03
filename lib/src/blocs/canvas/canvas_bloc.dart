@@ -41,6 +41,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         SelectionPasted e => _onSelectionPasted(e, emit),
         SelectionCopied e => _onSelectionCopied(e, emit),
         ObjectDuplicatedWithConnection e => _onObjectDuplicatedWithConnection(e, emit),
+        GridToggled e => _onGridToggled(e, emit),
       });
     });
   }
@@ -319,6 +320,13 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     showNodeEditorSnackbar('New project created.', SnackbarType.success);
   }
 
+  void _onGridToggled(
+    GridToggled event,
+    Emitter<CanvasState> emit,
+  ) {
+    emit(state.copyWith(showGrid: !state.showGrid));
+  }
+
   void _onProjectSaved(ProjectSaved event, Emitter<CanvasState> emit) {
     final jsonData = {
       'viewport': {
@@ -478,13 +486,13 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     final arrowEnd = newObjectRect.topLeft +
         Offset(newObjectRect.width * endRelPos.dx, newObjectRect.height * endRelPos.dy);
 
-    // Collect obstacles (solid objects only, exclude the two connected objects)
+    // Collect obstacles (solid objects only, include connected objects for routing around)
     final obstacles = <Rect>[];
     for (final obj in state.drawingObjects.values) {
-      if (obj.id == sourceObject.id) continue;
       if (obj is ArrowObject || obj is LineObject || obj is PencilStrokeObject) continue;
       obstacles.add(obj.rect);
     }
+    obstacles.add(newObjectRect);
 
     final waypoints = OrthogonalRouter.route(
       start: arrowStart,

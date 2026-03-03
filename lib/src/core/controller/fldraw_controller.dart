@@ -307,6 +307,15 @@ class FlDrawController implements FlDrawControllerInterface {
     _canvasBloc!.add(ProjectSaved(onSave: onSave));
   }
 
+  // --- View Settings ---
+
+  /// Toggles grid visibility on/off.
+  @override
+  void toggleGrid() {
+    _assertIsInitialized();
+    _canvasBloc!.add(const GridToggled());
+  }
+
   /// Disposes of the controller's resources.
   /// Should be called when the controller is no longer needed.
   /// This is handled automatically by the `FlDraw` widget.

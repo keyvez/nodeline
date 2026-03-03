@@ -34,6 +34,8 @@ class OrthogonalRouter {
     }
 
     final inflated = relevantObstacles.map((r) => r.inflate(_padding)).toList();
+    // Wider inflation for candidate waypoints — routes maintain visible gap from objects
+    final candidateInflated = relevantObstacles.map((r) => r.inflate(_padding + 5.0)).toList();
 
     // Compute exit/entry stubs if attached to objects
     // Use obstacle-aware version to avoid landing inside another obstacle
@@ -62,7 +64,7 @@ class OrthogonalRouter {
           innerWaypoints = [clearCorner];
         }
       } else {
-        final candidates = _generateCandidates(routeStart, routeEnd, inflated);
+        final candidates = _generateCandidates(routeStart, routeEnd, candidateInflated, inflated);
         innerWaypoints = _findPath(routeStart, routeEnd, candidates, inflated);
       }
     }
@@ -108,9 +110,12 @@ class OrthogonalRouter {
     }
     result.add(aligned.last);
 
+    // Expand U-turns (fold-backs) into visible loops with offset
+    final expanded = _expandUTurns(result);
+
     // Return only the intermediate waypoints (strip start and end)
-    if (result.length <= 2) return const [];
-    return result.sublist(1, result.length - 1);
+    if (expanded.length <= 2) return const [];
+    return expanded.sublist(1, expanded.length - 1);
   }
 
   /// Computes optimal attachment points on two connected object rects.
@@ -267,6 +272,59 @@ class OrthogonalRouter {
     return result;
   }
 
+  /// Detects U-turns (where a segment reverses direction on the same axis)
+  /// and expands them into a visible loop with perpendicular offset.
+  /// e.g. A→B going left then B→C going right on the same Y becomes:
+  /// A → B_offset_up → C_offset_up → C (creating a visible rectangular loop)
+  static List<Offset> _expandUTurns(List<Offset> path) {
+    if (path.length < 3) return path;
+    const uTurnOffset = 20.0;
+    final result = <Offset>[path[0]];
+
+    for (int i = 1; i < path.length - 1; i++) {
+      final prev = result.last;
+      final curr = path[i];
+      final next = path[i + 1];
+
+      // Check for horizontal fold-back (same Y for all three, reverses X direction)
+      final allSameY = (prev.dy - curr.dy).abs() < 0.5 &&
+          (curr.dy - next.dy).abs() < 0.5;
+      if (allSameY) {
+        final dirIn = (curr.dx - prev.dx).sign;
+        final dirOut = (next.dx - curr.dx).sign;
+        if (dirIn != 0 && dirOut != 0 && dirIn == -dirOut) {
+          // U-turn on horizontal axis — offset perpendicular (vertical)
+          // Choose offset direction: prefer going toward the side with more room
+          final offsetY = curr.dy - prev.dy >= 0 ? -uTurnOffset : uTurnOffset;
+          result.add(Offset(curr.dx, curr.dy + offsetY));
+          result.add(Offset(next.dx, curr.dy + offsetY));
+          // next will be added normally
+          continue;
+        }
+      }
+
+      // Check for vertical fold-back (same X for all three, reverses Y direction)
+      final allSameX = (prev.dx - curr.dx).abs() < 0.5 &&
+          (curr.dx - next.dx).abs() < 0.5;
+      if (allSameX) {
+        final dirIn = (curr.dy - prev.dy).sign;
+        final dirOut = (next.dy - curr.dy).sign;
+        if (dirIn != 0 && dirOut != 0 && dirIn == -dirOut) {
+          // U-turn on vertical axis — offset perpendicular (horizontal)
+          final offsetX = curr.dx - prev.dx >= 0 ? -uTurnOffset : uTurnOffset;
+          result.add(Offset(curr.dx + offsetX, curr.dy));
+          result.add(Offset(curr.dx + offsetX, next.dy));
+          continue;
+        }
+      }
+
+      result.add(curr);
+    }
+
+    result.add(path.last);
+    return result;
+  }
+
   /// Returns the clear L-corner between [start] and [end], or null if both
   /// L-paths are blocked. This ensures we use the actual clear corner rather
   /// than letting _ensureAxisAligned pick one that might be blocked.
@@ -322,18 +380,21 @@ class OrthogonalRouter {
   static List<Offset> _generateCandidates(
     Offset start,
     Offset end,
-    List<Rect> inflatedObstacles,
+    List<Rect> candidateRects,
+    List<Rect> collisionRects,
   ) {
     final candidates = <Offset>{};
 
-    for (final rect in inflatedObstacles) {
+    // Generate corners and alignment points from the wider candidate rects
+    // so that routes maintain visible padding from objects
+    for (final rect in candidateRects) {
       candidates.add(rect.topLeft);
       candidates.add(rect.topRight);
       candidates.add(rect.bottomLeft);
       candidates.add(rect.bottomRight);
     }
 
-    for (final rect in inflatedObstacles) {
+    for (final rect in candidateRects) {
       candidates.add(Offset(rect.left, start.dy));
       candidates.add(Offset(rect.right, start.dy));
       candidates.add(Offset(start.dx, rect.top));
@@ -344,8 +405,9 @@ class OrthogonalRouter {
       candidates.add(Offset(end.dx, rect.bottom));
     }
 
+    // Filter out points that land inside collision rects
     candidates.removeWhere(
-      (p) => inflatedObstacles.any(
+      (p) => collisionRects.any(
         (r) => p.dx > r.left && p.dx < r.right &&
                p.dy > r.top && p.dy < r.bottom,
       ),

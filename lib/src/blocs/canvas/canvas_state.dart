@@ -7,6 +7,7 @@ final class CanvasState extends Equatable {
   final Map<String, DrawingObject> drawingObjects;
   final Offset viewportOffset;
   final double viewportZoom;
+  final bool showGrid;
 
   // History stacks
   final List<HistoryEntry> undoStack;
@@ -17,6 +18,7 @@ final class CanvasState extends Equatable {
     this.drawingObjects = const {},
     this.viewportOffset = Offset.zero,
     this.viewportZoom = 1.0,
+    this.showGrid = false,
     this.undoStack = const [],
     this.redoStack = const [],
   });
@@ -27,6 +29,7 @@ final class CanvasState extends Equatable {
     required this.drawingObjects,
     required this.viewportOffset,
     required this.viewportZoom,
+    this.showGrid = true,
   }) : undoStack = [],
        redoStack = [];
 
@@ -35,6 +38,7 @@ final class CanvasState extends Equatable {
     Map<String, DrawingObject>? drawingObjects,
     Offset? viewportOffset,
     double? viewportZoom,
+    bool? showGrid,
     List<HistoryEntry>? undoStack,
     List<HistoryEntry>? redoStack,
   }) {
@@ -43,6 +47,7 @@ final class CanvasState extends Equatable {
       drawingObjects: drawingObjects ?? this.drawingObjects,
       viewportOffset: viewportOffset ?? this.viewportOffset,
       viewportZoom: viewportZoom ?? this.viewportZoom,
+      showGrid: showGrid ?? this.showGrid,
       undoStack: undoStack ?? this.undoStack,
       redoStack: redoStack ?? this.redoStack,
     );
@@ -54,6 +59,7 @@ final class CanvasState extends Equatable {
     drawingObjects,
     viewportOffset,
     viewportZoom,
+    showGrid,
     undoStack,
     redoStack,
   ];

@@ -204,6 +204,10 @@ final class ProjectLoaded extends CanvasEvent {
 
 final class NewProjectCreated extends CanvasEvent {}
 
+final class GridToggled extends CanvasEvent {
+  const GridToggled() : super(isUndoable: false);
+}
+
 // --- Clipboard Events ---
 final class SelectionCopied extends CanvasEvent {}
 

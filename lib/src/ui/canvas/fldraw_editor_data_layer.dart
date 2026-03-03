@@ -64,6 +64,7 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
   late CanvasBloc _canvasBloc;
   late SelectionBloc _selectionBloc;
   late ToolBloc _toolBloc;
+  final FocusNode _canvasFocusNode = FocusNode();
 
   bool _isPanning = false;
   bool _isAreaSelecting = false;
@@ -118,6 +119,7 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
 
   @override
   void dispose() {
+    _canvasFocusNode.dispose();
     _kineticTimer?.cancel();
     super.dispose();
   }
@@ -350,6 +352,10 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
 
   void _onPointerDown(PointerDownEvent event) {
     _activePointers++;
+    // Ensure keyboard shortcuts work by requesting focus on every click
+    if (!_canvasFocusNode.hasFocus) {
+      _canvasFocusNode.requestFocus();
+    }
 
     if (_activePointers > 1) {
       setState(() {
@@ -661,11 +667,7 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
         }
 
         // Recompute waypoints
-        final obstacles = _collectObstacles(excludeIds: {
-          objectId,
-          if (object.startAttachment != null) object.startAttachment!.objectId,
-          if (object.endAttachment != null) object.endAttachment!.objectId,
-        });
+        final obstacles = _collectObstacles(excludeId: objectId);
         final startObjRect = _getAttachedObjectRect(object.startAttachment);
         final endObjRect = _getAttachedObjectRect(object.endAttachment);
         final waypoints = OrthogonalRouter.route(
@@ -862,10 +864,7 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
       if (_tempDrawingObject != null) {
         List<Offset>? waypoints;
         if (pathType == LinkPathType.orthogonal) {
-          final excludeIds = <String>{};
-          if (_startSnapPoint != null) excludeIds.add(_startSnapPoint!.objectId);
-          if (_hoveredSnapPoint != null) excludeIds.add(_hoveredSnapPoint!.objectId);
-          final obstacles = _collectObstacles(excludeIds: excludeIds.isNotEmpty ? excludeIds : null);
+          final obstacles = _collectObstacles();
           final startObjRect = _getAttachedObjectRect(
             _startSnapPoint != null
                 ? ObjectAttachment(
@@ -1076,19 +1075,6 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
     final endAttachment = objectWithEndpoints.endAttachment as ObjectAttachment?;
     final canvasState = _canvasBloc.state;
 
-    // For orthogonal arrows with both attachments, use smart attachment points
-    if (obj is ArrowObject &&
-        obj.pathType == LinkPathType.orthogonal &&
-        startAttachment != null &&
-        endAttachment != null) {
-      final startObjRect = _getAttachedObjectRect(startAttachment);
-      final endObjRect = _getAttachedObjectRect(endAttachment);
-      if (startObjRect != null && endObjRect != null) {
-        return OrthogonalRouter.computeSmartAttachmentPoints(
-            startObjRect, endObjRect);
-      }
-    }
-
     if (startAttachment != null) {
       final targetNode = canvasState.nodes[startAttachment.objectId];
       final targetObject = canvasState.drawingObjects[startAttachment.objectId];
@@ -1140,11 +1126,7 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
             final startObjRect = _getAttachedObjectRect(obj.startAttachment);
             final endObjRect = _getAttachedObjectRect(obj.endAttachment);
             if (startObjRect != null && endObjRect != null) {
-              final obstacles = _collectObstacles(excludeIds: {
-                obj.id,
-                obj.startAttachment!.objectId,
-                obj.endAttachment!.objectId,
-              });
+              final obstacles = _collectObstacles(excludeId: obj.id);
               waypoints = OrthogonalRouter.route(
                 start: start,
                 end: end,
@@ -1684,8 +1666,13 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
                       _toolBloc.add(const ToolSelected(EditorTool.text)),
                     const SingleActivator(LogicalKeyboardKey.keyF): () =>
                       _toolBloc.add(const ToolSelected(EditorTool.figure)),
+                    const SingleActivator(LogicalKeyboardKey.keyG, meta: true): () =>
+                      _canvasBloc.add(const GridToggled()),
+                    const SingleActivator(LogicalKeyboardKey.keyG, control: true): () =>
+                      _canvasBloc.add(const GridToggled()),
                   },
                   child: Focus(
+                    focusNode: _canvasFocusNode,
                     autofocus: true,
                     child: MouseRegion(
                     cursor: _getCursor(toolState.activeTool),
