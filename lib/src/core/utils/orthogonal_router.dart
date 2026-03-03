@@ -37,13 +37,25 @@ class OrthogonalRouter {
     // Wider inflation for candidate waypoints — routes maintain visible gap from objects
     final candidateInflated = relevantObstacles.map((r) => r.inflate(_padding + 5.0)).toList();
 
+    // Build obstacle lists for exit/entry computation that exclude the
+    // arrow's own source/target objects — their own inflated rects would
+    // block exits when objects are close together.
+    List<Rect> _inflatedExcluding(Rect? exclude) {
+      if (exclude == null) return inflated;
+      return [
+        for (int i = 0; i < relevantObstacles.length; i++)
+          if (relevantObstacles[i] != exclude) inflated[i],
+      ];
+    }
+
     // Compute exit/entry stubs if attached to objects
-    // Use obstacle-aware version to avoid landing inside another obstacle
     final startExit = startObjectRect != null
-        ? _computeExitPoint(start, startObjectRect, inflated, end)
+        ? _computeExitPoint(start, startObjectRect,
+            _inflatedExcluding(startObjectRect), end)
         : null;
     final endEntry = endObjectRect != null
-        ? _computeExitPoint(end, endObjectRect, inflated, start)
+        ? _computeExitPoint(end, endObjectRect,
+            _inflatedExcluding(endObjectRect), start)
         : null;
 
     final routeStart = startExit ?? start;
@@ -51,22 +63,22 @@ class OrthogonalRouter {
 
     // Try to find a clean path between routeStart and routeEnd
     List<Offset> innerWaypoints;
-    if (inflated.isEmpty) {
+    // Check if a simple L-path works, and if so, use the correct corner
+    final clearCorner = _findClearLCorner(routeStart, routeEnd, inflated,
+        exitDir: startExit != null ? routeStart - start : null,
+        entryDir: endEntry != null ? routeEnd - end : null);
+    if (clearCorner != null) {
+      // clearCorner == routeStart is sentinel for "direct axis-aligned segment is clear"
+      if (clearCorner == routeStart) {
+        innerWaypoints = const [];
+      } else {
+        innerWaypoints = [clearCorner];
+      }
+    } else if (inflated.isEmpty) {
       innerWaypoints = const [];
     } else {
-      // Check if a simple L-path works, and if so, use the correct corner
-      final clearCorner = _findClearLCorner(routeStart, routeEnd, inflated);
-      if (clearCorner != null) {
-        // clearCorner == routeStart is sentinel for "direct axis-aligned segment is clear"
-        if (clearCorner == routeStart) {
-          innerWaypoints = const [];
-        } else {
-          innerWaypoints = [clearCorner];
-        }
-      } else {
-        final candidates = _generateCandidates(routeStart, routeEnd, candidateInflated, inflated);
-        innerWaypoints = _findPath(routeStart, routeEnd, candidates, inflated);
-      }
+      final candidates = _generateCandidates(routeStart, routeEnd, candidateInflated, inflated);
+      innerWaypoints = _findPath(routeStart, routeEnd, candidates, inflated);
     }
 
     // Assemble full waypoint list: start + exitStub + inner + entryStub + end
@@ -79,7 +91,7 @@ class OrthogonalRouter {
     fullPath.add(end);
 
     // Ensure every consecutive pair is axis-aligned
-    final aligned = _ensureAxisAligned(fullPath);
+    final aligned = _ensureAxisAligned(fullPath, inflated);
 
     // Build set of protected points (by value) that must not be simplified away
     final protectedPoints = <Offset>{start, end};
@@ -109,6 +121,39 @@ class OrthogonalRouter {
       result.add(aligned[i]);
     }
     result.add(aligned.last);
+
+    // Check if the routed path is excessively long compared to a direct
+    // connection. If so, try a simpler stub-only path — but only use it
+    // if it doesn't cross any obstacles.
+    final directDist = (start.dx - end.dx).abs() + (start.dy - end.dy).abs();
+    if (directDist > 0) {
+      double pathLen = 0;
+      for (int i = 0; i < result.length - 1; i++) {
+        pathLen += (result[i].dx - result[i + 1].dx).abs() +
+            (result[i].dy - result[i + 1].dy).abs();
+      }
+      if (pathLen > directDist * 3.0) {
+        // Path is too long — try a simpler stub-only path
+        final simplePath = <Offset>[start];
+        if (startExit != null) simplePath.add(startExit);
+        if (endEntry != null) simplePath.add(endEntry);
+        simplePath.add(end);
+        final simpleAligned = _ensureAxisAligned(simplePath, inflated);
+
+        // Only use the simple path if it doesn't cross obstacles
+        bool simpleClear = true;
+        for (int i = 0; i < simpleAligned.length - 1 && simpleClear; i++) {
+          if (_segmentHitsAny(simpleAligned[i], simpleAligned[i + 1], inflated)) {
+            simpleClear = false;
+          }
+        }
+        if (simpleClear) {
+          if (simpleAligned.length <= 2) return const [];
+          return simpleAligned.sublist(1, simpleAligned.length - 1);
+        }
+        // Otherwise keep the longer but obstacle-avoiding path
+      }
+    }
 
     // Expand U-turns (fold-backs) into visible loops with offset
     final expanded = _expandUTurns(result);
@@ -226,23 +271,33 @@ class OrthogonalRouter {
     }
 
     // All padded exits are blocked (objects too close together).
-    // Use a minimal stub (just outside the object edge) in the natural
-    // direction so the line can pass straight through the tight gap.
+    // Use a minimal stub (just outside the object edge).
+    // Try progressively smaller stubs until one is clear, preferring
+    // directions sorted by target proximity.
     const minStub = 2.0;
-    if (naturalExit == bottom) {
-      return Offset(point.dx, objectRect.bottom + minStub);
-    } else if (naturalExit == top) {
-      return Offset(point.dx, objectRect.top - minStub);
-    } else if (naturalExit == right) {
-      return Offset(objectRect.right + minStub, point.dy);
-    } else {
+    Offset minStubExit(Offset dir) {
+      if (dir == bottom) return Offset(point.dx, objectRect.bottom + minStub);
+      if (dir == top) return Offset(point.dx, objectRect.top - minStub);
+      if (dir == right) return Offset(objectRect.right + minStub, point.dy);
       return Offset(objectRect.left - minStub, point.dy);
     }
+
+    // Sort by target proximity, then try each with minimal stub
+    final minExits = [left, right, top, bottom];
+    minExits.sort((a, b) => score(a).compareTo(score(b)));
+    for (final exit in minExits) {
+      final stub = minStubExit(exit);
+      if (isClear(stub)) return stub;
+    }
+
+    // Absolute last resort: use natural direction
+    return minStubExit(naturalExit);
   }
 
   /// Inserts corner points between any non-axis-aligned consecutive pairs
   /// so that every segment is purely horizontal or vertical.
-  static List<Offset> _ensureAxisAligned(List<Offset> path) {
+  /// When [obstacles] is provided, avoids L-corners that cross obstacles.
+  static List<Offset> _ensureAxisAligned(List<Offset> path, [List<Rect> obstacles = const []]) {
     if (path.length < 2) return path;
     final result = <Offset>[path.first];
 
@@ -256,14 +311,24 @@ class OrthogonalRouter {
       if (isHorizontal || isVertical) {
         result.add(b);
       } else {
-        // Insert an L-corner: prefer the direction that makes sense
-        // (vertical first if horizontal distance is larger, to match typical orthogonal layout)
+        // Two possible L-corners
+        final corner1 = Offset(b.dx, a.dy); // horizontal then vertical
+        final corner2 = Offset(a.dx, b.dy); // vertical then horizontal
+
+        // Prefer based on distance ratio, but validate against obstacles
         final dx = (b.dx - a.dx).abs();
         final dy = (b.dy - a.dy).abs();
-        if (dx > dy) {
-          result.add(Offset(b.dx, a.dy)); // horizontal then vertical
+        final preferred = dx > dy ? corner1 : corner2;
+        final fallback = dx > dy ? corner2 : corner1;
+
+        if (obstacles.isEmpty) {
+          result.add(preferred);
         } else {
-          result.add(Offset(a.dx, b.dy)); // vertical then horizontal
+          final prefClear = !_segmentHitsAny(a, preferred, obstacles) &&
+              !_segmentHitsAny(preferred, b, obstacles);
+          final fbClear = !_segmentHitsAny(a, fallback, obstacles) &&
+              !_segmentHitsAny(fallback, b, obstacles);
+          result.add(prefClear ? preferred : (fbClear ? fallback : preferred));
         }
         result.add(b);
       }
@@ -275,10 +340,16 @@ class OrthogonalRouter {
   /// Detects U-turns (where a segment reverses direction on the same axis)
   /// and expands them into a visible loop with perpendicular offset.
   /// e.g. A→B going left then B→C going right on the same Y becomes:
-  /// A → B_offset_up → C_offset_up → C (creating a visible rectangular loop)
+  /// A → B → B_offset → C_offset → C (creating a visible rectangular loop)
+  ///
+  /// When the U-turn involves the first or last point in the path (start/end),
+  /// the curr point is preserved and extra waypoints are inserted to maintain
+  /// axis-alignment with the start/end.
   static List<Offset> _expandUTurns(List<Offset> path) {
     if (path.length < 3) return path;
     const uTurnOffset = 20.0;
+    final pathStart = path.first;
+    final pathEnd = path.last;
     final result = <Offset>[path[0]];
 
     for (int i = 1; i < path.length - 1; i++) {
@@ -294,11 +365,15 @@ class OrthogonalRouter {
         final dirOut = (next.dx - curr.dx).sign;
         if (dirIn != 0 && dirOut != 0 && dirIn == -dirOut) {
           // U-turn on horizontal axis — offset perpendicular (vertical)
-          // Choose offset direction: prefer going toward the side with more room
-          final offsetY = curr.dy - prev.dy >= 0 ? -uTurnOffset : uTurnOffset;
+          // Choose offset direction toward the overall end of the path
+          final toEnd = pathEnd.dy - curr.dy;
+          final offsetY = toEnd >= 0 ? uTurnOffset : -uTurnOffset;
+          // Preserve curr to maintain axis-alignment with prev, then add
+          // perpendicular offset waypoints.
+          result.add(curr);
           result.add(Offset(curr.dx, curr.dy + offsetY));
           result.add(Offset(next.dx, curr.dy + offsetY));
-          // next will be added normally
+          // next will be added normally in the next iteration (or as path.last)
           continue;
         }
       }
@@ -311,7 +386,9 @@ class OrthogonalRouter {
         final dirOut = (next.dy - curr.dy).sign;
         if (dirIn != 0 && dirOut != 0 && dirIn == -dirOut) {
           // U-turn on vertical axis — offset perpendicular (horizontal)
-          final offsetX = curr.dx - prev.dx >= 0 ? -uTurnOffset : uTurnOffset;
+          final toEnd = pathEnd.dx - curr.dx;
+          final offsetX = toEnd >= 0 ? uTurnOffset : -uTurnOffset;
+          result.add(curr);
           result.add(Offset(curr.dx + offsetX, curr.dy));
           result.add(Offset(curr.dx + offsetX, next.dy));
           continue;
@@ -328,7 +405,13 @@ class OrthogonalRouter {
   /// Returns the clear L-corner between [start] and [end], or null if both
   /// L-paths are blocked. This ensures we use the actual clear corner rather
   /// than letting _ensureAxisAligned pick one that might be blocked.
-  static Offset? _findClearLCorner(Offset start, Offset end, List<Rect> obstacles) {
+  ///
+  /// [exitDir] and [entryDir] are optional offset vectors representing the
+  /// direction from the connection point to the exit/entry stub. When provided,
+  /// corners that would create a U-turn (fold-back) with the stub are
+  /// deprioritized.
+  static Offset? _findClearLCorner(Offset start, Offset end, List<Rect> obstacles,
+      {Offset? exitDir, Offset? entryDir}) {
     // If start and end are already axis-aligned, no corner needed
     if ((start.dx - end.dx).abs() < 0.5 || (start.dy - end.dy).abs() < 0.5) {
       // Check the direct segment
@@ -336,16 +419,46 @@ class OrthogonalRouter {
       return null;
     }
 
-    final corner1 = Offset(end.dx, start.dy);
-    if (!_segmentHitsAny(start, corner1, obstacles) &&
-        !_segmentHitsAny(corner1, end, obstacles)) {
-      return corner1;
+    final corner1 = Offset(end.dx, start.dy); // horizontal-first
+    final corner2 = Offset(start.dx, end.dy); // vertical-first
+    final c1Clear = !_segmentHitsAny(start, corner1, obstacles) &&
+        !_segmentHitsAny(corner1, end, obstacles);
+    final c2Clear = !_segmentHitsAny(start, corner2, obstacles) &&
+        !_segmentHitsAny(corner2, end, obstacles);
+
+    if (c1Clear && c2Clear) {
+      // Both clear — prefer the one that doesn't create a U-turn with stubs.
+      // A horizontal exit stub (exitDir.dx != 0) going in direction D creates
+      // a U-turn if corner1 (horizontal-first) goes in direction -D on the
+      // same axis. In that case prefer corner2 (vertical-first).
+      if (exitDir != null) {
+        final isHorizontalExit = exitDir.dx.abs() > exitDir.dy.abs();
+        if (isHorizontalExit) {
+          // Exit goes horizontal. corner1 goes horizontal from start toward
+          // end.dx. If the exit direction and corner1 direction are opposite,
+          // corner1 creates a U-turn.
+          final exitDirSign = exitDir.dx.sign;
+          final corner1DirSign = (end.dx - start.dx).sign;
+          if (exitDirSign != 0 && corner1DirSign != 0 && exitDirSign != corner1DirSign) {
+            return corner2; // Avoid U-turn
+          }
+        } else {
+          // Exit goes vertical. corner2 goes vertical from start toward
+          // end.dy. If opposite, corner2 creates a U-turn.
+          final exitDirSign = exitDir.dy.sign;
+          final corner2DirSign = (end.dy - start.dy).sign;
+          if (exitDirSign != 0 && corner2DirSign != 0 && exitDirSign != corner2DirSign) {
+            return corner1; // Avoid U-turn
+          }
+        }
+      }
+      // Default: prefer based on distance ratio
+      final dx = (end.dx - start.dx).abs();
+      final dy = (end.dy - start.dy).abs();
+      return dx > dy ? corner1 : corner2;
     }
-    final corner2 = Offset(start.dx, end.dy);
-    if (!_segmentHitsAny(start, corner2, obstacles) &&
-        !_segmentHitsAny(corner2, end, obstacles)) {
-      return corner2;
-    }
+    if (c1Clear) return corner1;
+    if (c2Clear) return corner2;
     return null;
   }
 
@@ -511,7 +624,7 @@ class OrthogonalRouter {
     final pathPoints = path.reversed.map((i) => points[i]).toList();
 
     // Expand: insert L-corners for any non-axis-aligned hops
-    final expanded = _ensureAxisAligned(pathPoints);
+    final expanded = _ensureAxisAligned(pathPoints, inflatedObstacles);
 
     if (expanded.length <= 2) return const [];
     final waypoints = expanded.sublist(1, expanded.length - 1);

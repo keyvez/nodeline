@@ -493,7 +493,6 @@ class FlDrawEditorRenderBox extends RenderBox
       } else if (obj is ArrowObject) {
         final paint = obj.isSelected ? selectedArrowPaint : objectPaint;
         final pathType = obj.pathType;
-
         // Resolve attached object rects
         Rect? startObjRect;
         Rect? endObjRect;
@@ -536,13 +535,19 @@ class FlDrawEditorRenderBox extends RenderBox
 
         // For orthogonal arrows, dynamically recompute waypoints for routing
         if (pathType == LinkPathType.orthogonal) {
+          // Collect obstacles, excluding source/target objects — the router
+          // handles them separately via startObjectRect/endObjectRect
+          final startAttachId = obj.startAttachment?.objectId;
+          final endAttachId = obj.endAttachment?.objectId;
           final obstacles = <Rect>[];
           for (final o in canvasState.drawingObjects.values) {
             if (o.id == obj.id) continue;
+            if (o.id == startAttachId || o.id == endAttachId) continue;
             if (o is ArrowObject || o is LineObject || o is PencilStrokeObject) continue;
             obstacles.add(o.rect);
           }
           for (final node in canvasState.nodes.values) {
+            if (node.id == startAttachId || node.id == endAttachId) continue;
             final bounds = getNodeBoundsInWorld(node);
             if (bounds != null) obstacles.add(bounds);
           }

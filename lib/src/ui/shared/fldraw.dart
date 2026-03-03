@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:fldraw/fldraw.dart';
 import 'package:fldraw/src/core/controller/fldraw_controller.dart';
+import 'package:flutter/material.dart' as material;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -97,8 +98,10 @@ class _FlDrawState extends State<FlDraw> {
         BlocProvider.value(value: _toolBloc),
       ],
       child: ShadcnApp(
-        theme: ThemeData(colorScheme: ColorSchemes.darkDefaultColor, radius: 0.7),
-        home: DrawerOverlay(child: widget.child),
+        theme: ThemeData(colorScheme: ColorSchemes.darkZinc, radius: 0.7),
+        home: material.Scaffold(
+          body: DrawerOverlay(child: widget.child),
+        ),
       ),
     );
   }

@@ -229,6 +229,256 @@ void main() {
     });
   });
 
+  group('diagonal overlap routing', () {
+    test('arrow from bottom-left of top box to left of bottom-right box avoids target', () {
+      // Two boxes close together diagonally — bottom box overlaps with bottom-left region of top box
+      const topRect = Rect.fromLTWH(100, 50, 180, 150);
+      const bottomRect = Rect.fromLTWH(150, 180, 160, 130);
+
+      // Arrow starts at bottom-left of top box, ends at left-center of bottom box
+      final start = Offset(topRect.left, topRect.bottom); // (100, 200)
+      final end = Offset(bottomRect.left, bottomRect.center.dy); // (150, 245)
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [topRect, bottomRect],
+        startObjectRect: topRect,
+        endObjectRect: bottomRect,
+      );
+      final fullPath = [start, ...waypoints, end];
+      _verifyAxisAligned(fullPath);
+
+      // No segment should pass through the bottom box (target)
+      for (int i = 0; i < fullPath.length - 1; i++) {
+        expect(
+          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
+          isFalse,
+          reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box',
+        );
+      }
+    });
+
+    test('arrow avoids target when boxes nearly touch diagonally', () {
+      // Boxes nearly touching: top box bottom-left overlaps with bottom box top-left
+      const topRect = Rect.fromLTWH(200, 100, 150, 130);
+      const bottomRect = Rect.fromLTWH(230, 215, 150, 120);
+
+      // Arrow from bottom-left corner of top to left side of bottom
+      final start = Offset(topRect.left, topRect.bottom - 10); // (200, 220)
+      final end = Offset(bottomRect.left, bottomRect.center.dy); // (230, 275)
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [topRect, bottomRect],
+        startObjectRect: topRect,
+        endObjectRect: bottomRect,
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Path: $fullPath');
+      _verifyAxisAligned(fullPath);
+
+      // No segment should cross through either box
+      for (int i = 0; i < fullPath.length - 1; i++) {
+        expect(
+          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
+          isFalse,
+          reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box',
+        );
+      }
+    });
+
+    test('arrow avoids target when start is inside target inflated zone', () {
+      // Scenario matching the screenshot: boxes overlap vertically, bottom box shifted right
+      const topRect = Rect.fromLTWH(300, 100, 170, 150);
+      const bottomRect = Rect.fromLTWH(340, 230, 160, 120);
+
+      // Arrow start: bottom-left of source box
+      // Arrow end: left-center of target box
+      final start = Offset(topRect.left, topRect.bottom);
+      final end = Offset(bottomRect.left, bottomRect.center.dy);
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [topRect, bottomRect],
+        startObjectRect: topRect,
+        endObjectRect: bottomRect,
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Path: $fullPath');
+      _verifyAxisAligned(fullPath);
+
+      // The route should go LEFT from the source, then DOWN, then RIGHT to the target
+      // NOT straight down through the target box
+      for (int i = 0; i < fullPath.length - 1; i++) {
+        expect(
+          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
+          isFalse,
+          reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box',
+        );
+      }
+    });
+
+    test('close diagonal boxes: route should not cut through target corner', () {
+      // Approximate screen coordinates from the screenshot
+      // Top box and bottom box are close together, bottom-right offset
+      const topRect = Rect.fromLTWH(320, 120, 160, 140);
+      const bottomRect = Rect.fromLTWH(360, 250, 160, 110);
+
+      // Start at bottom-left of top, end at left-center of bottom
+      final start = Offset(topRect.left, topRect.bottom - 5);
+      final end = Offset(bottomRect.left, bottomRect.center.dy);
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [topRect, bottomRect],
+        startObjectRect: topRect,
+        endObjectRect: bottomRect,
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Close diagonal path: $fullPath');
+      _verifyAxisAligned(fullPath);
+
+      for (int i = 0; i < fullPath.length - 1; i++) {
+        expect(
+          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
+          isFalse,
+          reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box',
+        );
+        expect(
+          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], topRect),
+          isFalse,
+          reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses top box',
+        );
+      }
+    });
+
+    test('very close boxes: fallback path must also avoid obstacles', () {
+      // Boxes very close — routing may exceed 3x direct distance and trigger fallback
+      const topRect = Rect.fromLTWH(300, 100, 150, 130);
+      const bottomRect = Rect.fromLTWH(330, 220, 150, 110);
+
+      final start = Offset(topRect.left, topRect.bottom);
+      final end = Offset(bottomRect.left, bottomRect.center.dy);
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [topRect, bottomRect],
+        startObjectRect: topRect,
+        endObjectRect: bottomRect,
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Very close boxes path: $fullPath');
+      _verifyAxisAligned(fullPath);
+
+      // Must not cross either box
+      for (int i = 0; i < fullPath.length - 1; i++) {
+        expect(
+          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
+          isFalse,
+          reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box',
+        );
+      }
+    });
+  });
+
+  group('real-world reproduction', () {
+    test('arrow from left-center of top box to left-center of overlapping bottom box', () {
+      // Exact coordinates from saved project
+      const topRect = Rect.fromLTWH(-103.9296875, -276.34765625, 220.7890625, 185.02734375);
+      const bottomRect = Rect.fromLTWH(6.51171875, -143.24609375, 193.4140625, 127.40625);
+
+      // Start on left edge of top box (relativePosition [0.0, 0.536])
+      final start = Offset(
+        topRect.left + topRect.width * 0.0,
+        topRect.top + topRect.height * 0.5361960858825765,
+      );
+      // End on left edge of bottom box (relativePosition [0.002, 0.493])
+      final end = Offset(
+        bottomRect.left + bottomRect.width * 0.0015955083410752514,
+        bottomRect.top + bottomRect.height * 0.49251900907530044,
+      );
+
+      // Obstacles: only other objects (source and target excluded)
+      final obstacles = <Rect>[];
+
+      print('Start: $start');
+      print('End: $end');
+      print('TopRect: $topRect');
+      print('BottomRect: $bottomRect');
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: obstacles,
+        startObjectRect: topRect,
+        endObjectRect: bottomRect,
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Real-world path: $fullPath');
+      _verifyAxisAligned(fullPath);
+
+      // No intermediate segment should pass through either box.
+      // Skip the first segment (start→exit stub enters/exits source box)
+      // and last segment (entry stub→end enters target box).
+      for (int i = 1; i < fullPath.length - 2; i++) {
+        expect(
+          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
+          isFalse,
+          reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box',
+        );
+        expect(
+          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], topRect),
+          isFalse,
+          reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses top box',
+        );
+      }
+    });
+
+    test('same scenario but with both boxes as obstacles (old behavior)', () {
+      // Same rectangles but both in obstacle list (like old code did)
+      const topRect = Rect.fromLTWH(-103.9296875, -276.34765625, 220.7890625, 185.02734375);
+      const bottomRect = Rect.fromLTWH(6.51171875, -143.24609375, 193.4140625, 127.40625);
+
+      final start = Offset(
+        topRect.left,
+        topRect.top + topRect.height * 0.5361960858825765,
+      );
+      final end = Offset(
+        bottomRect.left + bottomRect.width * 0.0015955083410752514,
+        bottomRect.top + bottomRect.height * 0.49251900907530044,
+      );
+
+      // Both boxes as obstacles (old behavior)
+      final obstacles = [topRect, bottomRect];
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: obstacles,
+        startObjectRect: topRect,
+        endObjectRect: bottomRect,
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Old-behavior path: $fullPath');
+      _verifyAxisAligned(fullPath);
+
+      // Check if it crosses the bottom box
+      bool crossesBottom = false;
+      for (int i = 0; i < fullPath.length - 1; i++) {
+        if (_segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect)) {
+          crossesBottom = true;
+          print('  OVERLAP: ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box');
+        }
+      }
+      print('  Crosses bottom box: $crossesBottom');
+    });
+  });
+
   group('edge cases', () {
     test('start equals end returns empty', () {
       final waypoints = OrthogonalRouter.route(

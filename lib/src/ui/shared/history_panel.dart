@@ -45,7 +45,7 @@ class _HistoryPanelState extends State<HistoryPanel> {
     final reversedHistory = _undoHistory.reversed.toList();
 
     return Theme(
-      data: ThemeData(colorScheme: ColorSchemes.darkDefaultColor, radius: 0.7),
+      data: ThemeData(colorScheme: ColorSchemes.darkZinc, radius: 0.7),
       child: Card(
         child: Padding(
           padding: const EdgeInsets.all(8.0),
