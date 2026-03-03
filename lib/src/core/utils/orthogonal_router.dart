@@ -220,8 +220,19 @@ class OrthogonalRouter {
       if (isClear(exit)) return exit;
     }
 
-    // All blocked — return the natural exit anyway
-    return naturalExit;
+    // All padded exits are blocked (objects too close together).
+    // Use a minimal stub (just outside the object edge) in the natural
+    // direction so the line can pass straight through the tight gap.
+    const minStub = 2.0;
+    if (naturalExit == bottom) {
+      return Offset(point.dx, objectRect.bottom + minStub);
+    } else if (naturalExit == top) {
+      return Offset(point.dx, objectRect.top - minStub);
+    } else if (naturalExit == right) {
+      return Offset(objectRect.right + minStub, point.dy);
+    } else {
+      return Offset(objectRect.left - minStub, point.dy);
+    }
   }
 
   /// Inserts corner points between any non-axis-aligned consecutive pairs
