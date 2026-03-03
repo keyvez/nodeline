@@ -37,6 +37,24 @@ class OrthogonalRouter {
     // Wider inflation for candidate waypoints — routes maintain visible gap from objects
     final candidateInflated = relevantObstacles.map((r) => r.inflate(_padding + 5.0)).toList();
 
+    // Build routing obstacle lists that include source/target so the inner
+    // path avoids crossing through them. Use full padding when objects are
+    // far apart, but fall back to raw rects when they overlap (inflated
+    // rects would block all paths between closely-spaced objects).
+    final routingInflated = List<Rect>.from(inflated);
+    final routingCandidateInflated = List<Rect>.from(candidateInflated);
+    final bool objectsClose = startObjectRect != null && endObjectRect != null &&
+        startObjectRect.inflate(_padding).overlaps(endObjectRect.inflate(_padding));
+    final double objPad = objectsClose ? 0.0 : _padding;
+    if (startObjectRect != null) {
+      routingInflated.add(startObjectRect.inflate(objPad));
+      routingCandidateInflated.add(startObjectRect.inflate(objPad + 5.0));
+    }
+    if (endObjectRect != null) {
+      routingInflated.add(endObjectRect.inflate(objPad));
+      routingCandidateInflated.add(endObjectRect.inflate(objPad + 5.0));
+    }
+
     // Build obstacle lists for exit/entry computation that exclude the
     // arrow's own source/target objects — their own inflated rects would
     // block exits when objects are close together.
@@ -64,7 +82,7 @@ class OrthogonalRouter {
     // Try to find a clean path between routeStart and routeEnd
     List<Offset> innerWaypoints;
     // Check if a simple L-path works, and if so, use the correct corner
-    final clearCorner = _findClearLCorner(routeStart, routeEnd, inflated,
+    final clearCorner = _findClearLCorner(routeStart, routeEnd, routingInflated,
         exitDir: startExit != null ? routeStart - start : null,
         entryDir: endEntry != null ? routeEnd - end : null);
     if (clearCorner != null) {
@@ -74,11 +92,11 @@ class OrthogonalRouter {
       } else {
         innerWaypoints = [clearCorner];
       }
-    } else if (inflated.isEmpty) {
+    } else if (routingInflated.isEmpty) {
       innerWaypoints = const [];
     } else {
-      final candidates = _generateCandidates(routeStart, routeEnd, candidateInflated, inflated);
-      innerWaypoints = _findPath(routeStart, routeEnd, candidates, inflated);
+      final candidates = _generateCandidates(routeStart, routeEnd, routingCandidateInflated, routingInflated);
+      innerWaypoints = _findPath(routeStart, routeEnd, candidates, routingInflated);
     }
 
     // Assemble full waypoint list: start + exitStub + inner + entryStub + end
@@ -91,7 +109,7 @@ class OrthogonalRouter {
     fullPath.add(end);
 
     // Ensure every consecutive pair is axis-aligned
-    final aligned = _ensureAxisAligned(fullPath, inflated);
+    final aligned = _ensureAxisAligned(fullPath, routingInflated);
 
     // Build set of protected points (by value) that must not be simplified away
     final protectedPoints = <Offset>{start, end};
@@ -138,12 +156,12 @@ class OrthogonalRouter {
         if (startExit != null) simplePath.add(startExit);
         if (endEntry != null) simplePath.add(endEntry);
         simplePath.add(end);
-        final simpleAligned = _ensureAxisAligned(simplePath, inflated);
+        final simpleAligned = _ensureAxisAligned(simplePath, routingInflated);
 
         // Only use the simple path if it doesn't cross obstacles
         bool simpleClear = true;
         for (int i = 0; i < simpleAligned.length - 1 && simpleClear; i++) {
-          if (_segmentHitsAny(simpleAligned[i], simpleAligned[i + 1], inflated)) {
+          if (_segmentHitsAny(simpleAligned[i], simpleAligned[i + 1], routingInflated)) {
             simpleClear = false;
           }
         }
@@ -254,18 +272,20 @@ class OrthogonalRouter {
       naturalExit = left;
     }
 
-    // Try the natural exit first
-    if (isClear(naturalExit)) return naturalExit;
-
-    // Natural exit is blocked — try target-directed fallback
+    // Score exits by distance to target (lower = closer to target)
     double score(Offset exitPt) {
       if (target == null) return 0;
       return (exitPt.dx - target.dx).abs() + (exitPt.dy - target.dy).abs();
     }
 
+    // Sort all exits by target proximity
     final exits = [left, right, top, bottom];
     exits.sort((a, b) => score(a).compareTo(score(b)));
 
+    // Try the natural exit first
+    if (isClear(naturalExit)) return naturalExit;
+
+    // Natural exit is blocked — try target-directed fallback
     for (final exit in exits) {
       if (isClear(exit)) return exit;
     }
@@ -427,28 +447,27 @@ class OrthogonalRouter {
         !_segmentHitsAny(corner2, end, obstacles);
 
     if (c1Clear && c2Clear) {
-      // Both clear — prefer the one that doesn't create a U-turn with stubs.
-      // A horizontal exit stub (exitDir.dx != 0) going in direction D creates
-      // a U-turn if corner1 (horizontal-first) goes in direction -D on the
-      // same axis. In that case prefer corner2 (vertical-first).
+      // Both clear — prefer the corner that continues the exit stub direction.
+      // A horizontal exit stub should continue horizontally (corner1),
+      // a vertical exit stub should continue vertically (corner2).
+      // Avoid corners that reverse (U-turn) the exit direction.
       if (exitDir != null) {
         final isHorizontalExit = exitDir.dx.abs() > exitDir.dy.abs();
         if (isHorizontalExit) {
-          // Exit goes horizontal. corner1 goes horizontal from start toward
-          // end.dx. If the exit direction and corner1 direction are opposite,
-          // corner1 creates a U-turn.
           final exitDirSign = exitDir.dx.sign;
           final corner1DirSign = (end.dx - start.dx).sign;
-          if (exitDirSign != 0 && corner1DirSign != 0 && exitDirSign != corner1DirSign) {
-            return corner2; // Avoid U-turn
+          if (exitDirSign != 0 && corner1DirSign != 0) {
+            // corner1 continues horizontally: prefer if same direction,
+            // avoid if opposite (U-turn)
+            return exitDirSign == corner1DirSign ? corner1 : corner2;
           }
         } else {
-          // Exit goes vertical. corner2 goes vertical from start toward
-          // end.dy. If opposite, corner2 creates a U-turn.
           final exitDirSign = exitDir.dy.sign;
           final corner2DirSign = (end.dy - start.dy).sign;
-          if (exitDirSign != 0 && corner2DirSign != 0 && exitDirSign != corner2DirSign) {
-            return corner1; // Avoid U-turn
+          if (exitDirSign != 0 && corner2DirSign != 0) {
+            // corner2 continues vertically: prefer if same direction,
+            // avoid if opposite (U-turn)
+            return exitDirSign == corner2DirSign ? corner2 : corner1;
           }
         }
       }

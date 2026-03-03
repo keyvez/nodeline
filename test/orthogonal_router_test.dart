@@ -477,6 +477,64 @@ void main() {
       }
       print('  Crosses bottom box: $crossesBottom');
     });
+
+    test('left-edge exit routes around source box when target is to the right', () {
+      // Source box on the left, target box on the right
+      // Arrow starts on left edge of source (exit goes LEFT)
+      // Arrow ends on left edge of target (entry goes LEFT)
+      // Path must go around the source box, not through it
+      const sourceRect = Rect.fromLTWH(-103.9, -276.3, 220.8, 185.0);
+      const targetRect = Rect.fromLTWH(283.4, -200.9, 193.4, 127.4);
+
+      final start = Offset(sourceRect.left, sourceRect.top + sourceRect.height * 0.536);
+      final end = Offset(targetRect.left + targetRect.width * 0.002, targetRect.top + targetRect.height * 0.493);
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [],
+        startObjectRect: sourceRect,
+        endObjectRect: targetRect,
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Around-source path: $fullPath');
+      _verifyAxisAligned(fullPath);
+
+      // No intermediate segment should cross through the source box
+      for (int i = 1; i < fullPath.length - 2; i++) {
+        expect(
+          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], sourceRect),
+          isFalse,
+          reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses source box',
+        );
+      }
+    });
+
+    test('boxes far apart: left-edge to left-edge takes simple 2-turn path', () {
+      // Top box center-right, bottom box far to the left and below
+      const topRect = Rect.fromLTWH(-103.9, -276.3, 220.8, 185.0);
+      const bottomRect = Rect.fromLTWH(-296.0, -9.0, 193.4, 127.4);
+
+      // Start on left edge of top box
+      final start = Offset(topRect.left, topRect.top + topRect.height * 0.536);
+      // End on left edge of bottom box
+      final end = Offset(bottomRect.left + bottomRect.width * 0.002, bottomRect.top + bottomRect.height * 0.493);
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [],
+        startObjectRect: topRect,
+        endObjectRect: bottomRect,
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Far apart path: $fullPath');
+      _verifyAxisAligned(fullPath);
+
+      // Should be a simple path — at most 3 waypoints (exit stub, corner, entry stub)
+      expect(waypoints.length, lessThanOrEqualTo(3),
+          reason: 'Path should be simple (2 turns max), got ${waypoints.length} waypoints');
+    });
   });
 
   group('edge cases', () {

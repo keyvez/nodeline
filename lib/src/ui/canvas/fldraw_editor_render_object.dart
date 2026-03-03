@@ -573,7 +573,13 @@ class FlDrawEditorRenderBox extends RenderBox
         }
 
         if (pathType == LinkPathType.orthogonal) {
-          _paintOrthogonalPath(canvas, start, end, paint, waypoints: waypoints);
+          // Stop the drawn path slightly before the end object edge so the
+          // arrow doesn't cross into the object. The arrowhead tip becomes
+          // the visual endpoint.
+          final drawEnd = (waypoints != null && waypoints.isNotEmpty && endObjRect != null)
+              ? _shortenEndpoint(waypoints.last, end, 4.0 / zoom)
+              : end;
+          _paintOrthogonalPath(canvas, start, drawEnd, paint, waypoints: waypoints);
         } else {
           final path = Path()
             ..moveTo(start.dx, start.dy)
@@ -588,6 +594,9 @@ class FlDrawEditorRenderBox extends RenderBox
 
         if (pathType == LinkPathType.orthogonal) {
           // Determine arrow head direction from the last segment
+          final arrowEnd = (waypoints != null && waypoints.isNotEmpty && endObjRect != null)
+              ? _shortenEndpoint(waypoints.last, end, 4.0 / zoom)
+              : end;
           if (waypoints != null && waypoints.isNotEmpty) {
             controlPoint = waypoints.last;
           } else {
@@ -599,8 +608,10 @@ class FlDrawEditorRenderBox extends RenderBox
               controlPoint = Offset(start.dx, end.dy);
             }
           }
+          _paintArrowHead(canvas, controlPoint, arrowEnd, paint);
+        } else {
+          _paintArrowHead(canvas, controlPoint, end, paint);
         }
-        _paintArrowHead(canvas, controlPoint, end, paint);
 
         if (obj.isSelected) {
           final double visibleHandleRadius = 4.0 / zoom;
@@ -843,6 +854,15 @@ class FlDrawEditorRenderBox extends RenderBox
       object.cachedPath = path;
       canvas.drawPath(path, paint..style = PaintingStyle.fill);
     }
+  }
+
+  /// Shortens the endpoint by [amount] along the direction from [prev] to [end].
+  static Offset _shortenEndpoint(Offset prev, Offset end, double amount) {
+    final dir = end - prev;
+    final dist = dir.distance;
+    if (dist < amount * 2) return end; // Too short to shorten
+    final unit = dir / dist;
+    return end - unit * amount;
   }
 
   void _paintArrowHead(
