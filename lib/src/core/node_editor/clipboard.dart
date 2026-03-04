@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'package:fldraw/src/core/utils/renderbox.dart';
-import 'package:fldraw/src/core/utils/snackbar.dart';
-import 'package:fldraw/src/models/entities.dart';
+import 'package:flow_draw/src/core/utils/renderbox.dart';
+import 'package:flow_draw/src/core/utils/snackbar.dart';
+import 'package:flow_draw/src/models/entities.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 

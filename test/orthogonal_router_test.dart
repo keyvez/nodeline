@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fldraw/src/core/utils/orthogonal_router.dart';
+import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
 
 void main() {
   group('OrthogonalRouter.route', () {
@@ -587,6 +587,98 @@ void main() {
           reason: 'Path too complex for overlapping boxes: ${waypoints.length} waypoints');
     });
 
+  group('clearance from connected objects', () {
+    test('path maintains minimum distance from source and target objects', () {
+      // Simple horizontal connection: source on left, target on right
+      const sourceRect = Rect.fromLTWH(0, 0, 150, 100);
+      const targetRect = Rect.fromLTWH(400, 50, 150, 100);
+
+      // Arrow from right-center of source to left-center of target
+      final start = Offset(sourceRect.right, sourceRect.center.dy);
+      final end = Offset(targetRect.left, targetRect.center.dy);
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [],
+        startObjectRect: sourceRect,
+        endObjectRect: targetRect,
+        devicePixelRatio: 2.0, // iPad-like DPR
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Clearance test path (dpr=2): $fullPath');
+      _verifyAxisAligned(fullPath);
+
+      // Check that intermediate waypoints maintain minimum distance from
+      // source and target objects
+      const minClearance = 15.0; // exit stubs are close to edge; routing provides visual gap
+      for (int i = 1; i < fullPath.length - 1; i++) {
+        final p = fullPath[i];
+        final distToSource = _minDistToRect(p, sourceRect);
+        final distToTarget = _minDistToRect(p, targetRect);
+        print('  waypoint $p: distSource=$distToSource, distTarget=$distToTarget');
+        expect(distToSource, greaterThanOrEqualTo(minClearance),
+            reason: 'Waypoint $p is too close to source ($distToSource < $minClearance)');
+        expect(distToTarget, greaterThanOrEqualTo(minClearance),
+            reason: 'Waypoint $p is too close to target ($distToTarget < $minClearance)');
+      }
+    });
+
+    test('path maintains clearance with DPR=1 (Mac)', () {
+      const sourceRect = Rect.fromLTWH(0, 0, 150, 100);
+      const targetRect = Rect.fromLTWH(400, 50, 150, 100);
+
+      final start = Offset(sourceRect.right, sourceRect.center.dy);
+      final end = Offset(targetRect.left, targetRect.center.dy);
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [],
+        startObjectRect: sourceRect,
+        endObjectRect: targetRect,
+        devicePixelRatio: 1.0,
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Clearance test path (dpr=1): $fullPath');
+      _verifyAxisAligned(fullPath);
+    });
+
+    test('right-to-left connection routes around both objects', () {
+      // Source on right, target below-left — forces path to go around
+      const sourceRect = Rect.fromLTWH(200, 0, 200, 150);
+      const targetRect = Rect.fromLTWH(0, 200, 100, 80);
+
+      // Arrow from bottom of source to top of target
+      final start = Offset(sourceRect.center.dx, sourceRect.bottom);
+      final end = Offset(targetRect.center.dx, targetRect.top);
+
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [],
+        startObjectRect: sourceRect,
+        endObjectRect: targetRect,
+        devicePixelRatio: 2.0,
+      );
+      final fullPath = [start, ...waypoints, end];
+      print('Around both objects path: $fullPath');
+      _verifyAxisAligned(fullPath);
+
+      // Intermediate waypoints (excluding exit/entry stubs which are at
+      // object edges) should be outside source/target objects
+      for (int i = 2; i < fullPath.length - 2; i++) {
+        final p = fullPath[i];
+        final distToSource = _minDistToRect(p, sourceRect);
+        final distToTarget = _minDistToRect(p, targetRect);
+        expect(distToSource, greaterThan(0),
+            reason: 'Waypoint $p is inside source rect');
+        expect(distToTarget, greaterThan(0),
+            reason: 'Waypoint $p is inside target rect');
+      }
+    });
+  });
+
   group('edge cases', () {
     test('start equals end returns empty', () {
       final waypoints = OrthogonalRouter.route(
@@ -676,6 +768,21 @@ void _verifyNoOverlappingSegments(List<Offset> path) {
       }
     }
   }
+}
+
+/// Minimum distance from a point to any edge of a rectangle.
+double _minDistToRect(Offset p, Rect rect) {
+  // If point is inside the rect, distance is 0
+  if (p.dx >= rect.left && p.dx <= rect.right &&
+      p.dy >= rect.top && p.dy <= rect.bottom) {
+    return 0;
+  }
+  // Clamp point to rect bounds and compute distance
+  final clampedX = p.dx.clamp(rect.left, rect.right);
+  final clampedY = p.dy.clamp(rect.top, rect.bottom);
+  final dx = p.dx - clampedX;
+  final dy = p.dy - clampedY;
+  return (dx.abs() > dy.abs()) ? dx.abs() : dy.abs();
 }
 
 /// Simplified segment-rect intersection for test verification.

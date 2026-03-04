@@ -1,9 +1,9 @@
-name: fldraw
+name: flow_draw
 description: "The open-source tldraw alternative for building infinite canvas apps in Flutter."
 version: 0.1.0
-homepage: "https://github.com/fldraw/fldraw"
-repository: "https://github.com/fldraw/fldraw"
-issue_tracker: "https://github.com/fldraw/fldraw/issues"
+homepage: "https://github.com/flow-draw/flow_draw"
+repository: "https://github.com/flow-draw/flow_draw"
+issue_tracker: "https://github.com/flow-draw/flow_draw/issues"
 
 environment:
   sdk: ^3.8.0

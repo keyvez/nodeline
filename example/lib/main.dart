@@ -4,12 +4,12 @@ import 'dart:io';
 
 import 'package:example/gen/assets.gen.dart';
 import 'package:flan_flutter/flan_flutter.dart';
-import 'package:fldraw/fldraw.dart';
+import 'package:flow_draw/flow_draw.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-const _storageKey = 'fldraw_project';
+const _storageKey = 'flow_draw_project';
 
 void main() {
   FlanBinding.ensureInitialized();
@@ -22,10 +22,10 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Flow',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: Colors.black,
       ),
       home: const HomePage(),
     );
@@ -41,7 +41,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late List<String> svgs;
-  FlDrawController controller = FlDrawController();
+  FlowDrawController controller = FlowDrawController();
   Timer? _autoSaveTimer;
 
   @override
@@ -82,7 +82,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _loadDefaultProject() {
-    final fldrawCode = """
+    final flowDrawCode = """
    // Vertical workflow with grouped steps
 
 start [shape: node, heading: "Start", text: "Begin the process"]
@@ -119,8 +119,8 @@ start -> outputPhase
   """;
 
     try {
-      final parser = FlDrawParser();
-      final jsonString = parser.parse(fldrawCode);
+      final parser = FlowDrawParser();
+      final jsonString = parser.parse(flowDrawCode);
       final projectData = jsonDecode(jsonString);
       controller.loadProject(projectData);
     } on FormatException catch (e) {
@@ -135,7 +135,7 @@ start -> outputPhase
       // Write debug dump to Downloads folder
       try {
         final home = Platform.environment['HOME'] ?? '';
-        final file = File('$home/Downloads/fldraw_debug.json');
+        final file = File('$home/Downloads/flow_draw_debug.json');
         file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(data));
       } catch (_) {}
       final prefs = await SharedPreferences.getInstance();
@@ -185,7 +185,7 @@ start -> outputPhase
         },
         child: Focus(
           autofocus: true,
-          child: FlDraw(
+          child: FlowDraw(
         controller: controller,
         onControllerCreated: (controller) {
           _loadSavedProject();
@@ -195,12 +195,12 @@ start -> outputPhase
         },
         child: Stack(
           children: [
-            FlDrawCanvas(),
+            FlowDrawCanvas(),
             Align(
               alignment: Alignment.topCenter,
               child: Padding(
                 padding: const EdgeInsets.only(top: 32.0),
-                child: FlToolbar(svgs: svgs),
+                child: FlowDrawToolbar(svgs: svgs),
               ),
             ),
           ],

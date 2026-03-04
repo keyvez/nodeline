@@ -1,4 +1,4 @@
-import 'package:fldraw/src/constants.dart';
+import 'package:flow_draw/src/constants.dart';
 import 'package:flutter/material.dart';
 
 enum SnackbarType { success, error, warning, info }

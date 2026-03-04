@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:collection/collection.dart';
-import 'package:fldraw/fldraw.dart';
-import 'package:fldraw/src/models/drawing_entities.dart';
+import 'package:flow_draw/flow_draw.dart';
+import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
@@ -30,7 +30,7 @@ class _ParsedRelationship {
   _ParsedRelationship(this.sourceId, this.targetId, this.type);
 }
 
-class FlDrawParser {
+class FlowDrawParser {
   // Layout constants
   final double hSpacing = 80.0;
   final double vSpacing = 100.0;

@@ -1,20 +1,20 @@
 import 'dart:async';
 
-import 'package:fldraw/fldraw.dart';
-import 'package:fldraw/src/core/controller/fldraw_controller.dart';
+import 'package:flow_draw/flow_draw.dart';
+import 'package:flow_draw/src/core/controller/flow_draw_controller.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
-class FlDraw extends StatefulWidget {
+class FlowDraw extends StatefulWidget {
   final Widget child;
-  final FlDrawController? controller;
-  final Function(FlDrawController)? onControllerCreated;
+  final FlowDrawController? controller;
+  final Function(FlowDrawController)? onControllerCreated;
   final void Function(CanvasState)? onCanvasStateChanged;
   final void Function(SelectionState)? onSelectionStateChanged;
   final void Function(ToolState)? onToolStateChanged;
 
-  const FlDraw({
+  const FlowDraw({
     super.key,
     required this.child,
     this.controller,
@@ -24,11 +24,11 @@ class FlDraw extends StatefulWidget {
   });
 
   @override
-  State<FlDraw> createState() => _FlDrawState();
+  State<FlowDraw> createState() => _FlowDrawState();
 }
 
-class _FlDrawState extends State<FlDraw> {
-  late final FlDrawController _controller;
+class _FlowDrawState extends State<FlowDraw> {
+  late final FlowDrawController _controller;
   bool _didCreateController = false;
 
   late final CanvasBloc _canvasBloc;
@@ -47,7 +47,7 @@ class _FlDrawState extends State<FlDraw> {
     _toolBloc = ToolBloc();
 
     if (widget.controller == null) {
-      _controller = FlDrawController();
+      _controller = FlowDrawController();
       _didCreateController = true;
     } else {
       _controller = widget.controller!;

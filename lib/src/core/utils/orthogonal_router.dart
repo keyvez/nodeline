@@ -4,7 +4,8 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 class OrthogonalRouter {
-  static const double _padding = 25.0;
+  static const double _basePadding = 40.0;
+  static double _padding = _basePadding;
   static const double _searchInflation = 300.0;
   static const int _maxObstacles = 20;
 
@@ -13,13 +14,19 @@ class OrthogonalRouter {
   /// Returns a list of intermediate waypoints (excluding start and end).
   /// Every segment between consecutive points (including start/end) is
   /// guaranteed to be axis-aligned (horizontal or vertical).
+  ///
+  /// [devicePixelRatio] scales the padding proportionally to display density.
   static List<Offset> route({
     required Offset start,
     required Offset end,
     required List<Rect> obstacles,
     Rect? startObjectRect,
     Rect? endObjectRect,
+    double devicePixelRatio = 1.0,
+    double zoom = 1.0,
   }) {
+    // Scale padding inversely with zoom to maintain a consistent visual gap.
+    _padding = _basePadding / zoom.clamp(0.1, 10.0);
     // Filter and inflate obstacles first (needed for obstacle-aware exit stubs)
     final searchArea = Rect.fromPoints(start, end).inflate(_searchInflation);
     var relevantObstacles = obstacles.where((r) => searchArea.overlaps(r)).toList();
@@ -37,15 +44,37 @@ class OrthogonalRouter {
     // Wider inflation for candidate waypoints — routes maintain visible gap from objects
     final candidateInflated = relevantObstacles.map((r) => r.inflate(_padding + 5.0)).toList();
 
-    // Add the source object as a routing obstacle so the inner path avoids
-    // cutting through it after the exit stub. Use the raw (uninflated) rect
-    // — the exit stub already provides visual clearance beyond the edge.
-    // Candidate generation uses a small inflation for waypoint spacing.
+    // Source/target objects are added to routing obstacles so the inner
+    // path avoids them. The exit stub is inside the inflated zone on
+    // the non-exit axis, so the L-corner check and A* will use a
+    // separate list (innerInflated) that excludes source/target.
+    // Source/target collision is enforced post-hoc by _ensureAxisAligned.
     final routingInflated = List<Rect>.from(inflated);
     final routingCandidateInflated = List<Rect>.from(candidateInflated);
+    // Target gets extra padding so the route (and large arrowhead) maintains
+    // clear visual separation from the target object.
+    final targetPadding = _padding * 1.46;
     if (startObjectRect != null) {
-      routingInflated.add(startObjectRect);
-      routingCandidateInflated.add(startObjectRect.inflate(_padding));
+      routingInflated.add(startObjectRect.inflate(_padding));
+      routingCandidateInflated.add(startObjectRect.inflate(_padding + 5));
+    }
+    if (endObjectRect != null) {
+      routingInflated.add(endObjectRect.inflate(targetPadding));
+      routingCandidateInflated.add(endObjectRect.inflate(targetPadding + 5));
+    }
+    // Inner routing obstacles use source/target with small inflation (2px).
+    // This prevents the path from crossing through the actual objects while
+    // keeping the exit stubs viable (they're at the object edge on the
+    // non-exit axis, which is inside ANY larger inflation). The candidate
+    // waypoints in routingCandidateInflated are generated with _padding + 5
+    // clearance, ensuring the path maintains visual distance from connected
+    // objects even though the collision zone is small.
+    final innerInflated = List<Rect>.from(inflated);
+    if (startObjectRect != null) {
+      innerInflated.add(startObjectRect.inflate(2));
+    }
+    if (endObjectRect != null) {
+      innerInflated.add(endObjectRect.inflate(2));
     }
 
     // Build obstacle lists for exit/entry computation that exclude the
@@ -59,37 +88,41 @@ class OrthogonalRouter {
       ];
     }
 
-    // Compute exit/entry stubs if attached to objects
+    // Compute exit/entry stubs if attached to objects.
+    // Target entry stub uses a larger distance to match the larger target inflation.
     final startExit = startObjectRect != null
         ? _computeExitPoint(start, startObjectRect,
             _inflatedExcluding(startObjectRect), end)
         : null;
     final endEntry = endObjectRect != null
         ? _computeExitPoint(end, endObjectRect,
-            _inflatedExcluding(endObjectRect), start)
+            _inflatedExcluding(endObjectRect), start,
+            targetPadding * 0.5 + 5)
         : null;
 
     final routeStart = startExit ?? start;
     final routeEnd = endEntry ?? end;
 
-    // Try to find a clean path between routeStart and routeEnd
+    // Try to find a clean path between routeStart and routeEnd.
+    // Use innerInflated (excludes source/target) for L-corner/A* collision
+    // since exit/entry stubs are inside the source/target inflated zones.
+    // Candidate waypoints use routingCandidateInflated (includes source/target)
+    // so they're placed with clearance from connected objects.
     List<Offset> innerWaypoints;
-    // Check if a simple L-path works, and if so, use the correct corner
-    final clearCorner = _findClearLCorner(routeStart, routeEnd, routingInflated,
+    final clearCorner = _findClearLCorner(routeStart, routeEnd, innerInflated,
         exitDir: startExit != null ? routeStart - start : null,
         entryDir: endEntry != null ? routeEnd - end : null);
     if (clearCorner != null) {
-      // clearCorner == routeStart is sentinel for "direct axis-aligned segment is clear"
       if (clearCorner == routeStart) {
         innerWaypoints = const [];
       } else {
         innerWaypoints = [clearCorner];
       }
-    } else if (routingInflated.isEmpty) {
+    } else if (innerInflated.isEmpty && routingCandidateInflated.isEmpty) {
       innerWaypoints = const [];
     } else {
-      final candidates = _generateCandidates(routeStart, routeEnd, routingCandidateInflated, routingInflated);
-      innerWaypoints = _findPath(routeStart, routeEnd, candidates, routingInflated);
+      final candidates = _generateCandidates(routeStart, routeEnd, routingCandidateInflated, innerInflated);
+      innerWaypoints = _findPath(routeStart, routeEnd, candidates, innerInflated);
     }
 
     // Assemble full waypoint list: start + exitStub + inner + entryStub + end
@@ -234,8 +267,9 @@ class OrthogonalRouter {
   /// Determines exit direction from which edge the point is on, with fallback
   /// to target-directed exits if the natural edge exit is blocked.
   static Offset _computeExitPoint(Offset point, Rect objectRect,
-      [List<Rect> inflatedObstacles = const [], Offset? target]) {
-    final exitDist = _padding + 5.0;
+      [List<Rect> inflatedObstacles = const [], Offset? target,
+      double? overrideExitDist]) {
+    final exitDist = overrideExitDist ?? (_padding * 0.4 + 5);
 
     // Generate all 4 possible exit points (projecting outward from each edge)
     final left = Offset(objectRect.left - exitDist, point.dy);

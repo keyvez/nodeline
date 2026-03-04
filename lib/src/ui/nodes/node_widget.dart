@@ -1,7 +1,7 @@
-import 'package:fldraw/fldraw.dart';
-import 'package:fldraw/src/core/utils/platform_info/platform_info.dart';
-import 'package:fldraw/src/core/utils/renderbox.dart';
-import 'package:fldraw/src/ui/shared/improved_listener.dart';
+import 'package:flow_draw/flow_draw.dart';
+import 'package:flow_draw/src/core/utils/platform_info/platform_info.dart';
+import 'package:flow_draw/src/core/utils/renderbox.dart';
+import 'package:flow_draw/src/ui/shared/improved_listener.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -44,9 +44,11 @@ class _DefaultNodeWidgetState extends State<DefaultNodeWidget> {
   }
 
   void _updateBuiltStyles() {
-    widget.node.builtStyle = widget.node.styleBuilder(widget.node.state);
+    final dpr = MediaQuery.of(context).devicePixelRatio;
+    widget.node.builtStyle = widget.node.styleBuilder(widget.node.state, devicePixelRatio: dpr);
     widget.node.builtHeaderStyle = widget.node.headerStyleBuilder(
       widget.node.state,
+      devicePixelRatio: dpr,
     );
     widget.node.forceRecompute = false;
   }

@@ -1,28 +1,28 @@
 import 'dart:async';
 
-import 'package:fldraw/fldraw.dart';
+import 'package:flow_draw/flow_draw.dart';
 import 'package:flutter/widgets.dart';
 
-import 'fldraw_controller_interface.dart';
+import 'flow_draw_controller_interface.dart';
 
-/// A controller to programmatically interact with the fldraw canvas.
+/// A controller to programmatically interact with the flow_draw canvas.
 ///
 /// This controller provides a clean API to access functionalities like changing tools,
 /// performing undo/redo, adding objects, and listening to state changes from
-/// outside the main `FlDraw` widget.
+/// outside the main `FlowDraw` widget.
 ///
 /// ## Usage
 ///
 /// 1. Create an instance of the controller.
 /// ```dart
-/// final controller = FlDrawController();
+/// final controller = FlowDrawController();
 /// ```
 ///
-/// 2. Pass it to the `FlDraw` widget.
+/// 2. Pass it to the `FlowDraw` widget.
 /// ```dart
-/// FlDraw(
+/// FlowDraw(
 ///   controller: controller,
-///   child: FlDrawCanvas(),
+///   child: FlowDrawCanvas(),
 /// );
 /// ```
 ///
@@ -35,14 +35,14 @@ import 'fldraw_controller_interface.dart';
 ///   print('Canvas updated! It now has ${state.nodes.length} nodes.');
 /// });
 /// ```
-class FlDrawController implements FlDrawControllerInterface {
+class FlowDrawController implements FlowDrawControllerInterface {
   CanvasBloc? _canvasBloc;
   SelectionBloc? _selectionBloc;
   ToolBloc? _toolBloc;
 
   bool _isInitialized = false;
 
-  /// Initializes the controller with the BLoCs from the `FlDraw` widget.
+  /// Initializes the controller with the BLoCs from the `FlowDraw` widget.
   /// This is intended for internal use by the library.
   void init(
     CanvasBloc canvasBloc,
@@ -55,12 +55,12 @@ class FlDrawController implements FlDrawControllerInterface {
     _isInitialized = true;
   }
 
-  /// Throws an error if the controller has not been attached to an [FlDraw] widget.
+  /// Throws an error if the controller has not been attached to an [FlowDraw] widget.
   void _assertIsInitialized() {
     assert(
       _isInitialized,
-      'FlDrawController is not attached to an FlDraw widget. '
-      'Please pass this controller to the `controller` property of an FlDraw widget.',
+      'FlowDrawController is not attached to an FlowDraw widget. '
+      'Please pass this controller to the `controller` property of an FlowDraw widget.',
     );
   }
 
@@ -307,6 +307,26 @@ class FlDrawController implements FlDrawControllerInterface {
     _canvasBloc!.add(ProjectSaved(onSave: onSave));
   }
 
+  // --- Mermaid Methods ---
+
+  /// Exports the current canvas (or selected objects) as a Mermaid flowchart string.
+  @override
+  String exportMermaid({Set<String>? selectedIds}) {
+    _assertIsInitialized();
+    return MermaidExporter.export(
+      canvasState.drawingObjects,
+      selectedIds: selectedIds,
+    );
+  }
+
+  /// Imports a Mermaid flowchart string, replacing the current canvas.
+  @override
+  void importMermaid(String mermaid) {
+    _assertIsInitialized();
+    final projectData = MermaidImporter.import(mermaid);
+    _canvasBloc!.add(ProjectLoaded(projectData));
+  }
+
   // --- View Settings ---
 
   /// Toggles grid visibility on/off.
@@ -318,7 +338,7 @@ class FlDrawController implements FlDrawControllerInterface {
 
   /// Disposes of the controller's resources.
   /// Should be called when the controller is no longer needed.
-  /// This is handled automatically by the `FlDraw` widget.
+  /// This is handled automatically by the `FlowDraw` widget.
   @override
   void dispose() {
     _canvasBloc = null;

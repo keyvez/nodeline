@@ -1,4 +1,4 @@
-import 'package:fldraw/fldraw.dart';
+import 'package:flow_draw/flow_draw.dart';
 import 'package:flutter/material.dart';
 
 typedef FlNodeHeaderBuilder =

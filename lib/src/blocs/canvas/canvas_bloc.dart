@@ -1,11 +1,12 @@
 import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
-import 'package:fldraw/src/core/node_editor/clipboard.dart';
-import 'package:fldraw/src/core/utils/orthogonal_router.dart';
-import 'package:fldraw/src/core/utils/snackbar.dart';
-import 'package:fldraw/src/models/drawing_entities.dart';
-import 'package:fldraw/src/models/entities.dart';
+import 'package:flow_draw/src/core/node_editor/clipboard.dart';
+import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
+import 'package:flow_draw/src/core/utils/snackbar.dart';
+import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:flow_draw/src/models/entities.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
 import 'package:uuid/uuid.dart';
 
@@ -14,6 +15,10 @@ part 'canvas_state.dart';
 
 class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
   static const int _maxHistoryStack = 100;
+  /// Snapshot of the state before an ongoing non-undoable operation
+  /// (drag, resize, rotation). Captured on the first non-undoable event
+  /// and consumed by the corresponding "ended" event.
+  CanvasState? _preOperationSnapshot;
 
   CanvasBloc() : super(const CanvasState()) {
     on<CanvasEvent>((event, emit) async {
@@ -53,8 +58,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
   ) {
     if (event.isUndoable) {
       final historicState = CanvasState.historic(
-        nodes: state.nodes,
-        drawingObjects: state.drawingObjects,
+        nodes: Map<String, NodeInstance>.from(state.nodes),
+        drawingObjects: Map<String, DrawingObject>.from(state.drawingObjects),
         viewportOffset: state.viewportOffset,
         viewportZoom: state.viewportZoom,
       );
@@ -67,8 +72,14 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       // Emit the new state with an updated undo stack and cleared redo stack
       emit(newState.copyWith(undoStack: newUndoStack, redoStack: []));
     } else {
-      // If the event is not undoable (like a drag update), just emit the new state
-      // but preserve the existing history.
+      // If the event is not undoable (like a drag update), capture a snapshot
+      // of the pre-operation state so the "ended" event can push it to undo.
+      _preOperationSnapshot ??= CanvasState.historic(
+        nodes: Map<String, NodeInstance>.from(state.nodes),
+        drawingObjects: Map<String, DrawingObject>.from(state.drawingObjects),
+        viewportOffset: state.viewportOffset,
+        viewportZoom: state.viewportZoom,
+      );
       emit(
         newState.copyWith(
           undoStack: state.undoStack,
@@ -85,12 +96,16 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
   ) {
     if (!event.isUndoable) return;
 
-    final historicState = CanvasState.historic(
-      nodes: currentState.nodes,
-      drawingObjects: currentState.drawingObjects,
+    // Use the pre-operation snapshot if available (captured before the first
+    // non-undoable event like drag/resize/rotation updates). This ensures
+    // undo restores the state BEFORE the operation, not after.
+    final historicState = _preOperationSnapshot ?? CanvasState.historic(
+      nodes: Map<String, NodeInstance>.from(currentState.nodes),
+      drawingObjects: Map<String, DrawingObject>.from(currentState.drawingObjects),
       viewportOffset: currentState.viewportOffset,
       viewportZoom: currentState.viewportZoom,
     );
+    _preOperationSnapshot = null;
 
     final newUndoStack = List<HistoryEntry>.from(currentState.undoStack)
       ..add((historicState, event));
@@ -164,6 +179,16 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     DrawingObjectUpdated event,
     Emitter<CanvasState> emit,
   ) {
+    // Capture pre-operation snapshot before the first update in a
+    // drag/resize/rotation sequence so the "ended" event can undo to it.
+    // Use Map.from to create defensive copies so mutations to the current
+    // state's collections don't corrupt the snapshot.
+    _preOperationSnapshot ??= CanvasState.historic(
+      nodes: Map<String, NodeInstance>.from(state.nodes),
+      drawingObjects: Map<String, DrawingObject>.from(state.drawingObjects),
+      viewportOffset: state.viewportOffset,
+      viewportZoom: state.viewportZoom,
+    );
     final newDrawingObjects = Map<String, DrawingObject>.from(
       state.drawingObjects,
     );
@@ -279,8 +304,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     final (previousState, lastEvent) = newUndoStack.removeLast();
 
     final currentStateForRedo = CanvasState.historic(
-      nodes: state.nodes,
-      drawingObjects: state.drawingObjects,
+      nodes: Map<String, NodeInstance>.from(state.nodes),
+      drawingObjects: Map<String, DrawingObject>.from(state.drawingObjects),
       viewportOffset: state.viewportOffset,
       viewportZoom: state.viewportZoom,
     );
@@ -289,7 +314,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       ..add((currentStateForRedo, lastEvent));
 
     emit(
-      previousState.copyWith(undoStack: newUndoStack, redoStack: newRedoStack),
+      previousState.copyWith(undoStack: newUndoStack, redoStack: newRedoStack, showGrid: state.showGrid),
     );
   }
 
@@ -300,8 +325,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     final (nextState, nextEvent) = newRedoStack.removeLast();
 
     final currentStateForUndo = CanvasState.historic(
-      nodes: state.nodes,
-      drawingObjects: state.drawingObjects,
+      nodes: Map<String, NodeInstance>.from(state.nodes),
+      drawingObjects: Map<String, DrawingObject>.from(state.drawingObjects),
       viewportOffset: state.viewportOffset,
       viewportZoom: state.viewportZoom,
     );
@@ -309,7 +334,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     final newUndoStack = List<HistoryEntry>.from(state.undoStack)
       ..add((currentStateForUndo, nextEvent));
 
-    emit(nextState.copyWith(undoStack: newUndoStack, redoStack: newRedoStack));
+    emit(nextState.copyWith(undoStack: newUndoStack, redoStack: newRedoStack, showGrid: state.showGrid));
   }
 
   void _onNewProjectCreated(
@@ -339,7 +364,6 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           .toList(),
     };
     event.onSave(jsonData);
-    showNodeEditorSnackbar('Project saved.', SnackbarType.success);
   }
 
   void _onProjectLoaded(ProjectLoaded event, Emitter<CanvasState> emit) {
@@ -468,9 +492,9 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     final newObjectRect = newRectTopLeft & sourceRect.size;
 
     if (sourceObject is RectangleObject) {
-      newShape = RectangleObject(id: newId, rect: newObjectRect);
+      newShape = RectangleObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle);
     } else if (sourceObject is CircleObject) {
-      newShape = CircleObject(id: newId, rect: newObjectRect);
+      newShape = CircleObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle);
     } else {
       return;
     }
@@ -494,12 +518,15 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     }
     obstacles.add(newObjectRect);
 
+    final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
     final waypoints = OrthogonalRouter.route(
       start: arrowStart,
       end: arrowEnd,
       obstacles: obstacles,
       startObjectRect: sourceRect,
       endObjectRect: newObjectRect,
+      devicePixelRatio: dpr,
+      zoom: state.viewportZoom,
     );
 
     final newArrow = ArrowObject(

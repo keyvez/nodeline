@@ -7,7 +7,7 @@
 
 ### Added
 
-This is the initial public release of `fldraw`, a powerful and extensible infinite canvas and diagramming library for Flutter.
+This is the initial public release of `flow_draw`, a powerful and extensible infinite canvas and diagramming library for Flutter.
 
 #### 🎨 Core Canvas & Rendering Engine
 
@@ -42,7 +42,7 @@ This is the initial public release of `fldraw`, a powerful and extensible infini
 
 #### 🕹️ User Interface & Experience
 
-- A clean, pre-built `FlToolbar` widget for easy tool selection.
+- A clean, pre-built `FlowDrawToolbar` widget for easy tool selection.
 - Global keyboard shortcuts for quickly switching between tools (`V`, `R`, `O`, `A`, `L`, `D`, `T`, `F`, `C`).
 - A robust Undo/Redo system that correctly handles complex actions like dragging and resizing as single, atomic operations.
 - A reactive `HistoryPanel` widget that displays a human-readable list of all undoable actions and includes Undo/Redo buttons.
@@ -50,7 +50,7 @@ This is the initial public release of `fldraw`, a powerful and extensible infini
 
 #### 🚀 Developer API & Extensibility
 
-- A powerful, high-level `FlDrawController` that provides a clean, programmatic API for interacting with the canvas, managing tools, and manipulating objects from external widgets.
-- A simple, declarative `FlDraw` widget to easily integrate the entire system into any Flutter application.
-- **fldraw-lang**: A custom, text-to-diagram Domain-Specific Language (DSL) with an accompanying `FlDrawParser` to generate entire, fully-connected diagrams from a simple text format.
-- Customizable node appearance through `headerBuilder` and `nodeBuilder` functions passed to the `FlDrawCanvas` widget.
+- A powerful, high-level `FlowDrawController` that provides a clean, programmatic API for interacting with the canvas, managing tools, and manipulating objects from external widgets.
+- A simple, declarative `FlowDraw` widget to easily integrate the entire system into any Flutter application.
+- **flow_draw-lang**: A custom, text-to-diagram Domain-Specific Language (DSL) with an accompanying `FlowDrawParser` to generate entire, fully-connected diagrams from a simple text format.
+- Customizable node appearance through `headerBuilder` and `nodeBuilder` functions passed to the `FlowDrawCanvas` widget.

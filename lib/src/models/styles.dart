@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
-import 'package:fldraw/src/models/entities.dart';
+import 'package:flow_draw/src/models/entities.dart';
 
 enum FlLineDrawMode { solid, dashed, dotted }
+
+enum LineStyle { solid, dashed, dotted, rough }
 
 class FlGridStyle {
   final double gridSpacingX;
@@ -137,19 +139,20 @@ class FlNodeHeaderStyle {
   }
 }
 
-typedef FlNodeHeaderStyleBuilder = FlNodeHeaderStyle Function(NodeState style);
+typedef FlNodeHeaderStyleBuilder = FlNodeHeaderStyle Function(NodeState style, {double devicePixelRatio});
 
-FlNodeHeaderStyle defaultNodeHeaderStyle(NodeState state) {
+FlNodeHeaderStyle defaultNodeHeaderStyle(NodeState state, {double devicePixelRatio = 1.0}) {
+  final r = 7.0 * devicePixelRatio;
   return FlNodeHeaderStyle(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
     textStyle: TextStyle(fontSize: 16),
     decoration: BoxDecoration(
       color: Color(0xFF27272A),
       borderRadius: BorderRadius.only(
-        topLeft: const Radius.circular(7),
-        topRight: const Radius.circular(7),
-        bottomLeft: Radius.circular(state.isCollapsed ? 7 : 0),
-        bottomRight: Radius.circular(state.isCollapsed ? 7 : 0),
+        topLeft: Radius.circular(r),
+        topRight: Radius.circular(r),
+        bottomLeft: Radius.circular(state.isCollapsed ? r : 0),
+        bottomRight: Radius.circular(state.isCollapsed ? r : 0),
       ),
     ),
     icon: state.isCollapsed ? Icons.expand_more : Icons.expand_less,
@@ -166,37 +169,38 @@ class FlNodeStyle {
   }
 }
 
-typedef FlNodeStyleBuilder = FlNodeStyle Function(NodeState style);
+typedef FlNodeStyleBuilder = FlNodeStyle Function(NodeState style, {double devicePixelRatio});
 
-FlNodeStyle defaultNodeStyle(NodeState state) {
-  return const FlNodeStyle(
+FlNodeStyle defaultNodeStyle(NodeState state, {double devicePixelRatio = 1.0}) {
+  final r = 10.0 * devicePixelRatio;
+  return FlNodeStyle(
     decoration: BoxDecoration(
       color: Color(0xFF27272A),
-      borderRadius: BorderRadius.all(Radius.circular(10)),
+      borderRadius: BorderRadius.all(Radius.circular(r)),
     ),
   );
 }
 
-class FlDrawEditorStyle {
+class FlowDrawEditorStyle {
   final BoxDecoration decoration;
   final EdgeInsetsGeometry padding;
   final FlGridStyle gridStyle;
   final FlSelectionAreaStyle selectionAreaStyle;
 
-  const FlDrawEditorStyle({
+  const FlowDrawEditorStyle({
     this.decoration = const BoxDecoration(color: Colors.black12),
     this.padding = const EdgeInsets.all(8.0),
     this.gridStyle = const FlGridStyle(),
     this.selectionAreaStyle = const FlSelectionAreaStyle(),
   });
 
-  FlDrawEditorStyle copyWith({
+  FlowDrawEditorStyle copyWith({
     BoxDecoration? decoration,
     EdgeInsetsGeometry? padding,
     FlGridStyle? gridStyle,
     FlSelectionAreaStyle? selectionAreaStyle,
   }) {
-    return FlDrawEditorStyle(
+    return FlowDrawEditorStyle(
       decoration: decoration ?? this.decoration,
       padding: padding ?? this.padding,
       gridStyle: gridStyle ?? this.gridStyle,

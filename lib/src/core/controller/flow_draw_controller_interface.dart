@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:fldraw/fldraw.dart';
+import 'package:flow_draw/flow_draw.dart';
 import 'package:flutter/widgets.dart';
 
-abstract class FlDrawControllerInterface {
+abstract class FlowDrawControllerInterface {
   Stream<CanvasState> get canvasStateStream;
 
   CanvasState get canvasState;
@@ -79,6 +79,12 @@ abstract class FlDrawControllerInterface {
   // --- View Settings ---
 
   void toggleGrid();
+
+  // --- Mermaid Methods ---
+
+  String exportMermaid({Set<String>? selectedIds});
+
+  void importMermaid(String mermaid);
 
   // --- Lifecycle ---
 

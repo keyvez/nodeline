@@ -1,13 +1,13 @@
-import 'package:fldraw/fldraw.dart';
-import 'package:fldraw/src/ui/shared/debug_info.dart';
+import 'package:flow_draw/flow_draw.dart';
+import 'package:flow_draw/src/ui/shared/debug_info.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../ui/nodes/builders.dart';
-import 'fldraw_editor_data_layer.dart';
+import 'flow_draw_editor_data_layer.dart';
 
-export 'fldraw_editor_data_layer.dart' show FlOverlayData;
+export 'flow_draw_editor_data_layer.dart' show FlOverlayData;
 
-class FlDrawCanvas extends StatelessWidget {
+class FlowDrawCanvas extends StatelessWidget {
   final bool expandToParent;
   final Size? fixedSize;
   final List<FlOverlayData> Function()? overlay;
@@ -15,7 +15,7 @@ class FlDrawCanvas extends StatelessWidget {
   final FlNodeBuilder? nodeBuilder;
   final bool debug;
 
-  const FlDrawCanvas({
+  const FlowDrawCanvas({
     super.key,
     this.expandToParent = true,
     this.fixedSize,
@@ -27,7 +27,7 @@ class FlDrawCanvas extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const FlDrawEditorStyle style = FlDrawEditorStyle();
+    const FlowDrawEditorStyle style = FlowDrawEditorStyle();
 
     final Widget editor = Container(
       decoration: style.decoration,
@@ -36,8 +36,8 @@ class FlDrawCanvas extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           Positioned.fill(
-            child: FlDrawEditorDataLayer(
-              fragmentShader: 'packages/fldraw/shaders/grid.frag',
+            child: FlowDrawEditorDataLayer(
+              fragmentShader: 'packages/flow_draw/shaders/grid.frag',
               headerBuilder: headerBuilder,
               nodeBuilder: nodeBuilder,
             ),

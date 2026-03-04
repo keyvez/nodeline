@@ -76,7 +76,7 @@ class $AssetsIconsGen {
 class Assets {
   const Assets._();
 
-  static const String package = 'fldraw';
+  static const String package = 'flow_draw';
 
   static const $AssetsIconsGen icons = $AssetsIconsGen();
 }
@@ -93,7 +93,7 @@ class SvgGenImage {
   final Set<String> flavors;
   final bool _isVecFormat;
 
-  static const String package = 'fldraw';
+  static const String package = 'flow_draw';
 
   _svg.SvgPicture svg({
     Key? key,
@@ -153,5 +153,5 @@ class SvgGenImage {
 
   String get path => _assetName;
 
-  String get keyName => 'packages/fldraw/$_assetName';
+  String get keyName => 'packages/flow_draw/$_assetName';
 }

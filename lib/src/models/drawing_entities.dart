@@ -1,7 +1,8 @@
 import 'dart:math';
 
 import 'package:equatable/equatable.dart';
-import 'package:fldraw/src/core/utils/json_extensions.dart';
+import 'package:flow_draw/src/core/utils/json_extensions.dart';
+import 'package:flow_draw/src/models/styles.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -52,8 +53,12 @@ abstract class DrawingObject {
 
 class RectangleObject extends DrawingObject {
   Rect _rect;
+  String? text;
+  TextStyle? textStyle;
+  bool isEditing;
+  final LineStyle lineStyle;
 
-  RectangleObject({required super.id, required Rect rect, super.isSelected, super.angle})
+  RectangleObject({required super.id, required Rect rect, super.isSelected, super.angle, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid})
     : _rect = rect;
 
   @override
@@ -68,32 +73,56 @@ class RectangleObject extends DrawingObject {
     'rect': _rect.toJson(),
     'isSelected': isSelected,
     'angle': angle,
+    if (text != null) 'text': text,
+    if (textStyle != null) 'textStyle': {
+      'fontSize': textStyle!.fontSize,
+      'color': textStyle!.color?.value,
+    },
+    'lineStyle': lineStyle.name,
   };
 
   factory RectangleObject.fromJson(Map<String, dynamic> json) {
+    TextStyle? style;
+    if (json['textStyle'] != null) {
+      final ts = json['textStyle'] as Map<String, dynamic>;
+      style = TextStyle(
+        fontSize: (ts['fontSize'] as num?)?.toDouble(),
+        color: ts['color'] != null ? Color(ts['color'] as int) : null,
+      );
+    }
     return RectangleObject(
       id: json['id'],
       rect: JSONRect.fromJson(json['rect']),
       isSelected: json['isSelected'] ?? false,
       angle: json['angle'] ?? 0.0,
+      text: json['text'] as String?,
+      textStyle: style,
+      lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
     );
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle}) {
     return RectangleObject(
       id: id,
       rect: rect ?? _rect,
       isSelected: isSelected ?? this.isSelected,
       angle: angle ?? this.angle,
+      text: text,
+      textStyle: textStyle,
+      lineStyle: lineStyle ?? this.lineStyle,
     );
   }
 }
 
 class CircleObject extends DrawingObject {
   Rect _rect;
+  String? text;
+  TextStyle? textStyle;
+  bool isEditing;
+  final LineStyle lineStyle;
 
-  CircleObject({required super.id, required Rect rect, super.isSelected, super.angle})
+  CircleObject({required super.id, required Rect rect, super.isSelected, super.angle, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid})
     : _rect = rect;
 
   @override
@@ -107,25 +136,45 @@ class CircleObject extends DrawingObject {
     'type': 'circle',
     'rect': _rect.toJson(),
     'isSelected': isSelected,
-    'angle': angle
+    'angle': angle,
+    if (text != null) 'text': text,
+    if (textStyle != null) 'textStyle': {
+      'fontSize': textStyle!.fontSize,
+      'color': textStyle!.color?.value,
+    },
+    'lineStyle': lineStyle.name,
   };
 
   factory CircleObject.fromJson(Map<String, dynamic> json) {
+    TextStyle? style;
+    if (json['textStyle'] != null) {
+      final ts = json['textStyle'] as Map<String, dynamic>;
+      style = TextStyle(
+        fontSize: (ts['fontSize'] as num?)?.toDouble(),
+        color: ts['color'] != null ? Color(ts['color'] as int) : null,
+      );
+    }
     return CircleObject(
       id: json['id'],
       rect: JSONRect.fromJson(json['rect']),
       isSelected: json['isSelected'] ?? false,
       angle: json['angle'] ?? 0.0,
+      text: json['text'] as String?,
+      textStyle: style,
+      lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
     );
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle}) {
     return CircleObject(
       id: id,
       rect: rect ?? _rect,
       isSelected: isSelected ?? this.isSelected,
       angle: angle ?? this.angle,
+      text: text,
+      textStyle: textStyle,
+      lineStyle: lineStyle ?? this.lineStyle,
     );
   }
 }
@@ -138,6 +187,7 @@ class ArrowObject extends DrawingObject {
   final ObjectAttachment? startAttachment;
   final ObjectAttachment? endAttachment;
   List<Offset>? waypoints;
+  final LineStyle lineStyle;
 
   ArrowObject({
     required super.id,
@@ -150,6 +200,7 @@ class ArrowObject extends DrawingObject {
     this.startAttachment,
     this.endAttachment,
     this.waypoints,
+    this.lineStyle = LineStyle.solid,
   });
 
   @override
@@ -226,7 +277,8 @@ class ArrowObject extends DrawingObject {
     'startAttachment': startAttachment?.toJson(),
     'endAttachment': endAttachment?.toJson(),
     'midPoint': midPoint?.toJson(),
-    'angle': angle
+    'angle': angle,
+    'lineStyle': lineStyle.name,
   };
 
   factory ArrowObject.fromJson(Map<String, dynamic> json) {
@@ -240,6 +292,7 @@ class ArrowObject extends DrawingObject {
       endAttachment: json['endAttachment'] != null ? ObjectAttachment.fromJson(json['endAttachment']) : null,
       angle: json['angle'] ?? 0.0,
       midPoint: json['midPoint'] != null ? JSONOffset.fromJson((json['midPoint'] as List).cast<double>()) : null,
+      lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
     );
   }
 
@@ -254,6 +307,7 @@ class ArrowObject extends DrawingObject {
     ObjectAttachment? endAttachment,
     double? angle,
     List<Offset>? waypoints,
+    LineStyle? lineStyle,
   }) {
     return ArrowObject(
       id: id,
@@ -266,6 +320,7 @@ class ArrowObject extends DrawingObject {
       endAttachment: endAttachment ?? this.endAttachment,
       angle: angle ?? this.angle,
       waypoints: waypoints ?? this.waypoints,
+      lineStyle: lineStyle ?? this.lineStyle,
     );
   }
 }
@@ -276,6 +331,7 @@ class LineObject extends DrawingObject {
   Offset? midPoint;
   final ObjectAttachment? startAttachment;
   final ObjectAttachment? endAttachment;
+  final LineStyle lineStyle;
 
   LineObject({
     required super.id,
@@ -286,6 +342,7 @@ class LineObject extends DrawingObject {
     this.startAttachment,
     this.endAttachment,
     super.angle,
+    this.lineStyle = LineStyle.solid,
   });
 
   @override
@@ -342,6 +399,7 @@ class LineObject extends DrawingObject {
     'endAttachment': endAttachment?.toJson(),
     'angle': angle,
     'midPoint': midPoint?.toJson(),
+    'lineStyle': lineStyle.name,
   };
 
   factory LineObject.fromJson(Map<String, dynamic> json) {
@@ -358,6 +416,7 @@ class LineObject extends DrawingObject {
           : null,
       angle: json['angle'] ?? 0.0,
       midPoint: json['midPoint'] != null ? JSONOffset.fromJson((json['midPoint'] as List).cast<double>()) : null,
+      lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
     );
   }
 
@@ -370,6 +429,7 @@ class LineObject extends DrawingObject {
     ObjectAttachment? startAttachment,
     ObjectAttachment? endAttachment,
     double? angle,
+    LineStyle? lineStyle,
   }) {
     return LineObject(
       id: id,
@@ -380,6 +440,7 @@ class LineObject extends DrawingObject {
       startAttachment: startAttachment ?? this.startAttachment,
       endAttachment: endAttachment ?? this.endAttachment,
       angle: angle ?? this.angle,
+      lineStyle: lineStyle ?? this.lineStyle,
     );
   }
 }

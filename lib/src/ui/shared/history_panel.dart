@@ -1,10 +1,10 @@
 import 'dart:async';
 
-import 'package:fldraw/fldraw.dart';
+import 'package:flow_draw/flow_draw.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 class HistoryPanel extends StatefulWidget {
-  final FlDrawController controller;
+  final FlowDrawController controller;
 
   const HistoryPanel({super.key, required this.controller});
 
@@ -16,6 +16,7 @@ class _HistoryPanelState extends State<HistoryPanel> {
   late StreamSubscription<CanvasState> _subscription;
   List<HistoryEntry> _undoHistory = [];
   List<HistoryEntry> _redoHistory = [];
+  bool _isCollapsed = true;
 
   @override
   void initState() {
@@ -50,6 +51,7 @@ class _HistoryPanelState extends State<HistoryPanel> {
         child: Padding(
           padding: const EdgeInsets.all(8.0),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
@@ -68,31 +70,48 @@ class _HistoryPanelState extends State<HistoryPanel> {
                         ? null
                         : () => widget.controller.redo(),
                   ),
+                  const Spacer(),
+                  IconButton.ghost(
+                    icon: Icon(
+                      _isCollapsed
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      size: 16,
+                    ),
+                    onPressed: () =>
+                        setState(() => _isCollapsed = !_isCollapsed),
+                  ),
                 ],
               ),
-              Gap(16),
-              Text(
-                'History (${reversedHistory.length} actions)',
-              ).base.extraBold,
-              Gap(10),
-              if (reversedHistory.isEmpty)
-                const Expanded(child: Center(child: Text('No actions yet.')))
-              else
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: reversedHistory.length,
-                    itemBuilder: (context, index) {
-                      final (state, event) = reversedHistory[index];
+              if (!_isCollapsed) ...[
+                Gap(16),
+                Text(
+                  'History (${reversedHistory.length} actions)',
+                ).base.extraBold,
+                Gap(10),
+                if (reversedHistory.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Center(child: Text('No actions yet.')),
+                  )
+                else
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: reversedHistory.length,
+                      itemBuilder: (context, index) {
+                        final (state, event) = reversedHistory[index];
 
-                      return Basic(
-                        title: Text(event.description),
-                        subtitle: Text(
-                          'Nodes: ${state.nodes.length}, Objects: ${state.drawingObjects.length}',
-                        ),
-                      );
-                    },
+                        return Basic(
+                          title: Text(event.description),
+                          subtitle: Text(
+                            'Nodes: ${state.nodes.length}, Objects: ${state.drawingObjects.length}',
+                          ),
+                        );
+                      },
+                    ),
                   ),
-                ),
+              ],
             ],
           ),
         ),

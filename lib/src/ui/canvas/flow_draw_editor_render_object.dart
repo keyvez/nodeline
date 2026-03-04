@@ -2,13 +2,13 @@ import 'dart:math';
 import 'dart:ui' as ui;
 import 'dart:ui';
 
-import 'package:fldraw/fldraw.dart';
-import 'package:fldraw/src/core/utils/json_extensions.dart';
-import 'package:fldraw/src/core/utils/orthogonal_router.dart';
-import 'package:fldraw/src/core/utils/renderbox.dart';
-import 'package:fldraw/src/core/utils/spatial_hash_grid.dart';
-import 'package:fldraw/src/models/drawing_entities.dart';
-import 'package:fldraw/src/ui/nodes/node_widget.dart';
+import 'package:flow_draw/flow_draw.dart';
+import 'package:flow_draw/src/core/utils/json_extensions.dart';
+import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
+import 'package:flow_draw/src/core/utils/renderbox.dart';
+import 'package:flow_draw/src/core/utils/spatial_hash_grid.dart';
+import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:flow_draw/src/ui/nodes/node_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
@@ -32,10 +32,10 @@ class _ParentData extends ContainerBoxParentData<RenderBox> {
   Rect rect = Rect.zero;
 }
 
-class FlDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
+class FlowDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
   final CanvasState canvasState;
   final SelectionState selectionState;
-  final FlDrawEditorStyle style;
+  final FlowDrawEditorStyle style;
   final FragmentShader gridShader;
   final TempDrawingObject? tempDrawingObject;
   final Rect selectionArea;
@@ -43,7 +43,7 @@ class FlDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
   final FlNodeBuilder? nodeBuilder;
   final Offset? snapHandlePosition;
 
-  FlDrawEditorRenderObjectWidget({
+  FlowDrawEditorRenderObjectWidget({
     super.key,
     required this.canvasState,
     required this.selectionState,
@@ -68,8 +68,8 @@ class FlDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
        );
 
   @override
-  FlDrawEditorRenderBox createRenderObject(BuildContext context) {
-    return FlDrawEditorRenderBox(
+  FlowDrawEditorRenderBox createRenderObject(BuildContext context) {
+    return FlowDrawEditorRenderBox(
       style: style,
       gridShader: gridShader,
       canvasState: canvasState,
@@ -84,7 +84,7 @@ class FlDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
   @override
   void updateRenderObject(
     BuildContext context,
-    FlDrawEditorRenderBox renderObject,
+    FlowDrawEditorRenderBox renderObject,
   ) {
     renderObject
       ..style = style
@@ -109,12 +109,12 @@ class FlDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
   }
 }
 
-class FlDrawEditorRenderBox extends RenderBox
+class FlowDrawEditorRenderBox extends RenderBox
     with
         ContainerRenderObjectMixin<RenderBox, _ParentData>,
         RenderBoxContainerDefaultsMixin<RenderBox, _ParentData> {
-  FlDrawEditorRenderBox({
-    required FlDrawEditorStyle style,
+  FlowDrawEditorRenderBox({
+    required FlowDrawEditorStyle style,
     required FragmentShader gridShader,
     required CanvasState canvasState,
     required SelectionState selectionState,
@@ -156,11 +156,11 @@ class FlDrawEditorRenderBox extends RenderBox
 
   Offset? snapHandlePosition;
 
-  FlDrawEditorStyle _style;
+  FlowDrawEditorStyle _style;
 
-  FlDrawEditorStyle get style => _style;
+  FlowDrawEditorStyle get style => _style;
 
-  set style(FlDrawEditorStyle value) {
+  set style(FlowDrawEditorStyle value) {
     if (_style == value) return;
     _style = value;
     markNeedsPaint();
@@ -348,6 +348,8 @@ class FlDrawEditorRenderBox extends RenderBox
     canvas.drawCircle(snapHandlePosition!, 6.0 / zoom, paint);
   }
 
+  double get dpr => WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+
   void _paintDrawingObjects(Canvas canvas) {
     final Paint objectPaint = Paint()
       ..color = Colors.white
@@ -413,11 +415,29 @@ class FlDrawEditorRenderBox extends RenderBox
               ..paint(canvas, obj.rect.topLeft);
           }
         } else if (obj is CircleObject) {
-          canvas.drawOval(obj.rect, objectPaint);
+          if (obj.lineStyle == LineStyle.solid) {
+            canvas.drawOval(obj.rect, objectPaint);
+          } else {
+            final ovalPath = Path()..addOval(obj.rect);
+            _paintStyledPath(canvas, ovalPath, objectPaint, obj.lineStyle, seed: obj.id.hashCode);
+          }
+          if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
+            _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle);
+          }
         } else if (obj is RectangleObject) {
+          final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+          final objCornerRadius = 10.0 * dpr / zoom;
           final rrect =
-          RRect.fromRectAndRadius(obj.rect, const Radius.circular(24.0));
-          canvas.drawRRect(rrect, objectPaint);
+          RRect.fromRectAndRadius(obj.rect, Radius.circular(objCornerRadius));
+          if (obj.lineStyle == LineStyle.solid) {
+            canvas.drawRRect(rrect, objectPaint);
+          } else {
+            final rrectPath = Path()..addRRect(rrect);
+            _paintStyledPath(canvas, rrectPath, objectPaint, obj.lineStyle, seed: obj.id.hashCode);
+          }
+          if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
+            _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle);
+          }
         } else if (obj is SvgObject) {
           canvas.save();
           canvas.translate(obj.rect.left, obj.rect.top);
@@ -442,19 +462,24 @@ class FlDrawEditorRenderBox extends RenderBox
 
           final double visibleHandleRadius = 4.0 / zoom;
           final double handleHitAreaRadius = 10.0 / zoom;
-          final corners = [
+          // Resize handles on 3 corners, rotation icon on topRight
+          final resizeCorners = [
             selectionRect.topLeft,
-            selectionRect.topRight,
             selectionRect.bottomRight,
-            selectionRect.bottomLeft
+            selectionRect.bottomLeft,
           ];
-          for (final corner in corners) {
+          for (final corner in resizeCorners) {
             canvas.drawCircle(corner, handleHitAreaRadius, handleHitAreaPaint);
             canvas.drawCircle(corner, visibleHandleRadius, handlePaint);
           }
+          // Rotation handle at topRight, offset away from the object
+          final rotOffset = 8.0 / zoom;
+          final rotCorner = selectionRect.topRight + Offset(rotOffset, -rotOffset);
+          canvas.drawCircle(rotCorner, handleHitAreaRadius, handleHitAreaPaint);
+          _paintRotationIcon(canvas, rotCorner, handlePaint, visibleHandleRadius);
 
           if (selectionState.selectedDrawingObjectIds.length == 1 && (obj is RectangleObject || obj is CircleObject)) {
-            _paintQuickActionArrows(canvas, obj.rect);
+            _paintQuickActionArrows(canvas, obj.rect, obj.id);
           }
         }
 
@@ -526,15 +551,48 @@ class FlDrawEditorRenderBox extends RenderBox
           final relPos = startAttachment.relativePosition;
           start = startObjRect.topLeft +
               Offset(startObjRect.width * relPos.dx, startObjRect.height * relPos.dy);
+          // Snap to rotated edge if the attached object is meaningfully rotated
+          final startObj = canvasState.drawingObjects[startAttachment.objectId];
+          if (startObj != null && startObj.angle.abs() > 0.05) {
+            start = _snapToRotatedEdge(
+                _rotatePoint(start, startObjRect.center, startObj.angle),
+                startObjRect, startObj.angle);
+          }
         }
         if (endObjRect != null && endAttachment != null) {
           final relPos = endAttachment.relativePosition;
           end = endObjRect.topLeft +
               Offset(endObjRect.width * relPos.dx, endObjRect.height * relPos.dy);
+          // Snap to rotated edge if the attached object is meaningfully rotated
+          final endObj = canvasState.drawingObjects[endAttachment.objectId];
+          if (endObj != null && endObj.angle.abs() > 0.05) {
+            end = _snapToRotatedEdge(
+                _rotatePoint(end, endObjRect.center, endObj.angle),
+                endObjRect, endObj.angle);
+          }
         }
 
-        // For orthogonal arrows, dynamically recompute waypoints for routing
+        // Check if attached objects are meaningfully rotated (> ~1 degree)
+        const rotationThreshold = 0.05; // ~2.9 degrees
+        final startObjAngle = startAttachment != null
+            ? (canvasState.drawingObjects[startAttachment.objectId]?.angle ?? 0.0)
+            : 0.0;
+        final endObjAngle = endAttachment != null
+            ? (canvasState.drawingObjects[endAttachment.objectId]?.angle ?? 0.0)
+            : 0.0;
+        final startIsRotated = startObjAngle.abs() > rotationThreshold;
+        final endIsRotated = endObjAngle.abs() > rotationThreshold;
+
         if (pathType == LinkPathType.orthogonal) {
+          // Snap start/end to nearest object edge, but skip for rotated
+          // objects — the rotated point is already on the correct visual edge.
+          if (startObjRect != null && !startIsRotated) {
+            start = _snapToNearestEdge(start, startObjRect);
+          }
+          if (endObjRect != null && !endIsRotated) {
+            end = _snapToNearestEdge(end, endObjRect);
+          }
+
           // Collect obstacles, excluding source/target objects — the router
           // handles them separately via startObjectRect/endObjectRect
           final startAttachId = obj.startAttachment?.objectId;
@@ -552,12 +610,23 @@ class FlDrawEditorRenderBox extends RenderBox
             if (bounds != null) obstacles.add(bounds);
           }
 
+          final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+          // For rotated objects, pass the rotated bounding box so the router
+          // still provides proper padding and curved entry stubs.
+          final routerStartRect = startIsRotated && startObjRect != null
+              ? _rotatedBoundingBox(startObjRect, startObjAngle)
+              : startObjRect;
+          final routerEndRect = endIsRotated && endObjRect != null
+              ? _rotatedBoundingBox(endObjRect, endObjAngle)
+              : endObjRect;
           waypoints = OrthogonalRouter.route(
             start: start,
             end: end,
             obstacles: obstacles,
-            startObjectRect: startObjRect,
-            endObjectRect: endObjRect,
+            startObjectRect: routerStartRect,
+            endObjectRect: routerEndRect,
+            devicePixelRatio: dpr,
+            zoom: canvasState.viewportZoom,
           );
         }
 
@@ -573,13 +642,12 @@ class FlDrawEditorRenderBox extends RenderBox
         }
 
         if (pathType == LinkPathType.orthogonal) {
-          // Stop the drawn path slightly before the end object edge so the
-          // arrow doesn't cross into the object. The arrowhead tip becomes
-          // the visual endpoint.
-          final drawEnd = (waypoints != null && waypoints.isNotEmpty && endObjRect != null)
-              ? _shortenEndpoint(waypoints.last, end, 4.0 / zoom)
-              : end;
-          _paintOrthogonalPath(canvas, start, drawEnd, paint, waypoints: waypoints);
+          if (obj.lineStyle == LineStyle.solid) {
+            _paintOrthogonalPath(canvas, start, end, paint, waypoints: waypoints);
+          } else {
+            final orthoPath = _buildOrthogonalPath(start, end, waypoints: waypoints);
+            _paintStyledPath(canvas, orthoPath, paint, obj.lineStyle, seed: obj.id.hashCode);
+          }
         } else {
           final path = Path()
             ..moveTo(start.dx, start.dy)
@@ -589,14 +657,12 @@ class FlDrawEditorRenderBox extends RenderBox
               end.dx,
               end.dy,
             );
-          canvas.drawPath(path, paint);
+          _paintStyledPath(canvas, path, paint, obj.lineStyle, seed: obj.id.hashCode);
         }
 
         if (pathType == LinkPathType.orthogonal) {
-          // Determine arrow head direction from the last segment
-          final arrowEnd = (waypoints != null && waypoints.isNotEmpty && endObjRect != null)
-              ? _shortenEndpoint(waypoints.last, end, 4.0 / zoom)
-              : end;
+          // Arrowhead tip at the target edge
+          final arrowEnd = end;
           if (waypoints != null && waypoints.isNotEmpty) {
             controlPoint = waypoints.last;
           } else {
@@ -608,9 +674,24 @@ class FlDrawEditorRenderBox extends RenderBox
               controlPoint = Offset(start.dx, end.dy);
             }
           }
-          _paintArrowHead(canvas, controlPoint, arrowEnd, paint);
+          _paintArrowHead(canvas, controlPoint, arrowEnd, paint, lineStyle: obj.lineStyle);
         } else {
-          _paintArrowHead(canvas, controlPoint, end, paint);
+          _paintArrowHead(canvas, controlPoint, end, paint, lineStyle: obj.lineStyle);
+        }
+
+        // Draw connection point dots at attached endpoints
+        {
+          final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+          final dotRadius = 1.5 * dpr / zoom;
+          final dotPaint = Paint()
+            ..color = paint.color
+            ..style = PaintingStyle.fill;
+          if (obj.startAttachment != null) {
+            canvas.drawCircle(start, dotRadius, dotPaint);
+          }
+          if (obj.endAttachment != null) {
+            canvas.drawCircle(end, dotRadius, dotPaint);
+          }
         }
 
         if (obj.isSelected) {
@@ -660,6 +741,12 @@ class FlDrawEditorRenderBox extends RenderBox
                   targetRect.width * relPos.dx,
                   targetRect.height * relPos.dy,
                 );
+            final startObj = canvasState.drawingObjects[startAttachment.objectId];
+            if (startObj != null && startObj.angle.abs() > 0.05) {
+              start = _snapToRotatedEdge(
+                  _rotatePoint(start, targetRect.center, startObj.angle),
+                  targetRect, startObj.angle);
+            }
           }
         }
 
@@ -680,6 +767,12 @@ class FlDrawEditorRenderBox extends RenderBox
                   targetRect.width * relPos.dx,
                   targetRect.height * relPos.dy,
                 );
+            final endObj = canvasState.drawingObjects[endAttachment.objectId];
+            if (endObj != null && endObj.angle.abs() > 0.05) {
+              end = _snapToRotatedEdge(
+                  _rotatePoint(end, targetRect.center, endObj.angle),
+                  targetRect, endObj.angle);
+            }
           }
         }
 
@@ -690,7 +783,22 @@ class FlDrawEditorRenderBox extends RenderBox
         final mid = obj.midPoint ?? (start + end) / 2;
         path.quadraticBezierTo(mid.dx, mid.dy, end.dx, end.dy);
 
-        canvas.drawPath(path, paint);
+        _paintStyledPath(canvas, path, paint, obj.lineStyle, seed: obj.id.hashCode);
+
+        // Draw connection point dots at attached endpoints
+        {
+          final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+          final dotRadius = 1.5 * dpr / zoom;
+          final dotPaint = Paint()
+            ..color = paint.color
+            ..style = PaintingStyle.fill;
+          if (obj.startAttachment != null) {
+            canvas.drawCircle(start, dotRadius, dotPaint);
+          }
+          if (obj.endAttachment != null) {
+            canvas.drawCircle(end, dotRadius, dotPaint);
+          }
+        }
 
         if (obj.isSelected) {
           final double visibleHandleRadius = 4.0 / zoom;
@@ -713,11 +821,12 @@ class FlDrawEditorRenderBox extends RenderBox
     }
   }
 
-  void _paintQuickActionArrows(Canvas canvas, Rect rect) {
-    final double baseHandleSize = 20.0;
+  void _paintQuickActionArrows(Canvas canvas, Rect rect, String objectId) {
+    final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+    final double baseHandleSize = 20.0 * dpr;
     final double handleSize = baseHandleSize / sqrt(zoom);
     final double halfHandle = handleSize / 2;
-    final double spacing = 10.0 / sqrt(zoom);
+    final double spacing = 10.0 * dpr / sqrt(zoom);
 
     final Paint handlePaint = Paint()..color = Colors.blue.withOpacity(0.8);
     final Paint arrowPaint = Paint()
@@ -726,11 +835,64 @@ class FlDrawEditorRenderBox extends RenderBox
       ..strokeWidth = 1.5 / zoom
       ..strokeCap = StrokeCap.round;
 
+    // Find where connectors approach each edge from, using the other endpoint
+    // For horizontal edges (top/bottom): track x of the other end relative to this object's center
+    // For vertical edges (left/right): track y of the other end relative to this object's center
+    final edgeApproachFromLeft = <String, List<bool>>{};
+    for (final obj in canvasState.drawingObjects.values) {
+      if (obj is ArrowObject || obj is LineObject) {
+        final startAtt = obj is ArrowObject ? obj.startAttachment : (obj as LineObject).startAttachment;
+        final endAtt = obj is ArrowObject ? obj.endAttachment : (obj as LineObject).endAttachment;
+        final otherEnd = obj is ArrowObject ? obj.end : (obj as LineObject).end;
+        final otherStart = obj is ArrowObject ? obj.start : (obj as LineObject).start;
+        for (final (att, otherPoint) in [(startAtt, otherEnd), (endAtt, otherStart)]) {
+          if (att != null && att.objectId == objectId) {
+            final rp = att.relativePosition;
+            if (rp.dy < 0.25) {
+              // Top edge: does the connector go left or right?
+              (edgeApproachFromLeft['top'] ??= []).add(otherPoint.dx < rect.center.dx);
+            }
+            if (rp.dy > 0.75) {
+              (edgeApproachFromLeft['bottom'] ??= []).add(otherPoint.dx < rect.center.dx);
+            }
+            if (rp.dx < 0.25) {
+              (edgeApproachFromLeft['left'] ??= []).add(otherPoint.dy < rect.center.dy);
+            }
+            if (rp.dx > 0.75) {
+              (edgeApproachFromLeft['right'] ??= []).add(otherPoint.dy < rect.center.dy);
+            }
+          }
+        }
+      }
+    }
+
+    // Offset perpendicular to the edge to avoid overlapping connection lines
+    final double connOffset = handleSize * 2.0;
+
+    Offset _edgeOffset(String edge) {
+      final approaches = edgeApproachFromLeft[edge];
+      if (approaches == null) return Offset.zero;
+      // If connector approaches from the left/top, move icon to the right/bottom
+      final mostlyFromLeft = approaches.where((b) => b).length >= approaches.length / 2;
+      switch (edge) {
+        case 'top':
+        case 'bottom':
+          // Connector comes from left → move icon right, and vice versa
+          return Offset(mostlyFromLeft ? connOffset : -connOffset, 0);
+        case 'left':
+        case 'right':
+          // Connector comes from above → move icon down, and vice versa
+          return Offset(0, mostlyFromLeft ? connOffset : -connOffset);
+        default:
+          return Offset.zero;
+      }
+    }
+
     final positions = {
-      'top': rect.topCenter - Offset(0, spacing + halfHandle),
-      'right': rect.centerRight + Offset(spacing + halfHandle, 0),
-      'bottom': rect.bottomCenter + Offset(0, spacing + halfHandle),
-      'left': rect.centerLeft - Offset(spacing + halfHandle, 0),
+      'top': rect.topCenter - Offset(0, spacing + halfHandle) + _edgeOffset('top'),
+      'right': rect.centerRight + Offset(spacing + halfHandle, 0) + _edgeOffset('right'),
+      'bottom': rect.bottomCenter + Offset(0, spacing + halfHandle) + _edgeOffset('bottom'),
+      'left': rect.centerLeft - Offset(spacing + halfHandle, 0) + _edgeOffset('left'),
     };
 
     for (var entry in positions.entries) {
@@ -817,6 +979,46 @@ class FlDrawEditorRenderBox extends RenderBox
     }
   }
 
+  /// Paints a quick-action style icon (blue oval + white arrow) for rotation.
+  void _paintRotationIcon(Canvas canvas, Offset center, Paint paint, double radius) {
+    final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+    final double handleSize = 20.0 * dpr / sqrt(zoom);
+
+    final handleRect = Rect.fromCenter(center: center, width: handleSize, height: handleSize);
+    final handlePaint = Paint()..color = Colors.blue.withOpacity(0.8);
+    canvas.drawOval(handleRect, handlePaint);
+
+    final arrowPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5 / zoom
+      ..strokeCap = StrokeCap.round;
+
+    // Same arrow as quick action icons, slightly smaller, shifted toward edge
+    final arrowSize = handleSize * 0.19;
+    final lineLen = handleSize * 0.43;
+    final shift = handleSize * 0.12; // push arrow toward the edge
+    final arrowPath = Path();
+    arrowPath.moveTo(center.dx, center.dy - arrowSize - shift);
+    arrowPath.lineTo(center.dx, center.dy + lineLen - shift);
+    // Top arrowhead
+    arrowPath.moveTo(center.dx - arrowSize, center.dy - shift);
+    arrowPath.lineTo(center.dx, center.dy - arrowSize - shift);
+    arrowPath.lineTo(center.dx + arrowSize, center.dy - shift);
+    // Bottom arrowhead (mirrored)
+    final bottomTip = center.dy + lineLen - shift;
+    arrowPath.moveTo(center.dx - arrowSize, bottomTip - arrowSize);
+    arrowPath.lineTo(center.dx, bottomTip);
+    arrowPath.lineTo(center.dx + arrowSize, bottomTip - arrowSize);
+
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(-pi / 2 + pi / 6);
+    canvas.translate(-center.dx, -center.dy);
+    canvas.drawPath(arrowPath, arrowPaint);
+    canvas.restore();
+  }
+
   void _paintPencilStroke(
     Canvas canvas,
     PencilStrokeObject object,
@@ -856,6 +1058,105 @@ class FlDrawEditorRenderBox extends RenderBox
     }
   }
 
+  /// Paints centered text inside a shape's rect.
+  void _paintShapeText(Canvas canvas, Rect shapeRect, String text, TextStyle? style) {
+    const defaultStyle = TextStyle(fontSize: 14, color: Colors.white);
+    final textPainter = TextPainter(
+      text: TextSpan(text: text, style: style ?? defaultStyle),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.center,
+    )..layout(maxWidth: shapeRect.width - 8);
+    final textOffset = Offset(
+      shapeRect.center.dx - textPainter.width / 2,
+      shapeRect.center.dy - textPainter.height / 2,
+    );
+    textPainter.paint(canvas, textOffset);
+  }
+
+  /// Returns the axis-aligned bounding box that encloses [rect] after
+  /// rotating it by [angle] around its center.
+  static Rect _rotatedBoundingBox(Rect rect, double angle) {
+    final center = rect.center;
+    final corners = [
+      _rotatePoint(rect.topLeft, center, angle),
+      _rotatePoint(rect.topRight, center, angle),
+      _rotatePoint(rect.bottomRight, center, angle),
+      _rotatePoint(rect.bottomLeft, center, angle),
+    ];
+    double minX = corners[0].dx, minY = corners[0].dy;
+    double maxX = corners[0].dx, maxY = corners[0].dy;
+    for (int i = 1; i < 4; i++) {
+      if (corners[i].dx < minX) minX = corners[i].dx;
+      if (corners[i].dy < minY) minY = corners[i].dy;
+      if (corners[i].dx > maxX) maxX = corners[i].dx;
+      if (corners[i].dy > maxY) maxY = corners[i].dy;
+    }
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
+  /// Snaps [point] to the nearest edge of a rotated rectangle.
+  /// Computes the 4 corners of [rect] rotated by [angle] around its center,
+  /// then projects [point] onto the nearest edge.
+  static Offset _snapToRotatedEdge(Offset point, Rect rect, double angle) {
+    final center = rect.center;
+    // Compute rotated corners
+    final corners = [
+      _rotatePoint(rect.topLeft, center, angle),
+      _rotatePoint(rect.topRight, center, angle),
+      _rotatePoint(rect.bottomRight, center, angle),
+      _rotatePoint(rect.bottomLeft, center, angle),
+    ];
+    // Find the nearest point on any edge
+    Offset nearest = point;
+    double minDist = double.infinity;
+    for (int i = 0; i < 4; i++) {
+      final a = corners[i];
+      final b = corners[(i + 1) % 4];
+      final projected = _projectOntoSegment(point, a, b);
+      final dist = (projected - point).distanceSquared;
+      if (dist < minDist) {
+        minDist = dist;
+        nearest = projected;
+      }
+    }
+    return nearest;
+  }
+
+  /// Projects [point] onto the line segment from [a] to [b].
+  static Offset _projectOntoSegment(Offset point, Offset a, Offset b) {
+    final ab = b - a;
+    final ap = point - a;
+    final lenSq = ab.distanceSquared;
+    if (lenSq < 1e-12) return a;
+    final t = (ap.dx * ab.dx + ap.dy * ab.dy) / lenSq;
+    final tc = t.clamp(0.0, 1.0);
+    return a + ab * tc;
+  }
+
+  /// Rotates [point] around [center] by [angle] radians.
+  static Offset _rotatePoint(Offset point, Offset center, double angle) {
+    final cosA = cos(angle);
+    final sinA = sin(angle);
+    final dx = point.dx - center.dx;
+    final dy = point.dy - center.dy;
+    return Offset(
+      center.dx + dx * cosA - dy * sinA,
+      center.dy + dx * sinA + dy * cosA,
+    );
+  }
+
+  static Offset _snapToNearestEdge(Offset point, Rect rect) {
+    final distToLeft = (point.dx - rect.left).abs();
+    final distToRight = (point.dx - rect.right).abs();
+    final distToTop = (point.dy - rect.top).abs();
+    final distToBottom = (point.dy - rect.bottom).abs();
+    final minDist = [distToLeft, distToRight, distToTop, distToBottom].reduce(min);
+    if (minDist == distToLeft) return Offset(rect.left, point.dy);
+    if (minDist == distToRight) return Offset(rect.right, point.dy);
+    if (minDist == distToTop) return Offset(point.dx, rect.top);
+    return Offset(point.dx, rect.bottom);
+  }
+
   /// Shortens the endpoint by [amount] along the direction from [prev] to [end].
   static Offset _shortenEndpoint(Offset prev, Offset end, double amount) {
     final dir = end - prev;
@@ -865,13 +1166,108 @@ class FlDrawEditorRenderBox extends RenderBox
     return end - unit * amount;
   }
 
+  /// Draws a dashed line along [path] using [paint].
+  void _paintDashedPath(Canvas canvas, Path path, Paint paint) {
+    final double dashWidth = 8.0 / zoom;
+    final double dashSpace = 5.0 / zoom;
+    for (final metric in path.computeMetrics()) {
+      double distance = 0.0;
+      while (distance < metric.length) {
+        final end = min(distance + dashWidth, metric.length);
+        final segment = metric.extractPath(distance, end);
+        canvas.drawPath(segment, paint);
+        distance = end + dashSpace;
+      }
+    }
+  }
+
+  /// Draws evenly spaced dots along [path] using [paint].
+  void _paintDottedPath(Canvas canvas, Path path, Paint paint) {
+    final double spacing = 6.0 / zoom;
+    final double radius = 1.5 / zoom;
+    final dotPaint = Paint()
+      ..color = paint.color
+      ..style = PaintingStyle.fill;
+    for (final metric in path.computeMetrics()) {
+      double distance = 0.0;
+      while (distance < metric.length) {
+        final tangent = metric.getTangentForOffset(distance);
+        if (tangent != null) {
+          canvas.drawCircle(tangent.position, radius, dotPaint);
+        }
+        distance += spacing;
+      }
+    }
+  }
+
+  /// Returns a new path with small random perpendicular offsets applied to
+  /// sample points, producing a hand-drawn/sketchy appearance. Uses
+  /// [Random(seed)] for deterministic wobble across repaints.
+  Path _roughenPath(Path source, double amplitude, int seed) {
+    final rng = Random(seed);
+    final result = Path();
+    for (final metric in source.computeMetrics()) {
+      final step = max(4.0 / zoom, 3.0);
+      final points = <Offset>[];
+      double d = 0.0;
+      while (d < metric.length) {
+        final tangent = metric.getTangentForOffset(d);
+        if (tangent != null) {
+          // Perpendicular direction
+          final normal = Offset(-tangent.vector.dy, tangent.vector.dx);
+          final offset = (rng.nextDouble() - 0.5) * 2.0 * amplitude;
+          points.add(tangent.position + normal * offset);
+        }
+        d += step;
+      }
+      // Always include the very last point
+      final lastTangent = metric.getTangentForOffset(metric.length);
+      if (lastTangent != null) points.add(lastTangent.position);
+
+      if (points.length < 2) continue;
+      result.moveTo(points[0].dx, points[0].dy);
+      for (int i = 0; i < points.length - 1; i++) {
+        final p0 = points[i];
+        final p1 = points[i + 1];
+        final mx = (p0.dx + p1.dx) / 2;
+        final my = (p0.dy + p1.dy) / 2;
+        result.quadraticBezierTo(p0.dx, p0.dy, mx, my);
+      }
+      result.lineTo(points.last.dx, points.last.dy);
+    }
+    return result;
+  }
+
+  /// Draws a [path] on [canvas] according to the given [lineStyle].
+  /// For solid, draws normally. For rough, roughens the path first then draws.
+  /// For dashed/dotted, uses the corresponding utility.
+  void _paintStyledPath(Canvas canvas, Path path, Paint paint, LineStyle lineStyle, {int seed = 0}) {
+    switch (lineStyle) {
+      case LineStyle.solid:
+        canvas.drawPath(path, paint);
+        break;
+      case LineStyle.dashed:
+        _paintDashedPath(canvas, path, paint);
+        break;
+      case LineStyle.dotted:
+        _paintDottedPath(canvas, path, paint);
+        break;
+      case LineStyle.rough:
+        final roughPath = _roughenPath(path, 0.15 / zoom, seed);
+        canvas.drawPath(roughPath, paint);
+        break;
+    }
+  }
+
   void _paintArrowHead(
     Canvas canvas,
     Offset controlPoint,
     Offset end,
-    Paint paint,
-  ) {
-    final double arrowSize = 12.0 / zoom;
+    Paint paint, {
+    LineStyle lineStyle = LineStyle.solid,
+  }) {
+    final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+    final double arrowSize = 7.0 * dpr / zoom;
     const double arrowAngle = 25 * (pi / 180);
 
     final lineVector = end - controlPoint;
@@ -879,15 +1275,87 @@ class FlDrawEditorRenderBox extends RenderBox
       return; // Avoid errors if start and end are the same
     final angle = lineVector.direction;
 
-    final Path path = Path();
     final p2 = end - Offset.fromDirection(angle - arrowAngle, arrowSize);
     final p3 = end - Offset.fromDirection(angle + arrowAngle, arrowSize);
 
-    path.moveTo(p2.dx, p2.dy);
-    path.lineTo(end.dx, end.dy);
-    path.lineTo(p3.dx, p3.dy);
+    final headPaint = Paint()
+      ..color = paint.color
+      ..strokeWidth = paint.strokeWidth
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
 
-    canvas.drawPath(path, paint..style = PaintingStyle.stroke);
+    final Path path = Path();
+    if (lineStyle == LineStyle.rough) {
+      // Quadratic bezier only bends toward the control point, doesn't pass
+      // through it. Push the control point beyond `end` so the curve apex
+      // lands at the actual tip.
+      final mid = (p2 + p3) / 2;
+      final cp = end * 2 - mid;
+      path.moveTo(p2.dx, p2.dy);
+      path.quadraticBezierTo(cp.dx, cp.dy, p3.dx, p3.dy);
+    } else {
+      path.moveTo(p2.dx, p2.dy);
+      path.lineTo(end.dx, end.dy);
+      path.lineTo(p3.dx, p3.dy);
+    }
+
+    canvas.drawPath(path, headPaint);
+  }
+
+  /// Builds the orthogonal path without drawing it.
+  Path _buildOrthogonalPath(Offset start, Offset end, {List<Offset>? waypoints}) {
+    final allPoints = [start, ...?waypoints, end];
+
+    if (allPoints.length == 2) {
+      final double dx = end.dx - start.dx;
+      final double dy = end.dy - start.dy;
+      final Path path = Path();
+      path.moveTo(start.dx, start.dy);
+      if (dx.abs() > dy.abs()) {
+        path.lineTo(end.dx, start.dy);
+        path.lineTo(end.dx, end.dy);
+      } else {
+        path.lineTo(start.dx, end.dy);
+        path.lineTo(end.dx, end.dy);
+      }
+      return path;
+    }
+
+    final dprForRadius = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+    final double cornerRadius = 10.0 * dprForRadius / zoom;
+    final Path path = Path();
+    path.moveTo(allPoints[0].dx, allPoints[0].dy);
+
+    for (int i = 1; i < allPoints.length - 1; i++) {
+      final prev = allPoints[i - 1];
+      final curr = allPoints[i];
+      final next = allPoints[i + 1];
+      final segPrev = (curr - prev).distance;
+      final segNext = (next - curr).distance;
+      final r = min(cornerRadius, min(segPrev / 2, segNext / 2));
+
+      if (r < 1.0) {
+        path.lineTo(curr.dx, curr.dy);
+        continue;
+      }
+
+      final dirIn = Offset((curr.dx - prev.dx) / segPrev, (curr.dy - prev.dy) / segPrev);
+      final dirOut = Offset((next.dx - curr.dx) / segNext, (next.dy - curr.dy) / segNext);
+      final cross = dirIn.dx * dirOut.dy - dirIn.dy * dirOut.dx;
+      if (cross.abs() < 0.01) {
+        path.lineTo(curr.dx, curr.dy);
+        continue;
+      }
+
+      final arcStart = Offset(curr.dx - dirIn.dx * r, curr.dy - dirIn.dy * r);
+      final arcEnd = Offset(curr.dx + dirOut.dx * r, curr.dy + dirOut.dy * r);
+      path.lineTo(arcStart.dx, arcStart.dy);
+      path.arcToPoint(arcEnd, radius: Radius.circular(r), clockwise: cross > 0);
+    }
+
+    path.lineTo(allPoints.last.dx, allPoints.last.dy);
+    return path;
   }
 
   void _paintOrthogonalPath(
@@ -917,7 +1385,8 @@ class FlDrawEditorRenderBox extends RenderBox
     }
 
     // Multi-segment path with rounded corners
-    final double cornerRadius = 24.0 / zoom;
+    final dprForRadius = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+    final double cornerRadius = 10.0 * dprForRadius / zoom;
     final Path path = Path();
     path.moveTo(allPoints[0].dx, allPoints[0].dy);
 

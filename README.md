@@ -1,15 +1,15 @@
-# fldraw
+# flow_draw
 
-[![Pub Version](https://img.shields.io/pub/v/fldraw.svg)](https://pub.dev/packages/fldraw)
-[![Project Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/fldraw/fldraw#-project-status-alpha)
+[![Pub Version](https://img.shields.io/pub/v/flow_draw.svg)](https://pub.dev/packages/flow_draw)
+[![Project Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/flow-draw/flow_draw#-project-status-alpha)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub Stars](https://img.shields.io/github/stars/fldraw/fldraw.svg)](https://github.com/fldraw/fldraw/stargazers)
-[![GitHub Issues](https://img.shields.io/github/issues/fldraw/fldraw.svg)](https://github.com/fldraw/fldraw/issues)
-[![GitHub Forks](https://img.shields.io/github/forks/fldraw/fldraw.svg)](https://github.com/fldraw/fldraw/network/members)
+[![GitHub Stars](https://img.shields.io/github/stars/flow-draw/flow_draw.svg)](https://github.com/flow-draw/flow_draw/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/flow-draw/flow_draw.svg)](https://github.com/flow-draw/flow_draw/issues)
+[![GitHub Forks](https://img.shields.io/github/forks/flow-draw/flow_draw.svg)](https://github.com/flow-draw/flow_draw/network/members)
 
 A powerful, extensible, and high-performance infinite canvas and diagramming library for Flutter, inspired by [tldraw](https://www.tldraw.com/) and [eraser.io](https://www.eraser.io)
 
-`fldraw` provides a complete toolkit for building applications that require node-based editors, whiteboarding, or any kind of interactive canvas. It's built from the ground up with performance and customization in mind, using a custom rendering pipeline to ensure a smooth experience even with a large number of objects.
+`flow_draw` provides a complete toolkit for building applications that require node-based editors, whiteboarding, or any kind of interactive canvas. It's built from the ground up with performance and customization in mind, using a custom rendering pipeline to ensure a smooth experience even with a large number of objects.
 
 <p align="center">
   <img src="https://i.ibb.co/tMn7pHjb/Build-using-Flutter.png" alt="Build using Flutter" width="450"/>
@@ -28,7 +28,7 @@ A powerful, extensible, and high-performance infinite canvas and diagramming lib
 - **Powerful Controller API**: Programmatically control the canvas, manage tools, and manipulate objects from your own widgets.
 - **Undo/Redo History**: A robust, built-in history stack for all major actions.
 - **Keyboard Shortcuts**: Speed up your workflow with intuitive keyboard shortcuts for tools and actions.
-- **Text-to-Diagram (fldraw-lang)**: A simple, text-based language to programmatically generate entire diagrams.
+- **Text-to-Diagram (flow_draw-lang)**: A simple, text-based language to programmatically generate entire diagrams.
 - **Customizable UI**: Use builders to completely customize the appearance of nodes, context menus, and more coming soon.
 
 ## 📖 Table of Contents
@@ -36,13 +36,13 @@ A powerful, extensible, and high-performance infinite canvas and diagramming lib
 - [Installation](#-installation)
 - [Quick Start](#-quick-start)
 - [Core Concepts](#-core-concepts)
-  - [FlDraw Widget](#fldraw-widget)
-  - [FlDrawCanvas](#fldrawcanvas)
-  - [FlDrawController](#fldrawcontroller)
+  - [FlowDraw Widget](#flowdraw-widget)
+  - [FlowDrawCanvas](#flowdrawcanvas)
+  - [FlowDrawController](#flowdrawcontroller)
   - [Toolbar & Tools](#toolbar--tools)
 - [Advanced Usage](#-advanced-usage)
-  - [Programmatic Control with `FlDrawController`](#programmatic-control-with-fldrawcontroller)
-  - [Text-to-Diagram with `FlDrawParser`](#text-to-diagram-with-fldrawparser)
+  - [Programmatic Control with `FlowDrawController`](#programmatic-control-with-flowdrawcontroller)
+  - [Text-to-Diagram with `FlowDrawParser`](#text-to-diagram-with-flowdrawparser)
   - [Customizing Nodes](#customizing-nodes)
 - [Contributing](#contributing-❤️)
 - [Star History](#star-history)
@@ -52,21 +52,21 @@ A powerful, extensible, and high-performance infinite canvas and diagramming lib
 
 ## 📦 Installation
 
-Add `fldraw` to your `pubspec.yaml` file:
+Add `flow_draw` to your `pubspec.yaml` file:
 
 ```yaml
 dependencies:
-  fldraw: ^latest_version
+  flow_draw: ^latest_version
 ```
 
 Then, run `flutter pub get` in your terminal.
 
 ## 🚀 Quick Start
 
-Getting started with `fldraw` is simple. Wrap your canvas area with the `FlDraw` widget and provide it with an `FlDrawCanvas` and a `FlToolbar`.
+Getting started with `flow_draw` is simple. Wrap your canvas area with the `FlowDraw` widget and provide it with a `FlowDrawCanvas` and a `FlowDrawToolbar`.
 
 ```dart
-import 'package:fldraw/fldraw.dart';
+import 'package:flow_draw/flow_draw.dart';
 import 'package:flutter/material.dart';
 
 class MyDiagramPage extends StatefulWidget {
@@ -77,12 +77,12 @@ class MyDiagramPage extends StatefulWidget {
 }
 
 class _MyDiagramPageState extends State<MyDiagramPage> {
-  FlDrawController? controller;
+  FlowDrawController? controller;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: FlDraw(
+      body: FlowDraw(
         // The onControllerCreated callback gives you access to the controller
         // for programmatic interaction with the canvas.
         onControllerCreated: (c) {
@@ -94,12 +94,12 @@ class _MyDiagramPageState extends State<MyDiagramPage> {
           alignment: Alignment.center,
           children: [
             // The main canvas widget
-            const FlDrawCanvas(debug: true), // Set debug to true for helpful overlays
+            const FlowDrawCanvas(debug: true), // Set debug to true for helpful overlays
 
             // The toolbar for selecting tools
             Positioned(
               top: 24,
-              child: FlToolbar(svgs: const []), // svgs list is for a future feature
+              child: FlowDrawToolbar(svgs: const []), // svgs list is for a future feature
             ),
 
             // A panel to show the undo/redo history
@@ -123,23 +123,23 @@ class _MyDiagramPageState extends State<MyDiagramPage> {
 }
 ```
 
-![fldraw Basic UI](https://raw.githubusercontent.com/fldraw/fldraw/main/assets/readme/basic_ui.png)
+![flow_draw Basic UI](https://raw.githubusercontent.com/flow-draw/flow_draw/main/assets/readme/basic_ui.png)
 
 ## 🧠 Core Concepts
 
-### `FlDraw` Widget
+### `FlowDraw` Widget
 
 This is the root widget of the library. It sets up all the necessary BLoCs (`CanvasBloc`, `ToolBloc`, `SelectionBloc`) and provides them to the widget tree. It is the entry point for using the library.
 
-- **`onControllerCreated`**: A crucial callback that provides you with an `FlDrawController` instance once the canvas is initialized.
+- **`onControllerCreated`**: A crucial callback that provides you with a `FlowDrawController` instance once the canvas is initialized.
 
-### `FlDrawCanvas`
+### `FlowDrawCanvas`
 
 This is the main widget that renders the infinite canvas, grid, nodes, and all drawing objects. It handles all user interactions like panning, zooming, and drawing.
 
 - **`debug`**: When set to `true`, it displays useful information like the current viewport coordinates, zoom level, and selection count.
 
-### `FlDrawController`
+### `FlowDrawController`
 
 The controller is your primary tool for interacting with the canvas programmatically. It provides a clean, high-level API to abstract away the underlying BLoC architecture.
 
@@ -148,7 +148,7 @@ The controller is your primary tool for interacting with the canvas programmatic
 
 ### Toolbar & Tools
 
-The `FlToolbar` widget provides a ready-made UI for selecting the active tool. The canvas behavior changes based on the currently selected tool in the `ToolBloc`. Keyboard shortcuts are also available to quickly switch between tools.
+The `FlowDrawToolbar` widget provides a ready-made UI for selecting the active tool. The canvas behavior changes based on the currently selected tool in the `ToolBloc`. Keyboard shortcuts are also available to quickly switch between tools.
 
 | Tool      | Shortcut | Description                          |
 | :-------- | :------: | :----------------------------------- |
@@ -161,7 +161,7 @@ The `FlToolbar` widget provides a ready-made UI for selecting the active tool. T
 | Text      |   `T`    | Create a text object.                |
 | Figure    |   `F`    | Create a dashed group container.     |
 
-![fldraw Tool Shortcuts GIF](https://raw.githubusercontent.com/fldraw/fldraw/main/assets/readme/tool_shortcuts.gif)
+![flow_draw Tool Shortcuts GIF](https://raw.githubusercontent.com/flow-draw/flow_draw/main/assets/readme/tool_shortcuts.gif)
 
 ### Modifier Keys for Enhanced Control
 
@@ -175,11 +175,11 @@ You can hold down modifier keys to enhance the behavior of tools and actions, pr
 | `Ctrl`/`Cmd` + Click   | **Multi-Select (Alternative)**     | Same as Shift + Click, allows for adding objects to the current selection.                                                       |
 | `Shift` + `Ctrl`/`Cmd` | **Draw Orthogonal Arrows**         | While drawing with the Arrow tool, hold both `Shift` and `Ctrl`/`Cmd` to create an orthogonal (right-angled) connector line.     |
 
-![fldraw Modifier Keys GIF](https://raw.githubusercontent.com/fldraw/fldraw/main/assets/readme/modifier_keys.gif)
+![flow_draw Modifier Keys GIF](https://raw.githubusercontent.com/flow-draw/flow_draw/main/assets/readme/modifier_keys.gif)
 
 ## 🛠️ Advanced Usage
 
-### Programmatic Control with `FlDrawController`
+### Programmatic Control with `FlowDrawController`
 
 Once you have the controller from the `onControllerCreated` callback, you can perform a wide variety of actions.
 
@@ -202,13 +202,13 @@ controller.zoomOut();
 controller.centerView();
 ```
 
-### Text-to-Diagram with `FlDrawParser`
+### Text-to-Diagram with `FlowDrawParser`
 
-`fldraw` includes a powerful parser for a simple, text-based language to define entire diagrams. This is perfect for generating diagrams from code, versioning them in git, or building integrations.
+`flow_draw` includes a powerful parser for a simple, text-based language to define entire diagrams. This is perfect for generating diagrams from code, versioning them in git, or building integrations.
 
 ```dart
 void generateDiagramFromText() {
-  // 1. Define your diagram using fldraw-lang syntax
+  // 1. Define your diagram using flow_draw-lang syntax
   const myDiagramCode = """
     // This is a comment
 
@@ -222,7 +222,7 @@ void generateDiagramFromText() {
   """;
 
   // 2. Create a parser and generate the JSON
-  final parser = FlDrawParser();
+  final parser = FlowDrawParser();
   final jsonString = parser.parse(myDiagramCode);
   final projectData = jsonDecode(jsonString);
 
@@ -235,13 +235,13 @@ This will automatically parse the text, lay out the nodes, and render the comple
 
 ### Customizing Nodes
 
-You can completely change the appearance of nodes by providing builder functions to the `FlDrawCanvas` widget.
+You can completely change the appearance of nodes by providing builder functions to the `FlowDrawCanvas` widget.
 
 - **`headerBuilder`**: Customizes the header of a node.
 - **`nodeBuilder`**: Replaces the entire node widget with your own implementation, giving you full control.
 
 ```dart
-FlDrawCanvas(
+FlowDrawCanvas(
   headerBuilder: (context, node, onToggleCollapse) {
     // Return your own custom header widget here
     return Container(
@@ -264,7 +264,7 @@ FlDrawCanvas(
 
 ## Roadmap & Future Features
 
-`fldraw` is under active development. My goal is to make it the most powerful and easy-to-use diagramming library for Flutter. Below is a list of planned features and improvements. Contributions are highly welcome!
+`flow_draw` is under active development. My goal is to make it the most powerful and easy-to-use diagramming library for Flutter. Below is a list of planned features and improvements. Contributions are highly welcome!
 
 ☐ **Style & Property Inspector**: Implement a robust styling system (fill color, stroke, text properties) and a property panel widget to edit selected objects.
 
@@ -282,7 +282,7 @@ FlDrawCanvas(
 
 ## Contributing ❤️
 
-Contributions are welcome and greatly appreciated! `fldraw` is an open-source project, and we'd love to see it grow with the help of the community.
+Contributions are welcome and greatly appreciated! `flow_draw` is an open-source project, and we'd love to see it grow with the help of the community.
 
 If you'd like to contribute, please feel free to:
 
@@ -298,17 +298,17 @@ If you'd like to contribute, please feel free to:
 
 ## Star History
 
-<a href="https://star-history.com/#fldraw/fldraw">
+<a href="https://star-history.com/#flow-draw/flow_draw">
 	<picture>
 	  <source
 	    media="(prefers-color-scheme: dark)"
-	    srcset="https://api.star-history.com/svg?repos=fldraw/fldraw&type=Date&theme=dark"
+	    srcset="https://api.star-history.com/svg?repos=flow-draw/flow_draw&type=Date&theme=dark"
 	  />
 	  <source
 	    media="(prefers-color-scheme: light)"
-	    srcset="https://api.star-history.com/svg?repos=fldraw/fldraw&type=Date"
+	    srcset="https://api.star-history.com/svg?repos=flow-draw/flow_draw&type=Date"
 	  />
-	  <img src="https://api.star-history.com/svg?repos=fldraw/fldraw&type=Date" alt="Star History Chart" width="100%" />
+	  <img src="https://api.star-history.com/svg?repos=flow-draw/flow_draw&type=Date" alt="Star History Chart" width="100%" />
 	</picture>
 </a>
 
@@ -328,7 +328,7 @@ I am currently open looking for new job opportunities and interesting contract p
 
 ## Support The Project
 
-If `fldraw` has been useful to you, please consider giving it a ⭐️ on GitHub!
+If `flow_draw` has been useful to you, please consider giving it a ⭐️ on GitHub!
 
 For those who wish to provide more direct support, you can:
 
@@ -338,4 +338,4 @@ Your support helps in the ongoing development and maintenance of the project. Th
 
 ## License 📜
 
-`fldraw` is released under the [MIT License](https://opensource.org/licenses/MIT). See the `LICENSE` file for more details.
+`flow_draw` is released under the [MIT License](https://opensource.org/licenses/MIT). See the `LICENSE` file for more details.

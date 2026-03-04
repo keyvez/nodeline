@@ -1,16 +1,16 @@
 import 'dart:async';
-import 'package:fldraw/src/core/utils/platform_info/platform_info.dart'
+import 'package:flow_draw/src/core/utils/platform_info/platform_info.dart'
     show PlatformInfoImpl;
 import 'dart:math';
 
-import 'package:fldraw/fldraw.dart';
-import 'package:fldraw/src/core/node_editor/clipboard.dart';
-import 'package:fldraw/src/core/utils/json_extensions.dart';
-import 'package:fldraw/src/core/utils/orthogonal_router.dart';
-import 'package:fldraw/src/core/utils/renderbox.dart';
-import 'package:fldraw/src/models/drawing_entities.dart';
-import 'package:fldraw/src/ui/canvas/fldraw_editor_render_object.dart';
-import 'package:fldraw/src/ui/shared/improved_listener.dart';
+import 'package:flow_draw/flow_draw.dart';
+import 'package:flow_draw/src/core/node_editor/clipboard.dart';
+import 'package:flow_draw/src/core/utils/json_extensions.dart';
+import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
+import 'package:flow_draw/src/core/utils/renderbox.dart';
+import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:flow_draw/src/ui/canvas/flow_draw_editor_render_object.dart';
+import 'package:flow_draw/src/ui/shared/improved_listener.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -43,12 +43,12 @@ class FlOverlayData {
   });
 }
 
-class FlDrawEditorDataLayer extends StatefulWidget {
+class FlowDrawEditorDataLayer extends StatefulWidget {
   final FlNodeHeaderBuilder? headerBuilder;
   final FlNodeBuilder? nodeBuilder;
   final String fragmentShader;
 
-  const FlDrawEditorDataLayer({
+  const FlowDrawEditorDataLayer({
     super.key,
     this.headerBuilder,
     this.nodeBuilder,
@@ -56,10 +56,10 @@ class FlDrawEditorDataLayer extends StatefulWidget {
   });
 
   @override
-  State<FlDrawEditorDataLayer> createState() => _FlDrawEditorDataLayerState();
+  State<FlowDrawEditorDataLayer> createState() => _FlowDrawEditorDataLayerState();
 }
 
-class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
+class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     with TickerProviderStateMixin {
   late CanvasBloc _canvasBloc;
   late SelectionBloc _selectionBloc;
@@ -104,6 +104,8 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
   double _totalDragDelta = 0.0;
   DateTime? _lastClickTime;
   Offset? _lastClickPosition;
+  int _consecutiveTaps = 0;
+  Timer? _tapTimer;
 
   Offset get offset => _canvasBloc.state.viewportOffset;
 
@@ -121,6 +123,7 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
   void dispose() {
     _canvasFocusNode.dispose();
     _kineticTimer?.cancel();
+    _tapTimer?.cancel();
     super.dispose();
   }
 
@@ -324,9 +327,10 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
       return false;
     }
 
-    final double handleSize = 24.0 / zoom;
+    final dpr = MediaQuery.of(context).devicePixelRatio;
+    final double handleSize = 24.0 * dpr / zoom;
     final double halfHandle = handleSize / 2;
-    final double spacing = 12.0 / zoom;
+    final double spacing = 12.0 * dpr / zoom;
 
     final localPositions = {
       QuickActionDirection.top: object.rect.topCenter - Offset(0, spacing + halfHandle),
@@ -375,17 +379,47 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
     );
     if (worldPos == null) return;
 
-    // Double-click detection
+    // Multi-tap detection: double-tap = undo, triple-tap = redo, double-click = edit
     final now = DateTime.now();
     if (_lastClickTime != null &&
         _lastClickPosition != null &&
         now.difference(_lastClickTime!) < const Duration(milliseconds: 300) &&
-        (event.position - _lastClickPosition!).distance < 10) {
-      _lastClickTime = null;
-      _lastClickPosition = null;
-      _onDoubleClick();
-      return;
+        (event.position - _lastClickPosition!).distance < 40) {
+      _consecutiveTaps++;
+      _tapTimer?.cancel();
+      if (_consecutiveTaps == 3) {
+        // Triple-tap: redo
+        _consecutiveTaps = 0;
+        _lastClickTime = null;
+        _lastClickPosition = null;
+        _canvasBloc.add(RedoRequested());
+        return;
+      }
+      // Check if this second tap hit an object — only fire double-tap
+      // actions (edit/undo) when tapping the same spot on an object.
+      // Tapping empty space should deselect, not trigger undo.
+      final hitObject = _findHitObject(worldPos);
+      _lastClickTime = now;
+      _lastClickPosition = event.position;
+      if (hitObject != null) {
+        // Wait briefly to distinguish double-tap from triple-tap
+        _tapTimer = Timer(const Duration(milliseconds: 300), () {
+          if (_consecutiveTaps == 2) {
+            _consecutiveTaps = 0;
+            if (_selectionBloc.state.selectedNodeIds.isNotEmpty) {
+              _onDoubleClick();
+            }
+          }
+        });
+        return;
+      }
+      // Second tap on empty space — fall through to normal tool handling
+      // for deselection. Reset multi-tap state since this isn't a real
+      // double-tap.
+      _consecutiveTaps = 1;
     }
+    _consecutiveTaps = 1;
+    _tapTimer?.cancel();
     _lastClickTime = now;
     _lastClickPosition = event.position;
 
@@ -401,6 +435,10 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
     }
 
     if (tool == EditorTool.arrow) {
+      // Update hovered handle from tap position before checking —
+      // on touch devices there are no hover events, so the handle
+      // state can be stale from a previous interaction.
+      _updateHoveredHandle(event.position);
       if (_hoveredHandle.handle == Handle.rotate) {
         _beginRotation(worldPos);
         return;
@@ -514,7 +552,10 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
 
     final currentAngle = (worldPos - _rotationStartCenter).direction;
     final angleDelta = currentAngle - _rotationStartAngle;
-    final newAngle = _originalObjectAngle + angleDelta;
+    final rawAngle = _originalObjectAngle + angleDelta;
+    // Snap to 15-degree increments
+    const snap = 15.0 * pi / 180.0;
+    final newAngle = (rawAngle / snap).round() * snap;
 
     final updatedObject = (object as dynamic).copyWith(angle: newAngle);
     _canvasBloc.add(DrawingObjectUpdated(updatedObject));
@@ -545,10 +586,9 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
       return;
     }
 
-    // Double-click inside a closed shape → create centered text
+    // Double-click inside a closed shape → edit shape's inline text
     if (hitObject is RectangleObject || hitObject is CircleObject) {
-      final center = hitObject.rect.center;
-      _beginTextEditing(at: center);
+      _beginShapeTextEditing(hitObject);
       return;
     }
   }
@@ -676,6 +716,8 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
           obstacles: obstacles,
           startObjectRect: startObjRect,
           endObjectRect: endObjRect,
+          devicePixelRatio: MediaQuery.of(context).devicePixelRatio,
+          zoom: _canvasBloc.state.viewportZoom,
         );
 
         final updatedObject = object.copyWith(
@@ -887,6 +929,8 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
             obstacles: obstacles,
             startObjectRect: startObjRect,
             endObjectRect: endObjRect,
+            devicePixelRatio: MediaQuery.of(context).devicePixelRatio,
+            zoom: _canvasBloc.state.viewportZoom,
           );
         }
         _tempDrawingObject = TempDrawingObject(
@@ -952,6 +996,8 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
           )
         : null;
 
+    final lineStyle = _toolBloc.state.lineStyle;
+
     if (tool == EditorTool.arrowTopRight) {
       newObject = ArrowObject(
         id: id,
@@ -961,6 +1007,7 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
         startAttachment: startAttachment,
         endAttachment: endAttachment,
         waypoints: _tempDrawingObject!.waypoints,
+        lineStyle: lineStyle,
       );
     } else if (tool == EditorTool.pencil) {
       if (_currentPencilPoints.length > 1) {
@@ -974,10 +1021,10 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
       if (rect.width > 2 || rect.height > 2) {
         switch (tool) {
           case EditorTool.circle:
-            newObject = CircleObject(id: id, rect: rect);
+            newObject = CircleObject(id: id, rect: rect, lineStyle: lineStyle);
             break;
           case EditorTool.square:
-            newObject = RectangleObject(id: id, rect: rect);
+            newObject = RectangleObject(id: id, rect: rect, lineStyle: lineStyle);
             break;
           case EditorTool.arrowTopRight:
             newObject = ArrowObject(
@@ -985,6 +1032,7 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
               start: _drawingStart,
               end: _tempDrawingObject!.end,
               pathType: _tempDrawingObject!.pathType,
+              lineStyle: lineStyle,
             );
             break;
           case EditorTool.line:
@@ -994,6 +1042,7 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
               end: endPos,
               startAttachment: startAttachment,
               endAttachment: endAttachment,
+              lineStyle: lineStyle,
             );
             break;
           case EditorTool.figure:
@@ -1111,7 +1160,8 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
 
   String? _findHitObject(Offset worldPos) {
     final canvasState = _canvasBloc.state;
-    final tolerance = 8.0 / canvasState.viewportZoom;
+    final tolerance = 12.0 / canvasState.viewportZoom;
+    final hitPadding = 6.0 / canvasState.viewportZoom;
 
     for (final obj in canvasState.drawingObjects.values.toList().reversed) {
       if (obj is ArrowObject) {
@@ -1133,6 +1183,8 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
                 obstacles: obstacles,
                 startObjectRect: startObjRect,
                 endObjectRect: endObjRect,
+                devicePixelRatio: MediaQuery.of(context).devicePixelRatio,
+                zoom: _canvasBloc.state.viewportZoom,
               );
             }
           }
@@ -1167,14 +1219,14 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
         if (isPointNearPath(path, worldPos, tolerance)) {
           return obj.id;
         }
-      } else if (obj.rect.contains(worldPos)) {
+      } else if (obj.rect.inflate(hitPadding).contains(worldPos)) {
         return obj.id;
       }
     }
 
     for (final node in canvasState.nodes.values) {
       final nodeBounds = getNodeBoundsInWorld(node);
-      if (nodeBounds != null && nodeBounds.contains(worldPos)) {
+      if (nodeBounds != null && nodeBounds.inflate(hitPadding).contains(worldPos)) {
         return node.id;
       }
     }
@@ -1260,28 +1312,32 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
         final localPos = rotatedPos + center;
 
         final selectionRect = obj.rect.inflate(4.0 / canvasState.viewportZoom);
-        final handles = {
+        // topRight is the dedicated rotation handle, offset away from object
+        final rotOffset = 8.0 / canvasState.viewportZoom;
+        final rotationCorner = selectionRect.topRight + Offset(rotOffset, -rotOffset);
+        final rotDist = (localPos - rotationCorner).distance;
+        if (rotDist < rotationHitAreaRadius) {
+          if (_hoveredHandle.objectId != objectId ||
+              _hoveredHandle.handle != Handle.rotate) {
+            setState(() => _hoveredHandle =
+                (objectId: objectId, handle: Handle.rotate));
+          }
+          return;
+        }
+
+        // Other 3 corners are resize handles
+        final resizeHandles = {
           Handle.topLeft: selectionRect.topLeft,
-          Handle.topRight: selectionRect.topRight,
           Handle.bottomRight: selectionRect.bottomRight,
           Handle.bottomLeft: selectionRect.bottomLeft,
         };
-        for (final entry in handles.entries) {
+        for (final entry in resizeHandles.entries) {
           final distance = (localPos - entry.value).distance;
-
-          if (distance < rotationHitAreaRadius) {
-            if (distance < handleHitAreaRadius) {
-              if (_hoveredHandle.objectId != objectId ||
-                  _hoveredHandle.handle != entry.key) {
-                setState(() =>
-                _hoveredHandle = (objectId: objectId, handle: entry.key));
-              }
-            } else {
-              if (_hoveredHandle.objectId != objectId ||
-                  _hoveredHandle.handle != Handle.rotate) {
-                setState(() => _hoveredHandle =
-                (objectId: objectId, handle: Handle.rotate));
-              }
+          if (distance < handleHitAreaRadius) {
+            if (_hoveredHandle.objectId != objectId ||
+                _hoveredHandle.handle != entry.key) {
+              setState(() =>
+                  _hoveredHandle = (objectId: objectId, handle: entry.key));
             }
             return;
           }
@@ -1432,8 +1488,10 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
     final focusNode = FocusNode();
     OverlayEntry? overlayEntry;
 
+    bool _closed = false;
     void _submitAndClose() {
-      if (!mounted) return;
+      if (!mounted || _closed) return;
+      _closed = true;
       final newText = textEditingController.text;
 
       setState(() {
@@ -1452,18 +1510,22 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
 
         setState(() {
           object.text = newText;
-          object.rect = Rect.fromLTWH(
-            object.rect.left,
-            object.rect.top,
-            textPainter.width,
-            textPainter.height,
+          // Re-center the text rect around its current center
+          final center = object.rect.center;
+          object.rect = Rect.fromCenter(
+            center: center,
+            width: textPainter.width,
+            height: textPainter.height,
           );
         });
       }
 
-      // focusNode.dispose();
-      textEditingController.dispose();
       overlayEntry?.remove();
+      // Defer disposal to avoid "used after being disposed" errors
+      // when triggered from a focus change notification.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        textEditingController.dispose();
+      });
     }
 
     focusNode.addListener(() {
@@ -1537,6 +1599,136 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
     Overlay.of(context).insert(overlayEntry);
   }
 
+  void _beginShapeTextEditing(DrawingObject shapeObject) {
+    final canvasState = _canvasBloc.state;
+    final zoom = canvasState.viewportZoom;
+    final offset = canvasState.viewportOffset;
+
+    const defaultStyle = TextStyle(fontSize: 14, color: Colors.white);
+
+    String? existingText;
+    TextStyle existingStyle = defaultStyle;
+    if (shapeObject is RectangleObject) {
+      existingText = shapeObject.text;
+      existingStyle = shapeObject.textStyle ?? defaultStyle;
+    } else if (shapeObject is CircleObject) {
+      existingText = shapeObject.text;
+      existingStyle = shapeObject.textStyle ?? defaultStyle;
+    }
+
+    final textEditingController = TextEditingController(text: existingText ?? '');
+    final focusNode = FocusNode();
+    OverlayEntry? overlayEntry;
+
+    // Select all text initially for easy replacement
+    if (existingText != null && existingText.isNotEmpty) {
+      textEditingController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: existingText.length,
+      );
+    }
+
+    void setShapeEditing(bool editing) {
+      setState(() {
+        if (shapeObject is RectangleObject) shapeObject.isEditing = editing;
+        if (shapeObject is CircleObject) shapeObject.isEditing = editing;
+      });
+    }
+
+    setShapeEditing(true);
+
+    bool closed = false;
+    void submitAndClose() {
+      if (!mounted || closed) return;
+      closed = true;
+      final newText = textEditingController.text.trim();
+
+      setShapeEditing(false);
+
+      setState(() {
+        if (shapeObject is RectangleObject) {
+          shapeObject.text = newText.isEmpty ? null : newText;
+          shapeObject.textStyle = newText.isEmpty ? null : existingStyle;
+        } else if (shapeObject is CircleObject) {
+          shapeObject.text = newText.isEmpty ? null : newText;
+          shapeObject.textStyle = newText.isEmpty ? null : existingStyle;
+        }
+      });
+
+      overlayEntry?.remove();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        textEditingController.dispose();
+      });
+    }
+
+    focusNode.addListener(() {
+      if (!focusNode.hasFocus) {
+        submitAndClose();
+      }
+    });
+
+    overlayEntry = OverlayEntry(
+      builder: (context) {
+        final editorBox =
+            kNodeEditorWidgetKey.currentContext!.findRenderObject()
+                as RenderBox;
+        final editorSize = editorBox.size;
+        final editorGlobalOffset = editorBox.localToGlobal(Offset.zero);
+
+        Offset worldToGlobal(Offset worldPoint) {
+          final screenPointX =
+              (worldPoint.dx + offset.dx) * zoom + editorSize.width / 2;
+          final screenPointY =
+              (worldPoint.dy + offset.dy) * zoom + editorSize.height / 2;
+          return Offset(screenPointX, screenPointY) + editorGlobalOffset;
+        }
+
+        final shapeCenter = shapeObject.rect.center;
+        final globalCenter = worldToGlobal(shapeCenter);
+        final screenWidth = shapeObject.rect.width * zoom;
+
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () {
+                  focusNode.unfocus();
+                },
+                child: Container(color: Colors.transparent),
+              ),
+            ),
+            Positioned(
+              left: globalCenter.dx - screenWidth / 2,
+              top: globalCenter.dy - (existingStyle.fontSize! * zoom) / 2,
+              width: screenWidth,
+              child: Material(
+                color: Colors.transparent,
+                child: TextField(
+                  controller: textEditingController,
+                  focusNode: focusNode,
+                  textAlign: TextAlign.center,
+                  style: existingStyle.copyWith(
+                    fontSize: existingStyle.fontSize! * zoom,
+                  ),
+                  maxLines: 1,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => submitAndClose(),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    Overlay.of(context).insert(overlayEntry);
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<CanvasBloc, CanvasState>(
@@ -1549,11 +1741,11 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
                   child: ShaderBuilder(
                     assetKey: widget.fragmentShader,
                         (context, gridShader, child) =>
-                        FlDrawEditorRenderObjectWidget(
+                        FlowDrawEditorRenderObjectWidget(
                           key: kNodeEditorWidgetKey,
                           canvasState: canvasState,
                           selectionState: selectionState,
-                          style: const FlDrawEditorStyle(),
+                          style: const FlowDrawEditorStyle(),
                           gridShader: gridShader,
                           tempDrawingObject: _tempDrawingObject,
                           selectionArea: _selectionArea,
@@ -1694,17 +1886,17 @@ class _FlDrawEditorDataLayerState extends State<FlDrawEditorDataLayer>
                         );
                       }
                     },
-                    child: GestureDetector(
-                      onScaleStart: _onScaleStart,
-                      onScaleUpdate: _onScaleUpdate,
-                      onScaleEnd: _onScaleEnd,
-                      child: Listener(
-                        behavior: HitTestBehavior.translucent,
-                        onPointerDown: _onPointerDown,
-                        onPointerMove: _onPointerMove,
-                        onPointerUp: _onPointerUp,
-                        onPointerCancel: _onPointerCancel,
-                        onPointerSignal: _onPointerSignal,
+                    child: Listener(
+                      behavior: HitTestBehavior.translucent,
+                      onPointerDown: _onPointerDown,
+                      onPointerMove: _onPointerMove,
+                      onPointerUp: _onPointerUp,
+                      onPointerCancel: _onPointerCancel,
+                      onPointerSignal: _onPointerSignal,
+                      child: GestureDetector(
+                        onScaleStart: _onScaleStart,
+                        onScaleUpdate: _onScaleUpdate,
+                        onScaleEnd: _onScaleEnd,
                         child: canvasChild,
                       ),
                     ),

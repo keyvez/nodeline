@@ -16,3 +16,13 @@ final class ToolSelected extends ToolEvent {
   @override
   List<Object> get props => [tool];
 }
+
+/// Event dispatched when a new line style is selected from the toolbar.
+final class LineStyleSelected extends ToolEvent {
+  final LineStyle lineStyle;
+
+  const LineStyleSelected(this.lineStyle);
+
+  @override
+  List<Object> get props => [lineStyle];
+}
