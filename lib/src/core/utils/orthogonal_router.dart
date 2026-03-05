@@ -208,14 +208,11 @@ class OrthogonalRouter {
     // Skip expansion when the path is already complex (>6 points) —
     // the A* pathfinder has already routed around obstacles and
     // expansion would add unnecessary complexity.
-    final expanded = _expandUTurns(result, startObjectRect, endObjectRect);
-
-    // Re-align after U-turn expansion in case new points aren't axis-aligned
-    final finalPath = _ensureAxisAligned(expanded, routingInflated);
+    final expanded = _expandUTurns(result);
 
     // Return only the intermediate waypoints (strip start and end)
-    if (finalPath.length <= 2) return const [];
-    return finalPath.sublist(1, finalPath.length - 1);
+    if (expanded.length <= 2) return const [];
+    return expanded.sublist(1, expanded.length - 1);
   }
 
   /// Computes optimal attachment points on two connected object rects.
@@ -404,19 +401,12 @@ class OrthogonalRouter {
   /// When the U-turn involves the first or last point in the path (start/end),
   /// the curr point is preserved and extra waypoints are inserted to maintain
   /// axis-alignment with the start/end.
-  static List<Offset> _expandUTurns(List<Offset> path,
-      [Rect? startObjectRect, Rect? endObjectRect]) {
+  static List<Offset> _expandUTurns(List<Offset> path) {
     if (path.length < 3) return path;
-    final minUTurnOffset = _padding * 1.2 * _dpr;
+    final uTurnOffset = _padding * 1.2 * _dpr;
     final pathStart = path.first;
     final pathEnd = path.last;
     final result = <Offset>[path[0]];
-
-    // Collect object rects for clearance checking
-    final objectRects = <Rect>[
-      if (startObjectRect != null) startObjectRect,
-      if (endObjectRect != null) endObjectRect,
-    ];
 
     int skipUntil = -1;
     for (int i = 1; i < path.length - 1; i++) {
@@ -440,32 +430,14 @@ class OrthogonalRouter {
           // U-turn on horizontal axis — offset perpendicular (vertical)
           // Choose offset direction toward the overall end of the path
           final toEnd = pathEnd.dy - curr.dy;
-          var offsetY = toEnd >= 0 ? minUTurnOffset : -minUTurnOffset;
-
-          // Ensure the U-turn clears all object rects with padding
-          final clearance = _padding * 0.5;
-          for (final rect in objectRects) {
-            final expandedY = curr.dy + offsetY;
-            if (offsetY > 0 && expandedY < rect.bottom + clearance &&
-                curr.dy < rect.bottom + clearance) {
-              // Going down but not clearing the bottom edge
-              offsetY = rect.bottom + clearance - curr.dy;
-              if (offsetY < minUTurnOffset) offsetY = minUTurnOffset;
-            } else if (offsetY < 0 && expandedY > rect.top - clearance &&
-                curr.dy > rect.top - clearance) {
-              // Going up but not clearing the top edge
-              offsetY = rect.top - clearance - curr.dy;
-              if (offsetY > -minUTurnOffset) offsetY = -minUTurnOffset;
-            }
-          }
-
+          var offsetY = toEnd >= 0 ? uTurnOffset : -uTurnOffset;
           // Snap offset to a nearby subsequent path point's Y to avoid
           // creating a tiny segment (e.g. 0.1 units) between the expansion
           // endpoint and the next waypoint.
           final expandedY = curr.dy + offsetY;
           for (int j = i + 2; j < path.length; j++) {
             final dy = (path[j].dy - expandedY).abs();
-            if (dy > 0.01 && dy < minUTurnOffset) {
+            if (dy > 0.01 && dy < uTurnOffset) {
               offsetY = path[j].dy - curr.dy;
               break;
             }
@@ -492,27 +464,11 @@ class OrthogonalRouter {
         if (dirIn != 0 && dirOut != 0 && dirIn == -dirOut) {
           // U-turn on vertical axis — offset perpendicular (horizontal)
           final toEnd = pathEnd.dx - curr.dx;
-          var offsetX = toEnd >= 0 ? minUTurnOffset : -minUTurnOffset;
-
-          // Ensure the U-turn clears all object rects with padding
-          final clearance = _padding * 0.5;
-          for (final rect in objectRects) {
-            final expandedX = curr.dx + offsetX;
-            if (offsetX > 0 && expandedX < rect.right + clearance &&
-                curr.dx < rect.right + clearance) {
-              offsetX = rect.right + clearance - curr.dx;
-              if (offsetX < minUTurnOffset) offsetX = minUTurnOffset;
-            } else if (offsetX < 0 && expandedX > rect.left - clearance &&
-                curr.dx > rect.left - clearance) {
-              offsetX = rect.left - clearance - curr.dx;
-              if (offsetX > -minUTurnOffset) offsetX = -minUTurnOffset;
-            }
-          }
-
+          var offsetX = toEnd >= 0 ? uTurnOffset : -uTurnOffset;
           final expandedX = curr.dx + offsetX;
           for (int j = i + 2; j < path.length; j++) {
             final dx = (path[j].dx - expandedX).abs();
-            if (dx > 0.01 && dx < minUTurnOffset) {
+            if (dx > 0.01 && dx < uTurnOffset) {
               offsetX = path[j].dx - curr.dx;
               break;
             }
