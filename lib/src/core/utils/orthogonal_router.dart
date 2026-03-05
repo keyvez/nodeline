@@ -154,29 +154,52 @@ class OrthogonalRouter {
 
     if (exitOpposesTarget && startExit != null) {
       // Exit opposes target direction — build explicit wide U-turn waypoints.
-      // The path exits away from the target, sweeps wide perpendicular, then
-      // comes back to reach routeEnd.
-      final uTurnOffset = _padding * 2.5 * _dpr;
+      // Compute detour position that clears both source and target objects.
+      final clearance = _padding + 5;
       final exitDir = routeStart - start;
       final isHorizExit = exitDir.dx.abs() > exitDir.dy.abs();
 
       if (isHorizExit) {
-        // Horizontal exit (left or right) — need vertical detour
-        // Choose detour direction: toward end.dy if different, else below
+        // Horizontal exit — need vertical detour to clear objects
         final detourSign = (routeEnd.dy - routeStart.dy).abs() > 0.5
             ? (routeEnd.dy - routeStart.dy).sign
             : 1.0; // default: go down
-        final detourY = routeStart.dy + detourSign * uTurnOffset;
+        // Compute Y that clears both source and target objects
+        double detourY = routeStart.dy + detourSign * clearance;
+        if (startObjectRect != null) {
+          final edge = detourSign > 0 ? startObjectRect.bottom : startObjectRect.top;
+          detourY = detourSign > 0
+              ? max(detourY, edge + clearance)
+              : min(detourY, edge - clearance);
+        }
+        if (endObjectRect != null) {
+          final edge = detourSign > 0 ? endObjectRect.bottom : endObjectRect.top;
+          detourY = detourSign > 0
+              ? max(detourY, edge + clearance)
+              : min(detourY, edge - clearance);
+        }
         innerWaypoints = [
-          Offset(routeStart.dx, detourY),  // go perpendicular from exit
-          Offset(routeEnd.dx, detourY),     // traverse to target X
+          Offset(routeStart.dx, detourY),
+          Offset(routeEnd.dx, detourY),
         ];
       } else {
-        // Vertical exit (up or down) — need horizontal detour
+        // Vertical exit — need horizontal detour
         final detourSign = (routeEnd.dx - routeStart.dx).abs() > 0.5
             ? (routeEnd.dx - routeStart.dx).sign
             : 1.0;
-        final detourX = routeStart.dx + detourSign * uTurnOffset;
+        double detourX = routeStart.dx + detourSign * clearance;
+        if (startObjectRect != null) {
+          final edge = detourSign > 0 ? startObjectRect.right : startObjectRect.left;
+          detourX = detourSign > 0
+              ? max(detourX, edge + clearance)
+              : min(detourX, edge - clearance);
+        }
+        if (endObjectRect != null) {
+          final edge = detourSign > 0 ? endObjectRect.right : endObjectRect.left;
+          detourX = detourSign > 0
+              ? max(detourX, edge + clearance)
+              : min(detourX, edge - clearance);
+        }
         innerWaypoints = [
           Offset(detourX, routeStart.dy),
           Offset(detourX, routeEnd.dy),
@@ -473,7 +496,7 @@ class OrthogonalRouter {
   /// axis-alignment with the start/end.
   static List<Offset> _expandUTurns(List<Offset> path) {
     if (path.length < 3) return path;
-    final uTurnOffset = _padding * 2.5 * _dpr;
+    final uTurnOffset = _padding * 1.5 * _dpr;
     final pathStart = path.first;
     final pathEnd = path.last;
     final result = <Offset>[path[0]];
