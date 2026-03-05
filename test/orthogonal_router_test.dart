@@ -717,6 +717,46 @@ void main() {
       final fullPath = [const Offset(0, 50), ...waypoints, const Offset(200, 50)];
       _verifyAxisAligned(fullPath);
     });
+
+    test('left-edge start with right-side target same Y gets U-turn', () {
+      final sourceRect = const Rect.fromLTWH(200, 160, 100, 80);
+      final targetRect = const Rect.fromLTWH(420, 160, 100, 80);
+      final start = Offset(sourceRect.left, sourceRect.center.dy);
+      final end = Offset(targetRect.left, targetRect.center.dy);
+
+      // Render code excludes source & target from obstacles
+      final waypoints = OrthogonalRouter.route(
+        start: start,
+        end: end,
+        obstacles: [],
+        startObjectRect: sourceRect,
+        endObjectRect: targetRect,
+        devicePixelRatio: 2.0,
+        zoom: 1.0,
+      );
+
+      print('U-turn test: start=$start end=$end');
+      print('U-turn test waypoints=$waypoints');
+      final fullPath = [start, ...waypoints, end];
+      print('U-turn test fullPath=$fullPath');
+
+      // Should have waypoints (U-turn around source)
+      expect(waypoints.length, greaterThan(0),
+          reason: 'Left-edge exit toward right target should produce U-turn waypoints');
+      // Path should not cross through source rect interior
+      for (int i = 0; i < fullPath.length - 1; i++) {
+        final a = fullPath[i];
+        final b = fullPath[i + 1];
+        if ((a.dy - b.dy).abs() < 0.5) {
+          final minX = a.dx < b.dx ? a.dx : b.dx;
+          final maxX = a.dx > b.dx ? a.dx : b.dx;
+          if (a.dy > sourceRect.top + 1 && a.dy < sourceRect.bottom - 1 &&
+              minX < sourceRect.left - 1 && maxX > sourceRect.right + 1) {
+            fail('Segment $a -> $b crosses through source rect $sourceRect');
+          }
+        }
+      }
+    });
   });
 }
 

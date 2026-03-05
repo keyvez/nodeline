@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 class OrthogonalRouter {
   static const double _basePadding = 40.0;
   static double _padding = _basePadding;
+  static double _dpr = 1.0;
   static const double _searchInflation = 300.0;
   static const int _maxObstacles = 20;
 
@@ -26,6 +27,7 @@ class OrthogonalRouter {
     double zoom = 1.0,
   }) {
     // Scale padding inversely with zoom to maintain a consistent visual gap.
+    _dpr = devicePixelRatio;
     _padding = _basePadding / zoom.clamp(0.1, 10.0);
     // Filter and inflate obstacles first (needed for obstacle-aware exit stubs)
     final searchArea = Rect.fromPoints(start, end).inflate(_searchInflation);
@@ -90,9 +92,12 @@ class OrthogonalRouter {
 
     // Compute exit/entry stubs if attached to objects.
     // Target entry stub uses a larger distance to match the larger target inflation.
+    // Source exit uses same spacious padding as target for consistent turn radius
+    final sourcePadding = _padding * 1.0 + 5;
     final startExit = startObjectRect != null
         ? _computeExitPoint(start, startObjectRect,
-            _inflatedExcluding(startObjectRect), end)
+            _inflatedExcluding(startObjectRect), end,
+            sourcePadding)
         : null;
     final endEntry = endObjectRect != null
         ? _computeExitPoint(end, endObjectRect,
@@ -203,7 +208,7 @@ class OrthogonalRouter {
     // Skip expansion when the path is already complex (>6 points) —
     // the A* pathfinder has already routed around obstacles and
     // expansion would add unnecessary complexity.
-    final expanded = result.length <= 6 ? _expandUTurns(result) : result;
+    final expanded = _expandUTurns(result);
 
     // Return only the intermediate waypoints (strip start and end)
     if (expanded.length <= 2) return const [];
@@ -302,6 +307,10 @@ class OrthogonalRouter {
       naturalExit = left;
     }
 
+    // Always prefer the natural exit direction (outward from the attachment edge).
+    // Only fall back to other directions if natural is blocked by an obstacle.
+    if (isClear(naturalExit)) return naturalExit;
+
     // Score exits by distance to target (lower = closer to target)
     double score(Offset exitPt) {
       if (target == null) return 0;
@@ -311,9 +320,6 @@ class OrthogonalRouter {
     // Sort all exits by target proximity
     final exits = [left, right, top, bottom];
     exits.sort((a, b) => score(a).compareTo(score(b)));
-
-    // Try the natural exit first
-    if (isClear(naturalExit)) return naturalExit;
 
     // Natural exit is blocked — try target-directed fallback
     for (final exit in exits) {
@@ -397,7 +403,7 @@ class OrthogonalRouter {
   /// axis-alignment with the start/end.
   static List<Offset> _expandUTurns(List<Offset> path) {
     if (path.length < 3) return path;
-    const uTurnOffset = 20.0;
+    final uTurnOffset = _padding * 1.2 * _dpr;
     final pathStart = path.first;
     final pathEnd = path.last;
     final result = <Offset>[path[0]];

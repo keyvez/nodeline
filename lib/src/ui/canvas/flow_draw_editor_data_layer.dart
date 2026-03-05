@@ -328,15 +328,52 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     }
 
     final dpr = MediaQuery.of(context).devicePixelRatio;
-    final double handleSize = 24.0 * dpr / zoom;
+    // Match the render sizes from _paintQuickActionArrows
+    final double handleSize = 20.0 * dpr / sqrt(zoom);
     final double halfHandle = handleSize / 2;
-    final double spacing = 12.0 * dpr / zoom;
+    final double spacing = 10.0 * dpr / sqrt(zoom);
+
+    // Compute connector offsets (same logic as _paintQuickActionArrows)
+    final edgeApproachFromLeft = <String, List<bool>>{};
+    for (final obj in _canvasBloc.state.drawingObjects.values) {
+      if (obj is ArrowObject || obj is LineObject) {
+        final startAtt = obj is ArrowObject ? obj.startAttachment : (obj as LineObject).startAttachment;
+        final endAtt = obj is ArrowObject ? obj.endAttachment : (obj as LineObject).endAttachment;
+        final otherEnd = obj is ArrowObject ? obj.end : (obj as LineObject).end;
+        final otherStart = obj is ArrowObject ? obj.start : (obj as LineObject).start;
+        for (final (att, otherPoint) in [(startAtt, otherEnd), (endAtt, otherStart)]) {
+          if (att != null && att.objectId == objectId) {
+            final rp = att.relativePosition;
+            if (rp.dy < 0.25) (edgeApproachFromLeft['top'] ??= []).add(otherPoint.dx < object.rect.center.dx);
+            if (rp.dy > 0.75) (edgeApproachFromLeft['bottom'] ??= []).add(otherPoint.dx < object.rect.center.dx);
+            if (rp.dx < 0.25) (edgeApproachFromLeft['left'] ??= []).add(otherPoint.dy < object.rect.center.dy);
+            if (rp.dx > 0.75) (edgeApproachFromLeft['right'] ??= []).add(otherPoint.dy < object.rect.center.dy);
+          }
+        }
+      }
+    }
+    final double connOffset = handleSize * 2.0;
+    Offset _edgeOffset(String edge) {
+      final approaches = edgeApproachFromLeft[edge];
+      if (approaches == null) return Offset.zero;
+      final mostlyFromLeft = approaches.where((b) => b).length >= approaches.length / 2;
+      switch (edge) {
+        case 'top':
+        case 'bottom':
+          return Offset(mostlyFromLeft ? connOffset : -connOffset, 0);
+        case 'left':
+        case 'right':
+          return Offset(0, mostlyFromLeft ? connOffset : -connOffset);
+        default:
+          return Offset.zero;
+      }
+    }
 
     final localPositions = {
-      QuickActionDirection.top: object.rect.topCenter - Offset(0, spacing + halfHandle),
-      QuickActionDirection.right: object.rect.centerRight + Offset(spacing + halfHandle, 0),
-      QuickActionDirection.bottom: object.rect.bottomCenter + Offset(0, spacing + halfHandle),
-      QuickActionDirection.left: object.rect.centerLeft - Offset(spacing + halfHandle, 0),
+      QuickActionDirection.top: object.rect.topCenter - Offset(0, spacing + halfHandle) + _edgeOffset('top'),
+      QuickActionDirection.right: object.rect.centerRight + Offset(spacing + halfHandle, 0) + _edgeOffset('right'),
+      QuickActionDirection.bottom: object.rect.bottomCenter + Offset(0, spacing + halfHandle) + _edgeOffset('bottom'),
+      QuickActionDirection.left: object.rect.centerLeft - Offset(spacing + halfHandle, 0) + _edgeOffset('left'),
     };
 
     for (var entry in localPositions.entries) {
@@ -345,7 +382,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
       final worldCenter = localCenter.rotate(object.rect.center, object.angle);
 
-      if ((worldPos - worldCenter).distance < halfHandle) {
+      if ((worldPos - worldCenter).distance < halfHandle * 1.5) {
         _canvasBloc.add(ObjectDuplicatedWithConnection(objectId, direction));
         return true;
       }
@@ -406,9 +443,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         _tapTimer = Timer(const Duration(milliseconds: 300), () {
           if (_consecutiveTaps == 2) {
             _consecutiveTaps = 0;
-            if (_selectionBloc.state.selectedNodeIds.isNotEmpty) {
-              _onDoubleClick();
-            }
+            _onDoubleClick();
           }
         });
         return;
@@ -1288,8 +1323,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     );
     if (worldPos == null) return;
 
-    final handleHitAreaRadius = 10.0 / canvasState.viewportZoom;
-    final rotationHitAreaRadius = 22.0 / canvasState.viewportZoom;
+    final dpr = MediaQuery.of(context).devicePixelRatio;
+    final handleHitAreaRadius = 20.0 * dpr / sqrt(canvasState.viewportZoom);
+    final rotationHitAreaRadius = 22.0 * dpr / sqrt(canvasState.viewportZoom);
 
     for (final objectId in selectionState.selectedDrawingObjectIds) {
       final obj = canvasState.drawingObjects[objectId];

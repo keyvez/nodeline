@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flow_draw/src/core/node_editor/clipboard.dart';
@@ -457,8 +459,17 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       return;
     }
 
-    const double spacing = 60.0;
     final sourceRect = sourceObject.rect;
+    // Gap between source and new object: at least 60% of the object's dimension, minimum 120px
+    final double spacing;
+    switch (event.direction) {
+      case QuickActionDirection.top:
+      case QuickActionDirection.bottom:
+        spacing = max(sourceRect.height * 0.6, 120.0);
+      case QuickActionDirection.left:
+      case QuickActionDirection.right:
+        spacing = max(sourceRect.width * 0.6, 120.0);
+    }
 
     late Offset newRectTopLeft;
     late ObjectAttachment startAttachment;
@@ -471,7 +482,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         endAttachment = const ObjectAttachment(objectId: '', relativePosition: Offset(0.5, 1.0));
         break;
       case QuickActionDirection.right:
-        newRectTopLeft = sourceRect.topRight + const Offset(spacing, 0);
+        newRectTopLeft = sourceRect.topRight + Offset(spacing, 0);
         startAttachment = const ObjectAttachment(objectId: '', relativePosition: Offset(1.0, 0.5));
         endAttachment = const ObjectAttachment(objectId: '', relativePosition: Offset(0.0, 0.5));
         break;
@@ -485,6 +496,29 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         startAttachment = const ObjectAttachment(objectId: '', relativePosition: Offset(0.0, 0.5));
         endAttachment = const ObjectAttachment(objectId: '', relativePosition: Offset(1.0, 0.5));
         break;
+    }
+
+    // Avoid overlapping with existing objects: push further if needed
+    final existingRects = <Rect>[];
+    for (final obj in state.drawingObjects.values) {
+      if (obj is ArrowObject || obj is LineObject || obj is PencilStrokeObject) continue;
+      existingRects.add(obj.rect);
+    }
+    var candidateRect = newRectTopLeft & sourceRect.size;
+    const double pushStep = 40.0;
+    final Offset pushDir;
+    switch (event.direction) {
+      case QuickActionDirection.top:    pushDir = const Offset(0, -1);
+      case QuickActionDirection.right:  pushDir = const Offset(1, 0);
+      case QuickActionDirection.bottom: pushDir = const Offset(0, 1);
+      case QuickActionDirection.left:   pushDir = const Offset(-1, 0);
+    }
+    // Push until no overlap (max 20 iterations to avoid infinite loop)
+    for (int i = 0; i < 20; i++) {
+      final overlaps = existingRects.any((r) => r.overlaps(candidateRect.inflate(10)));
+      if (!overlaps) break;
+      newRectTopLeft += pushDir * pushStep;
+      candidateRect = newRectTopLeft & sourceRect.size;
     }
 
     final DrawingObject newShape;
