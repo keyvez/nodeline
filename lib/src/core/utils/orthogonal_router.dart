@@ -113,21 +113,91 @@ class OrthogonalRouter {
     // since exit/entry stubs are inside the source/target inflated zones.
     // Candidate waypoints use routingCandidateInflated (includes source/target)
     // so they're placed with clearance from connected objects.
+    //
+    // For L-corner checks, use moderate inflation for source/target so
+    // the quick L-path doesn't hug object edges with a tight turn.
+    // This rejects tight L-corners and lets A* find a wider route.
+    final lCornerInflated = List<Rect>.from(inflated);
+    if (startObjectRect != null) {
+      lCornerInflated.add(startObjectRect.inflate(_padding * 0.5));
+    }
+    if (endObjectRect != null) {
+      lCornerInflated.add(endObjectRect.inflate(_padding * 0.5));
+    }
+    // Detect when the exit stub direction opposes the direction toward the
+    // actual target endpoint (not the entry stub). This means the connector
+    // exits "away" from the target object and must fold back — a U-turn.
+    bool exitOpposesTarget = false;
+    if (startExit != null) {
+      final exitDir = routeStart - start;
+      final toTarget = end - start; // use actual endpoints, not stubs
+      // Horizontal exit opposing horizontal direction to target
+      if (exitDir.dx.abs() > exitDir.dy.abs()) {
+        if (toTarget.dx.abs() > 0.5 && exitDir.dx.sign != toTarget.dx.sign) {
+          exitOpposesTarget = true;
+        } else if (toTarget.dx.abs() <= 0.5) {
+          // Target is directly above/below — exit goes sideways away, that's a U-turn
+          exitOpposesTarget = true;
+        }
+      }
+      // Vertical exit opposing vertical direction to target
+      if (exitDir.dy.abs() > exitDir.dx.abs()) {
+        if (toTarget.dy.abs() > 0.5 && exitDir.dy.sign != toTarget.dy.sign) {
+          exitOpposesTarget = true;
+        } else if (toTarget.dy.abs() <= 0.5) {
+          exitOpposesTarget = true;
+        }
+      }
+    }
+
     List<Offset> innerWaypoints;
-    final clearCorner = _findClearLCorner(routeStart, routeEnd, innerInflated,
-        exitDir: startExit != null ? routeStart - start : null,
-        entryDir: endEntry != null ? routeEnd - end : null);
-    if (clearCorner != null) {
-      if (clearCorner == routeStart) {
+
+    if (exitOpposesTarget && startExit != null) {
+      // Exit opposes target direction — build explicit wide U-turn waypoints.
+      // The path exits away from the target, sweeps wide perpendicular, then
+      // comes back to reach routeEnd.
+      final uTurnOffset = _padding * 2.5 * _dpr;
+      final exitDir = routeStart - start;
+      final isHorizExit = exitDir.dx.abs() > exitDir.dy.abs();
+
+      if (isHorizExit) {
+        // Horizontal exit (left or right) — need vertical detour
+        // Choose detour direction: toward end.dy if different, else below
+        final detourSign = (routeEnd.dy - routeStart.dy).abs() > 0.5
+            ? (routeEnd.dy - routeStart.dy).sign
+            : 1.0; // default: go down
+        final detourY = routeStart.dy + detourSign * uTurnOffset;
+        innerWaypoints = [
+          Offset(routeStart.dx, detourY),  // go perpendicular from exit
+          Offset(routeEnd.dx, detourY),     // traverse to target X
+        ];
+      } else {
+        // Vertical exit (up or down) — need horizontal detour
+        final detourSign = (routeEnd.dx - routeStart.dx).abs() > 0.5
+            ? (routeEnd.dx - routeStart.dx).sign
+            : 1.0;
+        final detourX = routeStart.dx + detourSign * uTurnOffset;
+        innerWaypoints = [
+          Offset(detourX, routeStart.dy),
+          Offset(detourX, routeEnd.dy),
+        ];
+      }
+    } else {
+      final clearCorner = _findClearLCorner(routeStart, routeEnd, lCornerInflated,
+          exitDir: startExit != null ? routeStart - start : null,
+          entryDir: endEntry != null ? routeEnd - end : null);
+      if (clearCorner != null) {
+        if (clearCorner == routeStart) {
+          innerWaypoints = const [];
+        } else {
+          innerWaypoints = [clearCorner];
+        }
+      } else if (innerInflated.isEmpty && routingCandidateInflated.isEmpty) {
         innerWaypoints = const [];
       } else {
-        innerWaypoints = [clearCorner];
+        final candidates = _generateCandidates(routeStart, routeEnd, routingCandidateInflated, innerInflated);
+        innerWaypoints = _findPath(routeStart, routeEnd, candidates, innerInflated);
       }
-    } else if (innerInflated.isEmpty && routingCandidateInflated.isEmpty) {
-      innerWaypoints = const [];
-    } else {
-      final candidates = _generateCandidates(routeStart, routeEnd, routingCandidateInflated, innerInflated);
-      innerWaypoints = _findPath(routeStart, routeEnd, candidates, innerInflated);
     }
 
     // Assemble full waypoint list: start + exitStub + inner + entryStub + end
@@ -181,7 +251,7 @@ class OrthogonalRouter {
         pathLen += (result[i].dx - result[i + 1].dx).abs() +
             (result[i].dy - result[i + 1].dy).abs();
       }
-      if (pathLen > directDist * 3.0) {
+      if (pathLen > directDist * 3.0 && !exitOpposesTarget) {
         // Path is too long — try a simpler stub-only path
         final simplePath = <Offset>[start];
         if (startExit != null) simplePath.add(startExit);
@@ -403,7 +473,7 @@ class OrthogonalRouter {
   /// axis-alignment with the start/end.
   static List<Offset> _expandUTurns(List<Offset> path) {
     if (path.length < 3) return path;
-    final uTurnOffset = _padding * 1.2 * _dpr;
+    final uTurnOffset = _padding * 2.5 * _dpr;
     final pathStart = path.first;
     final pathEnd = path.last;
     final result = <Offset>[path[0]];

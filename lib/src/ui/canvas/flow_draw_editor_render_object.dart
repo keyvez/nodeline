@@ -1323,7 +1323,7 @@ class FlowDrawEditorRenderBox extends RenderBox
     }
 
     final dprForRadius = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-    final double cornerRadius = 10.0 * dprForRadius / zoom;
+    final double cornerRadius = 30.0 * dprForRadius / zoom;
     final Path path = Path();
     path.moveTo(allPoints[0].dx, allPoints[0].dy);
 
@@ -1386,7 +1386,7 @@ class FlowDrawEditorRenderBox extends RenderBox
 
     // Multi-segment path with rounded corners
     final dprForRadius = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-    final double cornerRadius = 10.0 * dprForRadius / zoom;
+    final double cornerRadius = 30.0 * dprForRadius / zoom;
     final Path path = Path();
     path.moveTo(allPoints[0].dx, allPoints[0].dy);
 

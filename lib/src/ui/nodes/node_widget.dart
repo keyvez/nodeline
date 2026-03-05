@@ -32,6 +32,11 @@ class _DefaultNodeWidgetState extends State<DefaultNodeWidget> {
     super.initState();
     _canvasBloc = context.read<CanvasBloc>();
     _selectionBloc = context.read<SelectionBloc>();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
     _updateBuiltStyles();
   }
 
