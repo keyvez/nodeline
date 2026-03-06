@@ -1,9 +1,11 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flow_draw/flow_draw.dart';
 import 'package:flow_draw/src/constants.dart';
 import 'package:flow_draw/src/core/utils/renderbox.dart';
 import 'package:flow_draw/src/core/utils/snackbar.dart';
+import 'package:flow_draw/src/core/utils/svg_exporter.dart';
 import 'package:flow_draw/src/gen/assets.gen.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -257,6 +259,8 @@ class FlowDrawToolbar extends StatelessWidget {
                 return const _MermaidButton();
               },
             ),
+            Gap(8),
+            const _SvgExportButton(),
             BlocBuilder<CanvasBloc, CanvasState>(
               builder: (context, canvasState) {
                 return Padding(
@@ -639,6 +643,49 @@ class _MermaidButton extends StatelessWidget {
           Icon(Icons.code, size: 16),
           const Gap(4),
           Text('Mermaid', style: TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
+class _SvgExportButton extends StatelessWidget {
+  const _SvgExportButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return GhostButton(
+      density: ButtonDensity.compact,
+      onPressed: () async {
+        final canvasBloc = context.read<CanvasBloc>();
+        final svg = SvgExporter.export(canvasBloc.state.drawingObjects);
+        if (svg.isEmpty) {
+          showNodeEditorSnackbar('Nothing to export', SnackbarType.error);
+          return;
+        }
+        try {
+          final tempDir = Directory.systemTemp;
+          final file = File('${tempDir.path}/fldraw_export.svg');
+          await file.writeAsString(svg);
+
+          if (Platform.isMacOS) {
+            await Process.run('open', [file.path]);
+          } else if (Platform.isLinux) {
+            await Process.run('xdg-open', [file.path]);
+          } else if (Platform.isWindows) {
+            await Process.run('cmd', ['/c', 'start', '', file.path]);
+          }
+          showNodeEditorSnackbar('SVG opened in viewer', SnackbarType.success);
+        } catch (e) {
+          showNodeEditorSnackbar('Failed to open SVG: $e', SnackbarType.error);
+        }
+      },
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.image, size: 16),
+          const Gap(4),
+          Text('SVG', style: TextStyle(fontSize: 12)),
         ],
       ),
     );

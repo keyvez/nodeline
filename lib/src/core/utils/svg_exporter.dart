@@ -1,0 +1,500 @@
+import 'dart:math' as math;
+import 'dart:ui';
+
+import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
+import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:flow_draw/src/models/styles.dart';
+
+// Theme constants (dark background, colored strokes — matches app).
+const _bg = '#1a1a1a';
+const _stroke = '#e0e0e0';
+const _arrowStroke = '#90caf9';
+const _lineStroke = '#a5d6a7';
+const _pencilStroke = '#ffcc80';
+const _figureStroke = '#ce93d8';
+const _textColor = '#e0e0e0';
+const _defaultStrokeWidth = 2;
+const _margin = 60.0;
+const _cornerRadius = 6.0;
+const _arrowHeadSize = 12.0;
+
+class SvgExporter {
+  SvgExporter._();
+
+  /// Exports a map of drawing objects to an SVG string.
+  static String export(Map<String, DrawingObject> objects) {
+    // Build solid-object rects for arrow attachment resolution.
+    final solidRects = <String, Rect>{};
+    for (final entry in objects.entries) {
+      final obj = entry.value;
+      if (obj is RectangleObject ||
+          obj is CircleObject ||
+          obj is FigureObject ||
+          obj is TextObject ||
+          obj is SvgObject) {
+        solidRects[entry.key] = obj.rect;
+      }
+    }
+
+    final svgElements = <String>[];
+    final allBounds = <Rect>[];
+
+    for (final obj in objects.values) {
+      switch (obj) {
+        case RectangleObject():
+          _renderRectangle(obj, svgElements, allBounds);
+        case CircleObject():
+          _renderCircle(obj, svgElements, allBounds);
+        case ArrowObject():
+          _renderArrow(obj, objects, solidRects, svgElements, allBounds);
+        case LineObject():
+          _renderLine(obj, svgElements, allBounds);
+        case PencilStrokeObject():
+          _renderPencilStroke(obj, svgElements, allBounds);
+        case FigureObject():
+          _renderFigure(obj, svgElements, allBounds);
+        case TextObject():
+          _renderText(obj, svgElements, allBounds);
+        case SvgObject():
+          break; // Skip — can't re-export without asset data.
+      }
+    }
+
+    if (allBounds.isEmpty) return '';
+
+    var minX = double.infinity, minY = double.infinity;
+    var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    for (final b in allBounds) {
+      minX = math.min(minX, b.left);
+      minY = math.min(minY, b.top);
+      maxX = math.max(maxX, b.right);
+      maxY = math.max(maxY, b.bottom);
+    }
+    minX -= _margin;
+    minY -= _margin;
+    maxX += _margin;
+    maxY += _margin;
+    final vw = maxX - minX;
+    final vh = maxY - minY;
+
+    final svg = StringBuffer()
+      ..writeln('<?xml version="1.0" encoding="UTF-8"?>')
+      ..writeln('<svg xmlns="http://www.w3.org/2000/svg"')
+      ..writeln('     viewBox="$minX $minY $vw $vh"')
+      ..writeln('     width="${vw.round()}" height="${vh.round()}">')
+      ..writeln(
+          '  <rect x="$minX" y="$minY" width="$vw" height="$vh" fill="$_bg"/>')
+      ..writeln()
+      ..writeAll(svgElements, '\n')
+      ..writeln()
+      ..writeln('</svg>');
+
+    return svg.toString();
+  }
+
+  // -- Renderers -------------------------------------------------------------
+
+  static void _renderRectangle(
+    RectangleObject obj,
+    List<String> svg,
+    List<Rect> bounds,
+  ) {
+    final rect = obj.rect;
+    final dashArray = _dashArray(obj.lineStyle);
+    final rotOpen = _rotateOpen(obj.angle, rect.center);
+    final rotClose = _rotateClose(obj.angle);
+
+    if (rotOpen.isNotEmpty) svg.add(rotOpen);
+
+    svg.add('  <rect x="${rect.left}" y="${rect.top}" '
+        'width="${rect.width}" height="${rect.height}" '
+        'rx="$_cornerRadius" ry="$_cornerRadius" '
+        'fill="none" stroke="$_stroke" stroke-width="$_defaultStrokeWidth"'
+        '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
+        '/>');
+
+    if (obj.text != null && obj.text!.isNotEmpty) {
+      svg.add('  <text x="${rect.center.dx}" y="${rect.center.dy}" '
+          'fill="$_textColor" font-size="14" font-family="sans-serif" '
+          'text-anchor="middle" dominant-baseline="central">'
+          '${_escapeXml(obj.text!)}</text>');
+    }
+
+    if (rotClose.isNotEmpty) svg.add(rotClose);
+
+    bounds.add(rect);
+  }
+
+  static void _renderCircle(
+    CircleObject obj,
+    List<String> svg,
+    List<Rect> bounds,
+  ) {
+    final rect = obj.rect;
+    final cx = rect.center.dx;
+    final cy = rect.center.dy;
+    final rx = rect.width / 2;
+    final ry = rect.height / 2;
+    final dashArray = _dashArray(obj.lineStyle);
+    final rotOpen = _rotateOpen(obj.angle, rect.center);
+    final rotClose = _rotateClose(obj.angle);
+
+    if (rotOpen.isNotEmpty) svg.add(rotOpen);
+
+    svg.add('  <ellipse cx="$cx" cy="$cy" rx="$rx" ry="$ry" '
+        'fill="none" stroke="$_stroke" stroke-width="$_defaultStrokeWidth"'
+        '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
+        '/>');
+
+    if (obj.text != null && obj.text!.isNotEmpty) {
+      svg.add('  <text x="$cx" y="$cy" '
+          'fill="$_textColor" font-size="14" font-family="sans-serif" '
+          'text-anchor="middle" dominant-baseline="central">'
+          '${_escapeXml(obj.text!)}</text>');
+    }
+
+    if (rotClose.isNotEmpty) svg.add(rotClose);
+
+    bounds.add(rect);
+  }
+
+  static void _renderArrow(
+    ArrowObject obj,
+    Map<String, DrawingObject> objects,
+    Map<String, Rect> solidRects,
+    List<String> svg,
+    List<Rect> bounds,
+  ) {
+    final dashArray = _dashArray(obj.lineStyle);
+
+    if (obj.pathType == LinkPathType.orthogonal) {
+      var fullPath = _computeOrthogonalPath(obj, solidRects);
+      if (fullPath.length < 2) fullPath = [obj.start, obj.end];
+
+      final pathD = _buildRoundedOrthogonalPath(fullPath);
+      svg.add('  <path d="$pathD" '
+          'fill="none" stroke="$_arrowStroke" stroke-width="$_defaultStrokeWidth" '
+          'stroke-linecap="round"'
+          '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
+          '/>');
+      _renderArrowhead(fullPath, svg);
+      _addPathBounds(fullPath, bounds);
+    } else {
+      // Straight or curved (quadratic bezier via midPoint).
+      final cp = obj.midPoint ?? (obj.start + obj.end) / 2;
+      final hasCurve = obj.midPoint != null;
+
+      if (hasCurve) {
+        svg.add('  <path d="M${obj.start.dx},${obj.start.dy} '
+            'Q${cp.dx},${cp.dy} ${obj.end.dx},${obj.end.dy}" '
+            'fill="none" stroke="$_arrowStroke" stroke-width="$_defaultStrokeWidth" '
+            'stroke-linejoin="round" stroke-linecap="round"'
+            '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
+            '/>');
+        // Arrowhead: use tangent at t=1 of the quadratic bezier.
+        // Tangent direction at t=1: 2*(end - cp)
+        final tangent = obj.end - cp;
+        final len = math.sqrt(tangent.dx * tangent.dx + tangent.dy * tangent.dy);
+        if (len > 0.1) {
+          _renderArrowhead([obj.end - tangent * (1.0 / len), obj.end], svg);
+        }
+      } else {
+        final points = '${obj.start.dx},${obj.start.dy} ${obj.end.dx},${obj.end.dy}';
+        svg.add('  <polyline points="$points" '
+            'fill="none" stroke="$_arrowStroke" stroke-width="$_defaultStrokeWidth" '
+            'stroke-linejoin="round" stroke-linecap="round"'
+            '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
+            '/>');
+        _renderArrowhead([obj.start, obj.end], svg);
+      }
+
+      // Bounds: include control point for curves.
+      _addPathBounds([obj.start, cp, obj.end], bounds);
+    }
+  }
+
+  static void _renderLine(
+    LineObject obj,
+    List<String> svg,
+    List<Rect> bounds,
+  ) {
+    final dashArray = _dashArray(obj.lineStyle);
+    final hasCurve = obj.midPoint != null;
+
+    if (hasCurve) {
+      final cp = obj.midPoint!;
+      svg.add('  <path d="M${obj.start.dx},${obj.start.dy} '
+          'Q${cp.dx},${cp.dy} ${obj.end.dx},${obj.end.dy}" '
+          'fill="none" stroke="$_lineStroke" stroke-width="$_defaultStrokeWidth" '
+          'stroke-linejoin="round" stroke-linecap="round"'
+          '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
+          '/>');
+      _addPathBounds([obj.start, cp, obj.end], bounds);
+    } else {
+      final points =
+          '${obj.start.dx},${obj.start.dy} ${obj.end.dx},${obj.end.dy}';
+      svg.add('  <polyline points="$points" '
+          'fill="none" stroke="$_lineStroke" stroke-width="$_defaultStrokeWidth" '
+          'stroke-linejoin="round" stroke-linecap="round"'
+          '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
+          '/>');
+      bounds.add(Rect.fromPoints(obj.start, obj.end));
+    }
+  }
+
+  static void _renderPencilStroke(
+    PencilStrokeObject obj,
+    List<String> svg,
+    List<Rect> bounds,
+  ) {
+    if (obj.points.isEmpty) return;
+
+    final pointsStr =
+        obj.points.map((p) => '${p.x},${p.y}').join(' ');
+    svg.add('  <polyline points="$pointsStr" '
+        'fill="none" stroke="$_pencilStroke" stroke-width="1.5" '
+        'stroke-linejoin="round" stroke-linecap="round"/>');
+
+    bounds.add(obj.rect);
+  }
+
+  static void _renderFigure(
+    FigureObject obj,
+    List<String> svg,
+    List<Rect> bounds,
+  ) {
+    final rect = obj.rect;
+    final rotOpen = _rotateOpen(obj.angle, rect.center);
+    final rotClose = _rotateClose(obj.angle);
+
+    if (rotOpen.isNotEmpty) svg.add(rotOpen);
+
+    svg.add('  <rect x="${rect.left}" y="${rect.top}" '
+        'width="${rect.width}" height="${rect.height}" '
+        'fill="none" stroke="$_figureStroke" stroke-width="1" '
+        'stroke-dasharray="6,3"/>');
+
+    if (obj.label.isNotEmpty) {
+      svg.add('  <text x="${rect.left + 6}" y="${rect.top + 14}" '
+          'fill="$_figureStroke" font-size="12" font-family="sans-serif">'
+          '${_escapeXml(obj.label)}</text>');
+    }
+
+    if (rotClose.isNotEmpty) svg.add(rotClose);
+
+    bounds.add(rect);
+  }
+
+  static void _renderText(
+    TextObject obj,
+    List<String> svg,
+    List<Rect> bounds,
+  ) {
+    final rect = obj.rect;
+    final rotOpen = _rotateOpen(obj.angle, rect.center);
+    final rotClose = _rotateClose(obj.angle);
+
+    if (rotOpen.isNotEmpty) svg.add(rotOpen);
+
+    if (obj.text.isNotEmpty) {
+      svg.add('  <text x="${rect.center.dx}" y="${rect.center.dy}" '
+          'fill="$_textColor" font-size="14" font-family="sans-serif" '
+          'text-anchor="middle" dominant-baseline="central">'
+          '${_escapeXml(obj.text)}</text>');
+    }
+
+    if (rotClose.isNotEmpty) svg.add(rotClose);
+
+    bounds.add(rect);
+  }
+
+  // -- Rounded orthogonal path -----------------------------------------------
+
+  /// Builds an SVG path string with rounded corners at each bend,
+  /// matching the app's `arcToPoint` rendering.
+  static String _buildRoundedOrthogonalPath(List<Offset> allPoints) {
+    const double cornerRadius = 30.0;
+    final sb = StringBuffer();
+    sb.write('M${allPoints[0].dx},${allPoints[0].dy}');
+
+    for (int i = 1; i < allPoints.length - 1; i++) {
+      final prev = allPoints[i - 1];
+      final curr = allPoints[i];
+      final next = allPoints[i + 1];
+      final segPrev = (curr - prev).distance;
+      final segNext = (next - curr).distance;
+      final r = math.min(cornerRadius, math.min(segPrev / 2, segNext / 2));
+
+      if (r < 1.0) {
+        sb.write(' L${curr.dx},${curr.dy}');
+        continue;
+      }
+
+      final dirIn = Offset(
+          (curr.dx - prev.dx) / segPrev, (curr.dy - prev.dy) / segPrev);
+      final dirOut = Offset(
+          (next.dx - curr.dx) / segNext, (next.dy - curr.dy) / segNext);
+      final cross = dirIn.dx * dirOut.dy - dirIn.dy * dirOut.dx;
+      if (cross.abs() < 0.01) {
+        sb.write(' L${curr.dx},${curr.dy}');
+        continue;
+      }
+
+      final arcStart =
+          Offset(curr.dx - dirIn.dx * r, curr.dy - dirIn.dy * r);
+      final arcEnd =
+          Offset(curr.dx + dirOut.dx * r, curr.dy + dirOut.dy * r);
+      // SVG arc: A rx ry x-rotation large-arc-flag sweep-flag x y
+      // sweep-flag: 1 = clockwise, 0 = counter-clockwise
+      final sweep = cross > 0 ? 1 : 0;
+      sb.write(' L${arcStart.dx},${arcStart.dy}');
+      sb.write(' A$r,$r 0 0,$sweep ${arcEnd.dx},${arcEnd.dy}');
+    }
+
+    sb.write(' L${allPoints.last.dx},${allPoints.last.dy}');
+    return sb.toString();
+  }
+
+  // -- Arrow routing ---------------------------------------------------------
+
+  static List<Offset> _computeOrthogonalPath(
+    ArrowObject arrow,
+    Map<String, Rect> solidRects,
+  ) {
+    Rect? startObjRect;
+    Rect? endObjRect;
+    var routeStart = arrow.start;
+    var routeEnd = arrow.end;
+
+    if (arrow.startAttachment != null) {
+      startObjRect = solidRects[arrow.startAttachment!.objectId];
+      if (startObjRect != null) {
+        routeStart = _resolveAttachment(
+            arrow.startAttachment!.relativePosition, startObjRect);
+      }
+    }
+
+    if (arrow.endAttachment != null) {
+      endObjRect = solidRects[arrow.endAttachment!.objectId];
+      if (endObjRect != null) {
+        routeEnd = _resolveAttachment(
+            arrow.endAttachment!.relativePosition, endObjRect);
+      }
+    }
+
+    // Collect obstacles — all solid objects except source and target.
+    final sourceId = arrow.startAttachment?.objectId;
+    final targetId = arrow.endAttachment?.objectId;
+    final obstacles = <Rect>[];
+    for (final entry in solidRects.entries) {
+      if (entry.key == sourceId || entry.key == targetId) continue;
+      obstacles.add(entry.value);
+    }
+
+    final waypoints = OrthogonalRouter.route(
+      start: routeStart,
+      end: routeEnd,
+      obstacles: obstacles,
+      startObjectRect: startObjRect,
+      endObjectRect: endObjRect,
+    );
+
+    return [routeStart, ...waypoints, routeEnd];
+  }
+
+  /// Convert a relative position (0-1 normalized) to absolute coords on a rect,
+  /// snapping to the nearest edge.
+  static Offset _resolveAttachment(Offset relPos, Rect rect) {
+    final absX = rect.left + relPos.dx * rect.width;
+    final absY = rect.top + relPos.dy * rect.height;
+
+    final distLeft = (absX - rect.left).abs();
+    final distRight = (absX - rect.right).abs();
+    final distTop = (absY - rect.top).abs();
+    final distBottom = (absY - rect.bottom).abs();
+    final minDist =
+        [distLeft, distRight, distTop, distBottom].reduce(math.min);
+
+    if (minDist == distLeft) return Offset(rect.left, absY);
+    if (minDist == distRight) return Offset(rect.right, absY);
+    if (minDist == distTop) return Offset(absX, rect.top);
+    return Offset(absX, rect.bottom);
+  }
+
+  // -- Arrowhead -------------------------------------------------------------
+
+  static void _renderArrowhead(List<Offset> path, List<String> svg) {
+    if (path.length < 2) return;
+    final tip = path.last;
+    final prev = path[path.length - 2];
+
+    final dx = tip.dx - prev.dx;
+    final dy = tip.dy - prev.dy;
+    final len = math.sqrt(dx * dx + dy * dy);
+    if (len < 0.1) return;
+
+    final ux = dx / len;
+    final uy = dy / len;
+
+    final px = -uy;
+    final py = ux;
+
+    final s = _arrowHeadSize;
+    final base1 = Offset(
+        tip.dx - ux * s + px * s * 0.4, tip.dy - uy * s + py * s * 0.4);
+    final base2 = Offset(
+        tip.dx - ux * s - px * s * 0.4, tip.dy - uy * s - py * s * 0.4);
+
+    svg.add(
+        '  <polygon points="${tip.dx},${tip.dy} ${base1.dx},${base1.dy} ${base2.dx},${base2.dy}" '
+        'fill="$_arrowStroke"/>');
+  }
+
+  // -- Rotation --------------------------------------------------------------
+
+  /// Returns `<g transform="rotate(...)">` if angle is non-zero.
+  /// Flutter's angle is in radians; SVG rotate() takes degrees.
+  static String _rotateOpen(double angle, Offset center) {
+    if (angle.abs() < 0.001) return '';
+    final degrees = angle * 180.0 / math.pi;
+    return '  <g transform="rotate($degrees ${center.dx} ${center.dy})">';
+  }
+
+  static String _rotateClose(double angle) {
+    if (angle.abs() < 0.001) return '';
+    return '  </g>';
+  }
+
+  // -- Bounds ----------------------------------------------------------------
+
+  static void _addPathBounds(List<Offset> points, List<Rect> bounds) {
+    var bMinX = double.infinity, bMinY = double.infinity;
+    var bMaxX = double.negativeInfinity, bMaxY = double.negativeInfinity;
+    for (final p in points) {
+      bMinX = math.min(bMinX, p.dx);
+      bMinY = math.min(bMinY, p.dy);
+      bMaxX = math.max(bMaxX, p.dx);
+      bMaxY = math.max(bMaxY, p.dy);
+    }
+    bounds.add(Rect.fromLTRB(bMinX, bMinY, bMaxX, bMaxY));
+  }
+
+  // -- Helpers ---------------------------------------------------------------
+
+  static String _dashArray(LineStyle lineStyle) {
+    return switch (lineStyle) {
+      LineStyle.dashed => '8,4',
+      LineStyle.dotted => '2,4',
+      _ => '',
+    };
+  }
+
+  static String _escapeXml(String s) {
+    return s
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&apos;');
+  }
+}
