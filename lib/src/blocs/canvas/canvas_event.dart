@@ -111,11 +111,27 @@ final class ObjectsDragged extends CanvasEvent {
 }
 
 final class ObjectsDragEnded extends CanvasEvent {
+  final Set<String> objectIds;
   // This event marks the end of a drag and IS undoable.
-  const ObjectsDragEnded() : super(isUndoable: true);
+  const ObjectsDragEnded(this.objectIds) : super(isUndoable: true);
 
   @override
   String get description => 'Moved object(s)';
+
+  @override
+  List<Object> get props => [objectIds];
+}
+
+final class ObjectsNudged extends CanvasEvent {
+  final Set<String> objectIds;
+  final Offset delta;
+  const ObjectsNudged(this.objectIds, this.delta) : super(isUndoable: true);
+
+  @override
+  String get description => 'Nudged object(s)';
+
+  @override
+  List<Object> get props => [objectIds, delta];
 }
 
 final class DrawingObjectUpdated extends CanvasEvent {
@@ -220,6 +236,68 @@ final class SelectionPasted extends CanvasEvent {
 
   @override
   List<Object> get props => [pastePosition];
+}
+
+// --- Duplicate Event ---
+final class SelectionDuplicated extends CanvasEvent {
+  final Set<String> selectedDrawingObjectIds;
+
+  const SelectionDuplicated(this.selectedDrawingObjectIds);
+
+  @override
+  String get description => 'Duplicated selection';
+
+  @override
+  List<Object> get props => [selectedDrawingObjectIds];
+}
+
+// --- Z-ordering Events ---
+final class ObjectsBroughtForward extends CanvasEvent {
+  final Set<String> selectedIds;
+
+  const ObjectsBroughtForward(this.selectedIds);
+
+  @override
+  String get description => 'Brought forward';
+
+  @override
+  List<Object> get props => [selectedIds];
+}
+
+final class ObjectsSentBackward extends CanvasEvent {
+  final Set<String> selectedIds;
+
+  const ObjectsSentBackward(this.selectedIds);
+
+  @override
+  String get description => 'Sent backward';
+
+  @override
+  List<Object> get props => [selectedIds];
+}
+
+final class ObjectsBroughtToFront extends CanvasEvent {
+  final Set<String> selectedIds;
+
+  const ObjectsBroughtToFront(this.selectedIds);
+
+  @override
+  String get description => 'Brought to front';
+
+  @override
+  List<Object> get props => [selectedIds];
+}
+
+final class ObjectsSentToBack extends CanvasEvent {
+  final Set<String> selectedIds;
+
+  const ObjectsSentToBack(this.selectedIds);
+
+  @override
+  String get description => 'Sent to back';
+
+  @override
+  List<Object> get props => [selectedIds];
 }
 
 final class ObjectDuplicatedWithConnection extends CanvasEvent {

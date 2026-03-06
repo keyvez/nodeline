@@ -34,6 +34,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         ObjectsRemoved e => _onObjectsRemoved(e, emit),
         ObjectsDragged e => _onObjectsDragged(e, emit),
         ObjectsDragEnded e => _onObjectsDragEnded(e, emit),
+        ObjectsNudged e => _onObjectsNudged(e, emit),
         DrawingObjectUpdated e => _onDrawingObjectUpdated(e, emit),
         ObjectsResizeEnded e => _onObjectsResizeEnded(e, emit),
         ObjectsRotationEnded e => _onObjectsRotationEnded(e, emit),
@@ -48,6 +49,11 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         SelectionCut e => _onSelectionCut(e, emit),
         SelectionPasted e => _onSelectionPasted(e, emit),
         SelectionCopied e => _onSelectionCopied(e, emit),
+        SelectionDuplicated e => _onSelectionDuplicated(e, emit),
+        ObjectsBroughtForward e => _onObjectsBroughtForward(e, emit),
+        ObjectsSentBackward e => _onObjectsSentBackward(e, emit),
+        ObjectsBroughtToFront e => _onObjectsBroughtToFront(e, emit),
+        ObjectsSentToBack e => _onObjectsSentToBack(e, emit),
         ObjectDuplicatedWithConnection e => _onObjectDuplicatedWithConnection(e, emit),
         GridToggled e => _onGridToggled(e, emit),
       });
@@ -243,31 +249,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     final newDrawingObjects = Map<String, DrawingObject>.from(
       state.drawingObjects,
     );
-
-    // Compute snapped delta from the first selected object's anchor point.
-    Offset effectiveDelta = event.delta;
-    final firstId = event.objectIds.first;
-    if (newNodes.containsKey(firstId)) {
-      final node = newNodes[firstId]!;
-      final currentPos = node.offset + event.delta;
-      final snappedPos = snapOffset(currentPos);
-      effectiveDelta = snappedPos - node.offset;
-    } else if (newDrawingObjects.containsKey(firstId)) {
-      final obj = newDrawingObjects[firstId]!;
-      if (obj is ArrowObject) {
-        final currentPos = obj.start + event.delta;
-        final snappedPos = snapOffset(currentPos);
-        effectiveDelta = snappedPos - obj.start;
-      } else if (obj is LineObject) {
-        final currentPos = obj.start + event.delta;
-        final snappedPos = snapOffset(currentPos);
-        effectiveDelta = snappedPos - obj.start;
-      } else {
-        final currentPos = obj.rect.topLeft + event.delta;
-        final snappedPos = snapOffset(currentPos);
-        effectiveDelta = snappedPos - obj.rect.topLeft;
-      }
-    }
+    final effectiveDelta = event.delta;
 
     for (final id in event.objectIds) {
       if (newNodes.containsKey(id)) {
@@ -321,7 +303,126 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
   }
 
   void _onObjectsDragEnded(ObjectsDragEnded event, Emitter<CanvasState> emit) {
+    // Snap all dragged objects to grid on drag end.
+    final newNodes = Map<String, NodeInstance>.from(state.nodes);
+    final newDrawingObjects = Map<String, DrawingObject>.from(
+      state.drawingObjects,
+    );
+
+    // Compute snap delta from the first object's anchor so multi-selection
+    // maintains relative positions.
+    Offset snapDelta = Offset.zero;
+    final firstId = event.objectIds.first;
+    if (newNodes.containsKey(firstId)) {
+      final node = newNodes[firstId]!;
+      snapDelta = snapOffset(node.offset) - node.offset;
+    } else if (newDrawingObjects.containsKey(firstId)) {
+      final obj = newDrawingObjects[firstId]!;
+      if (obj is ArrowObject) {
+        snapDelta = snapOffset(obj.start) - obj.start;
+      } else if (obj is LineObject) {
+        snapDelta = snapOffset(obj.start) - obj.start;
+      } else {
+        snapDelta = snapOffset(obj.rect.topLeft) - obj.rect.topLeft;
+      }
+    }
+
+    if (snapDelta != Offset.zero) {
+      for (final id in event.objectIds) {
+        if (newNodes.containsKey(id)) {
+          final node = newNodes[id]!;
+          newNodes[id] = node.copyWith(offset: node.offset + snapDelta);
+        } else if (newDrawingObjects.containsKey(id)) {
+          final object = newDrawingObjects[id]!;
+          if (object is ArrowObject) {
+            object.start += snapDelta;
+            object.end += snapDelta;
+            if (object.midPoint != null) {
+              object.midPoint = object.midPoint! + snapDelta;
+            }
+          } else if (object is LineObject) {
+            object.start += snapDelta;
+            object.end += snapDelta;
+            if (object.midPoint != null) {
+              object.midPoint = object.midPoint! + snapDelta;
+            }
+          } else if (object is PencilStrokeObject) {
+            object.points = object.points
+                .map((p) => PointVector(
+                      p.x + snapDelta.dx,
+                      p.y + snapDelta.dy,
+                      p.pressure,
+                    ))
+                .toList();
+          } else if (object is RectangleObject) {
+            object.rect = object.rect.shift(snapDelta);
+          } else if (object is CircleObject) {
+            object.rect = object.rect.shift(snapDelta);
+          } else if (object is FigureObject) {
+            object.rect = object.rect.shift(snapDelta);
+          } else if (object is TextObject) {
+            object.rect = object.rect.shift(snapDelta);
+          } else if (object is SvgObject) {
+            object.rect = object.rect.shift(snapDelta);
+          }
+          newDrawingObjects[id] = object.copyWith();
+        }
+      }
+      emit(state.copyWith(nodes: newNodes, drawingObjects: newDrawingObjects));
+    }
+
     _pushToUndoStack(event, emit, state);
+  }
+
+  void _onObjectsNudged(ObjectsNudged event, Emitter<CanvasState> emit) {
+    _pushToUndoStack(event, emit, state);
+    final newNodes = Map<String, NodeInstance>.from(state.nodes);
+    final newDrawingObjects = Map<String, DrawingObject>.from(
+      state.drawingObjects,
+    );
+    final delta = event.delta;
+
+    for (final id in event.objectIds) {
+      if (newNodes.containsKey(id)) {
+        final node = newNodes[id]!;
+        newNodes[id] = node.copyWith(offset: node.offset + delta);
+      } else if (newDrawingObjects.containsKey(id)) {
+        final object = newDrawingObjects[id]!;
+        if (object is ArrowObject) {
+          object.start += delta;
+          object.end += delta;
+          if (object.midPoint != null) {
+            object.midPoint = object.midPoint! + delta;
+          }
+        } else if (object is LineObject) {
+          object.start += delta;
+          object.end += delta;
+          if (object.midPoint != null) {
+            object.midPoint = object.midPoint! + delta;
+          }
+        } else if (object is PencilStrokeObject) {
+          object.points = object.points
+              .map((p) => PointVector(
+                    p.x + delta.dx,
+                    p.y + delta.dy,
+                    p.pressure,
+                  ))
+              .toList();
+        } else if (object is RectangleObject) {
+          object.rect = object.rect.shift(delta);
+        } else if (object is CircleObject) {
+          object.rect = object.rect.shift(delta);
+        } else if (object is FigureObject) {
+          object.rect = object.rect.shift(delta);
+        } else if (object is TextObject) {
+          object.rect = object.rect.shift(delta);
+        } else if (object is SvgObject) {
+          object.rect = object.rect.shift(delta);
+        }
+        newDrawingObjects[id] = object.copyWith();
+      }
+    }
+    emit(state.copyWith(nodes: newNodes, drawingObjects: newDrawingObjects));
   }
 
   void _onUndo(UndoRequested event, Emitter<CanvasState> emit) {
@@ -473,6 +574,195 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
   }
 
   void _onSelectionCopied(SelectionCopied e, Emitter<CanvasState> emit) {}
+
+  void _onSelectionDuplicated(
+    SelectionDuplicated event,
+    Emitter<CanvasState> emit,
+  ) {
+    if (event.selectedDrawingObjectIds.isEmpty) return;
+    _pushToUndoStack(event, emit, state);
+
+    const offset = Offset(16, 16);
+    final uuid = const Uuid();
+    final newDrawingObjects = Map<String, DrawingObject>.from(state.drawingObjects);
+    final newSelectedIds = <String>{};
+
+    for (final id in event.selectedDrawingObjectIds) {
+      final obj = state.drawingObjects[id];
+      if (obj == null) continue;
+
+      final newId = uuid.v4();
+      newSelectedIds.add(newId);
+
+      if (obj is RectangleObject) {
+        newDrawingObjects[newId] = RectangleObject(
+          id: newId,
+          rect: obj.rect.shift(offset),
+          text: obj.text,
+          textStyle: obj.textStyle,
+          lineStyle: obj.lineStyle,
+          angle: obj.angle,
+        );
+      } else if (obj is CircleObject) {
+        newDrawingObjects[newId] = CircleObject(
+          id: newId,
+          rect: obj.rect.shift(offset),
+          text: obj.text,
+          textStyle: obj.textStyle,
+          lineStyle: obj.lineStyle,
+          angle: obj.angle,
+        );
+      } else if (obj is ArrowObject) {
+        newDrawingObjects[newId] = ArrowObject(
+          id: newId,
+          start: obj.start + offset,
+          end: obj.end + offset,
+          midPoint: obj.midPoint != null ? obj.midPoint! + offset : null,
+          pathType: obj.pathType,
+          waypoints: obj.waypoints?.map((w) => w + offset).toList(),
+          lineStyle: obj.lineStyle,
+          angle: obj.angle,
+          // Clear attachments — detach from original objects
+        );
+      } else if (obj is LineObject) {
+        newDrawingObjects[newId] = LineObject(
+          id: newId,
+          start: obj.start + offset,
+          end: obj.end + offset,
+          midPoint: obj.midPoint != null ? obj.midPoint! + offset : null,
+          lineStyle: obj.lineStyle,
+          angle: obj.angle,
+        );
+      } else if (obj is PencilStrokeObject) {
+        newDrawingObjects[newId] = PencilStrokeObject(
+          id: newId,
+          points: obj.points
+              .map((p) => PointVector(p.x + offset.dx, p.y + offset.dy, p.pressure))
+              .toList(),
+          angle: obj.angle,
+        );
+      } else if (obj is FigureObject) {
+        newDrawingObjects[newId] = FigureObject(
+          id: newId,
+          rect: obj.rect.shift(offset),
+          label: obj.label,
+          angle: obj.angle,
+        );
+      } else if (obj is TextObject) {
+        newDrawingObjects[newId] = TextObject(
+          id: newId,
+          rect: obj.rect.shift(offset),
+          text: obj.text,
+          style: obj.style,
+          angle: obj.angle,
+        );
+      } else if (obj is SvgObject) {
+        newDrawingObjects[newId] = SvgObject(
+          id: newId,
+          rect: obj.rect.shift(offset),
+          assetPath: obj.assetPath,
+          pictureInfo: obj.pictureInfo,
+          angle: obj.angle,
+        );
+      }
+    }
+
+    emit(state.copyWith(drawingObjects: newDrawingObjects));
+
+    // The caller (data layer) will update selection to the new IDs.
+    // We store them in a way the data layer can read them.
+    // Actually, we need to emit an event to the selection bloc from the data layer.
+    // Store the new IDs so the data layer can select them.
+    _lastDuplicatedIds = newSelectedIds;
+  }
+
+  /// IDs of the most recently duplicated objects, for the data layer to select.
+  Set<String> _lastDuplicatedIds = {};
+  Set<String> consumeLastDuplicatedIds() {
+    final ids = _lastDuplicatedIds;
+    _lastDuplicatedIds = {};
+    return ids;
+  }
+
+  void _onObjectsBroughtForward(
+    ObjectsBroughtForward event,
+    Emitter<CanvasState> emit,
+  ) {
+    if (event.selectedIds.isEmpty) return;
+    _pushToUndoStack(event, emit, state);
+
+    final entries = state.drawingObjects.entries.toList();
+    // Move each selected entry one step forward (toward the end).
+    // Process from end to start to avoid cascading swaps.
+    for (int i = entries.length - 2; i >= 0; i--) {
+      if (event.selectedIds.contains(entries[i].key) &&
+          !event.selectedIds.contains(entries[i + 1].key)) {
+        final tmp = entries[i];
+        entries[i] = entries[i + 1];
+        entries[i + 1] = tmp;
+      }
+    }
+
+    emit(state.copyWith(
+      drawingObjects: Map.fromEntries(entries),
+    ));
+  }
+
+  void _onObjectsSentBackward(
+    ObjectsSentBackward event,
+    Emitter<CanvasState> emit,
+  ) {
+    if (event.selectedIds.isEmpty) return;
+    _pushToUndoStack(event, emit, state);
+
+    final entries = state.drawingObjects.entries.toList();
+    // Move each selected entry one step backward (toward the start).
+    // Process from start to end to avoid cascading swaps.
+    for (int i = 1; i < entries.length; i++) {
+      if (event.selectedIds.contains(entries[i].key) &&
+          !event.selectedIds.contains(entries[i - 1].key)) {
+        final tmp = entries[i];
+        entries[i] = entries[i - 1];
+        entries[i - 1] = tmp;
+      }
+    }
+
+    emit(state.copyWith(
+      drawingObjects: Map.fromEntries(entries),
+    ));
+  }
+
+  void _onObjectsBroughtToFront(
+    ObjectsBroughtToFront event,
+    Emitter<CanvasState> emit,
+  ) {
+    if (event.selectedIds.isEmpty) return;
+    _pushToUndoStack(event, emit, state);
+
+    final entries = state.drawingObjects.entries.toList();
+    final selected = entries.where((e) => event.selectedIds.contains(e.key)).toList();
+    final rest = entries.where((e) => !event.selectedIds.contains(e.key)).toList();
+
+    emit(state.copyWith(
+      drawingObjects: Map.fromEntries([...rest, ...selected]),
+    ));
+  }
+
+  void _onObjectsSentToBack(
+    ObjectsSentToBack event,
+    Emitter<CanvasState> emit,
+  ) {
+    if (event.selectedIds.isEmpty) return;
+    _pushToUndoStack(event, emit, state);
+
+    final entries = state.drawingObjects.entries.toList();
+    final selected = entries.where((e) => event.selectedIds.contains(e.key)).toList();
+    final rest = entries.where((e) => !event.selectedIds.contains(e.key)).toList();
+
+    emit(state.copyWith(
+      drawingObjects: Map.fromEntries([...selected, ...rest]),
+    ));
+  }
 
   void _onObjectDuplicatedWithConnection(
       ObjectDuplicatedWithConnection event, Emitter<CanvasState> emit) {

@@ -393,6 +393,10 @@ class FlowDrawEditorRenderBox extends RenderBox
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0 * iz;
 
+    final Paint fillPaint = Paint()
+      ..color = const Color(0xFF1a1a1a)
+      ..style = PaintingStyle.fill;
+
     final Paint handlePaint = Paint()..color = Colors.blue;
     final Paint handleHitAreaPaint = Paint()..color = Colors.transparent;
     final Paint selectedRectBorderPaint = Paint()
@@ -444,6 +448,7 @@ class FlowDrawEditorRenderBox extends RenderBox
               ..paint(canvas, obj.rect.topLeft);
           }
         } else if (obj is CircleObject) {
+          canvas.drawOval(obj.rect, fillPaint);
           if (obj.lineStyle == LineStyle.solid) {
             canvas.drawOval(obj.rect, objectPaint);
           } else {
@@ -458,6 +463,7 @@ class FlowDrawEditorRenderBox extends RenderBox
           final objCornerRadius = 10.0 * dpr / zoom;
           final rrect =
           RRect.fromRectAndRadius(obj.rect, Radius.circular(objCornerRadius));
+          canvas.drawRRect(rrect, fillPaint);
           if (obj.lineStyle == LineStyle.solid) {
             canvas.drawRRect(rrect, objectPaint);
           } else {
@@ -851,11 +857,10 @@ class FlowDrawEditorRenderBox extends RenderBox
   }
 
   void _paintQuickActionArrows(Canvas canvas, Rect rect, String objectId) {
-    final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-    final double baseHandleSize = 20.0 * dpr;
-    final double handleSize = baseHandleSize / sqrt(zoom);
+    final iz = clampedInverseZoom;
+    final double handleSize = 20.0 * iz;
     final double halfHandle = handleSize / 2;
-    final double spacing = 10.0 * dpr / sqrt(zoom);
+    final double spacing = 10.0 * iz;
 
     final Paint handlePaint = Paint()..color = Colors.blue.withOpacity(0.8);
     final Paint arrowPaint = Paint()
@@ -1010,8 +1015,7 @@ class FlowDrawEditorRenderBox extends RenderBox
 
   /// Paints a quick-action style icon (blue oval + white arrow) for rotation.
   void _paintRotationIcon(Canvas canvas, Offset center, Paint paint, double radius) {
-    final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-    final double handleSize = 20.0 * dpr / sqrt(zoom);
+    final double handleSize = 20.0 * clampedInverseZoom;
 
     final handleRect = Rect.fromCenter(center: center, width: handleSize, height: handleSize);
     final handlePaint = Paint()..color = Colors.blue.withOpacity(0.8);

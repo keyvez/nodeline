@@ -395,8 +395,10 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   }
 
   void _onPointerDown(PointerDownEvent event) {
-    // If inline shape text editor is active, don't intercept pointer events
-    if (_editingShapeObject != null) return;
+    // If inline shape text editor is active, finish editing and proceed
+    if (_editingShapeObject != null) {
+      _finishShapeTextEditing();
+    }
 
     _activePointers++;
     // Ensure keyboard shortcuts work by requesting focus on every click
@@ -445,14 +447,15 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       _lastClickTime = now;
       _lastClickPosition = event.position;
       if (hitObject != null) {
-        // Wait briefly to distinguish double-tap from triple-tap
+        // Wait briefly to distinguish double-tap from triple-tap.
+        // Don't return — fall through so drag can still start.
+        // The timer will fire text edit only if the user doesn't drag.
         _tapTimer = Timer(const Duration(milliseconds: 300), () {
-          if (_consecutiveTaps == 2) {
+          if (_consecutiveTaps == 2 && !_isDraggingSelection) {
             _consecutiveTaps = 0;
             _onDoubleClick();
           }
         });
-        return;
       }
       // Second tap on empty space — fall through to normal tool handling
       // for deselection. Reset multi-tap state since this isn't a real
@@ -552,7 +555,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
     if (_isDraggingSelection) {
       if (_totalDragDelta > 3.0) {
-        _canvasBloc.add(const ObjectsDragEnded());
+        _canvasBloc.add(ObjectsDragEnded(
+          _selectionBloc.state.selectedNodeIds.union(
+            _selectionBloc.state.selectedDrawingObjectIds,
+          ),
+        ));
       }
     }
     _isRotating = false;
@@ -1538,6 +1545,14 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     return Offset(startPoint.dx + newDx, startPoint.dy + newDy);
   }
 
+  void _nudgeSelection(Offset delta) {
+    final selectedIds = _selectionBloc.state.selectedNodeIds.union(
+      _selectionBloc.state.selectedDrawingObjectIds,
+    );
+    if (selectedIds.isEmpty) return;
+    _canvasBloc.add(ObjectsNudged(selectedIds, delta));
+  }
+
   void _beginTextEditing({TextObject? existingObject, Offset? at}) {
     if (existingObject == null && at == null) return;
 
@@ -1859,6 +1874,44 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                       _canvasBloc.add(RedoRequested()),
                     const SingleActivator(LogicalKeyboardKey.keyY, control: true): () =>
                       _canvasBloc.add(RedoRequested()),
+                    // Duplicate selection
+                    const SingleActivator(LogicalKeyboardKey.keyD, meta: true): () {
+                      _canvasBloc.add(SelectionDuplicated(selectionState.selectedDrawingObjectIds));
+                      final newIds = _canvasBloc.consumeLastDuplicatedIds();
+                      if (newIds.isNotEmpty) {
+                        _selectionBloc.add(SelectionReplaced(
+                          nodeIds: {},
+                          drawingObjectIds: newIds,
+                        ));
+                      }
+                    },
+                    const SingleActivator(LogicalKeyboardKey.keyD, control: true): () {
+                      _canvasBloc.add(SelectionDuplicated(selectionState.selectedDrawingObjectIds));
+                      final newIds = _canvasBloc.consumeLastDuplicatedIds();
+                      if (newIds.isNotEmpty) {
+                        _selectionBloc.add(SelectionReplaced(
+                          nodeIds: {},
+                          drawingObjectIds: newIds,
+                        ));
+                      }
+                    },
+                    // Z-ordering
+                    const SingleActivator(LogicalKeyboardKey.bracketRight, meta: true): () =>
+                      _canvasBloc.add(ObjectsBroughtForward(selectionState.selectedDrawingObjectIds)),
+                    const SingleActivator(LogicalKeyboardKey.bracketRight, control: true): () =>
+                      _canvasBloc.add(ObjectsBroughtForward(selectionState.selectedDrawingObjectIds)),
+                    const SingleActivator(LogicalKeyboardKey.bracketLeft, meta: true): () =>
+                      _canvasBloc.add(ObjectsSentBackward(selectionState.selectedDrawingObjectIds)),
+                    const SingleActivator(LogicalKeyboardKey.bracketLeft, control: true): () =>
+                      _canvasBloc.add(ObjectsSentBackward(selectionState.selectedDrawingObjectIds)),
+                    const SingleActivator(LogicalKeyboardKey.bracketRight, meta: true, shift: true): () =>
+                      _canvasBloc.add(ObjectsBroughtToFront(selectionState.selectedDrawingObjectIds)),
+                    const SingleActivator(LogicalKeyboardKey.bracketRight, control: true, shift: true): () =>
+                      _canvasBloc.add(ObjectsBroughtToFront(selectionState.selectedDrawingObjectIds)),
+                    const SingleActivator(LogicalKeyboardKey.bracketLeft, meta: true, shift: true): () =>
+                      _canvasBloc.add(ObjectsSentToBack(selectionState.selectedDrawingObjectIds)),
+                    const SingleActivator(LogicalKeyboardKey.bracketLeft, control: true, shift: true): () =>
+                      _canvasBloc.add(ObjectsSentToBack(selectionState.selectedDrawingObjectIds)),
                     const SingleActivator(LogicalKeyboardKey.keyA, meta: true): () {
                       final canvasState = _canvasBloc.state;
                       _selectionBloc.add(SelectionReplaced(
@@ -1893,6 +1946,23 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                       _canvasBloc.add(const GridToggled()),
                     const SingleActivator(LogicalKeyboardKey.keyG, control: true): () =>
                       _canvasBloc.add(const GridToggled()),
+                    // Nudge: arrow keys = 1 grid square, shift+arrow = 1px
+                    const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+                      _nudgeSelection(const Offset(0, -kGridSize)),
+                    const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+                      _nudgeSelection(const Offset(0, kGridSize)),
+                    const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+                      _nudgeSelection(const Offset(-kGridSize, 0)),
+                    const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+                      _nudgeSelection(const Offset(kGridSize, 0)),
+                    const SingleActivator(LogicalKeyboardKey.arrowUp, shift: true): () =>
+                      _nudgeSelection(const Offset(0, -1)),
+                    const SingleActivator(LogicalKeyboardKey.arrowDown, shift: true): () =>
+                      _nudgeSelection(const Offset(0, 1)),
+                    const SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true): () =>
+                      _nudgeSelection(const Offset(-1, 0)),
+                    const SingleActivator(LogicalKeyboardKey.arrowRight, shift: true): () =>
+                      _nudgeSelection(const Offset(1, 0)),
                   },
                   child: Focus(
                     focusNode: _canvasFocusNode,
