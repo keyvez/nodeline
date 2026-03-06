@@ -7,6 +7,7 @@ import 'package:flow_draw/flow_draw.dart';
 import 'package:flow_draw/src/core/node_editor/clipboard.dart';
 import 'package:flow_draw/src/core/utils/json_extensions.dart';
 import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
+import 'package:flow_draw/src/core/utils/snap_utils.dart';
 import 'package:flow_draw/src/core/utils/renderbox.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flow_draw/src/ui/canvas/flow_draw_editor_render_object.dart';
@@ -124,6 +125,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     _canvasFocusNode.dispose();
     _kineticTimer?.cancel();
     _tapTimer?.cancel();
+    _shapeTextController?.dispose();
+    _shapeTextFocusNode?.dispose();
     super.dispose();
   }
 
@@ -392,6 +395,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   }
 
   void _onPointerDown(PointerDownEvent event) {
+    // If inline shape text editor is active, don't intercept pointer events
+    if (_editingShapeObject != null) return;
+
     _activePointers++;
     // Ensure keyboard shortcuts work by requesting focus on every click
     if (!_canvasFocusNode.hasFocus) {
@@ -420,8 +426,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     final now = DateTime.now();
     if (_lastClickTime != null &&
         _lastClickPosition != null &&
-        now.difference(_lastClickTime!) < const Duration(milliseconds: 300) &&
-        (event.position - _lastClickPosition!).distance < 40) {
+        now.difference(_lastClickTime!) < const Duration(milliseconds: 500) &&
+        (event.position - _lastClickPosition!).distance < 60) {
       _consecutiveTaps++;
       _tapTimer?.cancel();
       if (_consecutiveTaps == 3) {
@@ -485,6 +491,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   }
 
   void _onPointerMove(PointerMoveEvent event) {
+    if (_editingShapeObject != null) return;
     if (_isScaling) return;
     if (_isPanning) {
       _onPanUpdate(event.delta);
@@ -527,6 +534,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   }
 
   void _onPointerUp(PointerUpEvent event) {
+    if (_editingShapeObject != null) return;
     _activePointers = (_activePointers - 1).clamp(0, 10);
 
     if (_isPanning) _onPanEnd();
@@ -602,6 +610,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   }
 
   void _onDoubleClick() {
+
     final worldPos = screenToWorld(
       _lastFocalPoint,
       _canvasBloc.state.viewportOffset,
@@ -726,9 +735,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         Offset newEnd = end;
 
         if (handle == Handle.arrowStart) {
-          newStart = _hoveredSnapPoint?.worldPosition ?? worldPos;
+          newStart = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
         } else if (handle == Handle.arrowEnd) {
-          newEnd = _hoveredSnapPoint?.worldPosition ?? worldPos;
+          newEnd = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
         } else if (handle == Handle.midPoint) {
           final dx = end.dx - start.dx;
           final dy = end.dy - start.dy;
@@ -764,10 +773,12 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
       }  else {
         if (handle == Handle.arrowStart) {
-          final updatedObject = object.copyWith(start: worldPos);
+          final pos = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
+          final updatedObject = object.copyWith(start: pos);
           _canvasBloc.add(DrawingObjectUpdated(updatedObject));
         } else if (handle == Handle.arrowEnd) {
-          final updatedObject = object.copyWith(end: worldPos);
+          final pos = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
+          final updatedObject = object.copyWith(end: pos);
           _canvasBloc.add(DrawingObjectUpdated(updatedObject));
         } else if (handle == Handle.midPoint) {
           final midPoint = (worldPos * 2) - (start * 0.5) - (end * 0.5);
@@ -780,10 +791,12 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       final (start, end) = _getDynamicEndpoints(object);
 
       if (_isResizing.handle == Handle.arrowStart) {
-        final updatedObject = object.copyWith(start: worldPos);
+        final pos = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
+        final updatedObject = object.copyWith(start: pos);
         _canvasBloc.add(DrawingObjectUpdated(updatedObject));
       } else if (_isResizing.handle == Handle.arrowEnd) {
-        final updatedObject = object.copyWith(end: worldPos);
+        final pos = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
+        final updatedObject = object.copyWith(end: pos);
         _canvasBloc.add(DrawingObjectUpdated(updatedObject));
       } else if (_isResizing.handle == Handle.midPoint) {
         final midPoint = (worldPos * 2) - (start * 0.5) - (end * 0.5);
@@ -840,11 +853,12 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       }
 
       final newCenter = anchorWorld + dragVector / 2;
-      final newRect = Rect.fromCenter(
+      final rawRect = Rect.fromCenter(
         center: newCenter,
         width: localDragVector.dx.abs(),
         height: localDragVector.dy.abs(),
       );
+      final newRect = snapRect(rawRect);
 
       dynamic updatedObject;
       if (object is TextObject) {
@@ -940,7 +954,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       }
       if (_tempDrawingObject != null) {
         List<Offset>? waypoints;
-        if (pathType == LinkPathType.orthogonal) {
+        final drawDist = (finalPos - _tempDrawingObject!.start).distance;
+        if (pathType == LinkPathType.orthogonal && drawDist > 2) {
           final obstacles = _collectObstacles();
           final startObjRect = _getAttachedObjectRect(
             _startSnapPoint != null
@@ -1013,6 +1028,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
     final tool = _tempDrawingObject!.tool;
     DrawingObject? newObject;
+    bool isTapCreated = false;
     final id = const Uuid().v4();
 
     final endPos = _hoveredSnapPoint?.worldPosition ?? _tempDrawingObject!.end;
@@ -1034,69 +1050,96 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     final lineStyle = _toolBloc.state.lineStyle;
 
     if (tool == EditorTool.arrowTopRight) {
-      newObject = ArrowObject(
-        id: id,
-        start: _drawingStart,
-        end: endPos,
-        pathType: _tempDrawingObject!.pathType,
-        startAttachment: startAttachment,
-        endAttachment: endAttachment,
-        waypoints: _tempDrawingObject!.waypoints,
-        lineStyle: lineStyle,
-      );
+      if ((_drawingStart - endPos).distance > 2) {
+        final hasAttachments = startAttachment != null || endAttachment != null;
+        final snapStart = hasAttachments ? _drawingStart : snapOffset(_drawingStart);
+        final snapEnd = hasAttachments ? endPos : snapOffset(endPos);
+        newObject = ArrowObject(
+          id: id,
+          start: snapStart,
+          end: snapEnd,
+          pathType: _tempDrawingObject!.pathType,
+          startAttachment: startAttachment,
+          endAttachment: endAttachment,
+          waypoints: _tempDrawingObject!.waypoints,
+          lineStyle: lineStyle,
+        );
+      }
     } else if (tool == EditorTool.pencil) {
       if (_currentPencilPoints.length > 1) {
         newObject = PencilStrokeObject(id: id, points: _currentPencilPoints);
       }
     } else {
+      final snappedStart = snapOffset(_drawingStart);
+      final snappedEnd = snapOffset(_tempDrawingObject!.end);
       final rect = Rect.fromPoints(
-        _drawingStart,
-        _tempDrawingObject!.end,
+        snappedStart,
+        snappedEnd,
       ).normalize;
-      if (rect.width > 2 || rect.height > 2) {
-        switch (tool) {
-          case EditorTool.circle:
-            newObject = CircleObject(id: id, rect: rect, lineStyle: lineStyle);
-            break;
-          case EditorTool.square:
-            newObject = RectangleObject(id: id, rect: rect, lineStyle: lineStyle);
-            break;
-          case EditorTool.arrowTopRight:
+      final isTap = rect.width <= 2 && rect.height <= 2;
+      isTapCreated = isTap;
+      final shapeRect = isTap
+          ? snapRect(Rect.fromCenter(center: snappedStart, width: 1008, height: 608))
+          : snapRect(rect);
+      switch (tool) {
+        case EditorTool.circle:
+          newObject = CircleObject(id: id, rect: shapeRect, lineStyle: lineStyle);
+          break;
+        case EditorTool.square:
+          newObject = RectangleObject(id: id, rect: shapeRect, lineStyle: lineStyle);
+          break;
+        case EditorTool.arrowTopRight:
+          if (!isTap) {
             newObject = ArrowObject(
               id: id,
-              start: _drawingStart,
-              end: _tempDrawingObject!.end,
+              start: snappedStart,
+              end: snappedEnd,
               pathType: _tempDrawingObject!.pathType,
               lineStyle: lineStyle,
             );
-            break;
-          case EditorTool.line:
+          }
+          break;
+        case EditorTool.line:
+          if (!isTap) {
+            final hasAttachments = startAttachment != null || endAttachment != null;
             newObject = LineObject(
               id: id,
-              start: _drawingStart,
-              end: endPos,
+              start: hasAttachments ? _drawingStart : snappedStart,
+              end: hasAttachments ? endPos : snappedEnd,
               startAttachment: startAttachment,
               endAttachment: endAttachment,
               lineStyle: lineStyle,
             );
-            break;
-          case EditorTool.figure:
-            newObject = FigureObject(id: id, rect: rect);
-            break;
-          case EditorTool.text:
-            newObject = TextObject(id: id, rect: rect);
-            break;
-          default:
-            break;
-        }
+          }
+          break;
+        case EditorTool.figure:
+          newObject = FigureObject(id: id, rect: shapeRect);
+          break;
+        case EditorTool.text:
+          newObject = TextObject(id: id, rect: shapeRect);
+          break;
+        default:
+          break;
       }
     }
 
     if (newObject != null) {
       _canvasBloc.add(DrawingObjectAdded(newObject));
+      if (isTapCreated && (newObject is RectangleObject || newObject is CircleObject)) {
+        _selectionBloc.add(SelectionReplaced(
+          nodeIds: const {},
+          drawingObjectIds: {newObject.id},
+        ));
+        _toolBloc.add(const ToolSelected(EditorTool.arrow));
+      }
     } else {
       _selectionBloc.add(SelectionCleared());
     }
+
+    final autoEditObject = (isTapCreated && newObject != null &&
+        (newObject is RectangleObject || newObject is CircleObject))
+        ? newObject
+        : null;
 
     setState(() {
       _isDrawing = false;
@@ -1105,6 +1148,15 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       _startSnapPoint = null;
       _hoveredSnapPoint = null;
     });
+
+    // Auto-enter text editing for tap-created shapes (inline widget, no overlay)
+    // Deferred to next frame so BlocBuilder rebuilds from tool/selection changes settle first.
+    if (autoEditObject != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _beginShapeTextEditing(autoEditObject);
+      });
+    }
   }
 
   void _finalizeResizing() {
@@ -1635,12 +1687,16 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     Overlay.of(context).insert(overlayEntry);
   }
 
-  void _beginShapeTextEditing(DrawingObject shapeObject) {
-    final canvasState = _canvasBloc.state;
-    final zoom = canvasState.viewportZoom;
-    final offset = canvasState.viewportOffset;
+  // Shape text editing state
+  DrawingObject? _editingShapeObject;
+  TextEditingController? _shapeTextController;
+  FocusNode? _shapeTextFocusNode;
+  TextStyle _shapeTextStyle = const TextStyle(fontSize: 84, color: Colors.white, fontFamily: 'Courier');
 
-    const defaultStyle = TextStyle(fontSize: 14, color: Colors.white);
+  DateTime? _shapeEditOpenedAt;
+
+  void _beginShapeTextEditing(DrawingObject shapeObject) {
+    const defaultStyle = TextStyle(fontSize: 84, color: Colors.white, fontFamily: 'Courier');
 
     String? existingText;
     TextStyle existingStyle = defaultStyle;
@@ -1652,117 +1708,56 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       existingStyle = shapeObject.textStyle ?? defaultStyle;
     }
 
-    final textEditingController = TextEditingController(text: existingText ?? '');
-    final focusNode = FocusNode();
-    OverlayEntry? overlayEntry;
+    _shapeTextController?.dispose();
+    _shapeTextFocusNode?.dispose();
 
-    // Select all text initially for easy replacement
+    _shapeTextController = TextEditingController(text: existingText ?? '');
+    _shapeTextFocusNode = FocusNode();
+    _shapeTextStyle = existingStyle;
+    _shapeEditOpenedAt = DateTime.now();
+
     if (existingText != null && existingText.isNotEmpty) {
-      textEditingController.selection = TextSelection(
+      _shapeTextController!.selection = TextSelection(
         baseOffset: 0,
         extentOffset: existingText.length,
       );
     }
 
-    void setShapeEditing(bool editing) {
-      setState(() {
-        if (shapeObject is RectangleObject) shapeObject.isEditing = editing;
-        if (shapeObject is CircleObject) shapeObject.isEditing = editing;
-      });
+    setState(() {
+      _editingShapeObject = shapeObject;
+      if (shapeObject is RectangleObject) shapeObject.isEditing = true;
+      if (shapeObject is CircleObject) shapeObject.isEditing = true;
+    });
+  }
+
+  void _finishShapeTextEditing() {
+    // Ignore dismiss if editor just opened (prevents event bleeding)
+    if (_shapeEditOpenedAt != null &&
+        DateTime.now().difference(_shapeEditOpenedAt!).inMilliseconds < 500) {
+      return;
     }
+    final shapeObject = _editingShapeObject;
+    if (shapeObject == null) return;
 
-    setShapeEditing(true);
+    final newText = _shapeTextController?.text.trim() ?? '';
 
-    bool closed = false;
-    void submitAndClose() {
-      if (!mounted || closed) return;
-      closed = true;
-      final newText = textEditingController.text.trim();
-
-      setShapeEditing(false);
-
-      setState(() {
-        if (shapeObject is RectangleObject) {
-          shapeObject.text = newText.isEmpty ? null : newText;
-          shapeObject.textStyle = newText.isEmpty ? null : existingStyle;
-        } else if (shapeObject is CircleObject) {
-          shapeObject.text = newText.isEmpty ? null : newText;
-          shapeObject.textStyle = newText.isEmpty ? null : existingStyle;
-        }
-      });
-
-      overlayEntry?.remove();
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        textEditingController.dispose();
-      });
-    }
-
-    focusNode.addListener(() {
-      if (!focusNode.hasFocus) {
-        submitAndClose();
+    setState(() {
+      if (shapeObject is RectangleObject) {
+        shapeObject.isEditing = false;
+        shapeObject.text = newText.isEmpty ? null : newText;
+        shapeObject.textStyle = newText.isEmpty ? null : _shapeTextStyle;
+      } else if (shapeObject is CircleObject) {
+        shapeObject.isEditing = false;
+        shapeObject.text = newText.isEmpty ? null : newText;
+        shapeObject.textStyle = newText.isEmpty ? null : _shapeTextStyle;
       }
+      _editingShapeObject = null;
     });
 
-    overlayEntry = OverlayEntry(
-      builder: (context) {
-        final editorBox =
-            kNodeEditorWidgetKey.currentContext!.findRenderObject()
-                as RenderBox;
-        final editorSize = editorBox.size;
-        final editorGlobalOffset = editorBox.localToGlobal(Offset.zero);
-
-        Offset worldToGlobal(Offset worldPoint) {
-          final screenPointX =
-              (worldPoint.dx + offset.dx) * zoom + editorSize.width / 2;
-          final screenPointY =
-              (worldPoint.dy + offset.dy) * zoom + editorSize.height / 2;
-          return Offset(screenPointX, screenPointY) + editorGlobalOffset;
-        }
-
-        final shapeCenter = shapeObject.rect.center;
-        final globalCenter = worldToGlobal(shapeCenter);
-        final screenWidth = shapeObject.rect.width * zoom;
-
-        return Stack(
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: () {
-                  focusNode.unfocus();
-                },
-                child: Container(color: Colors.transparent),
-              ),
-            ),
-            Positioned(
-              left: globalCenter.dx - screenWidth / 2,
-              top: globalCenter.dy - (existingStyle.fontSize! * zoom) / 2,
-              width: screenWidth,
-              child: Material(
-                color: Colors.transparent,
-                child: TextField(
-                  controller: textEditingController,
-                  focusNode: focusNode,
-                  textAlign: TextAlign.center,
-                  style: existingStyle.copyWith(
-                    fontSize: existingStyle.fontSize! * zoom,
-                  ),
-                  maxLines: 1,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.zero,
-                    isDense: true,
-                  ),
-                  onSubmitted: (_) => submitAndClose(),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-
-    Overlay.of(context).insert(overlayEntry);
+    _shapeTextController?.dispose();
+    _shapeTextController = null;
+    _shapeTextFocusNode?.dispose();
+    _shapeTextFocusNode = null;
   }
 
   @override
@@ -1793,7 +1788,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                 );
 
                 return CallbackShortcuts(
-                  bindings: {
+                  bindings: _editingShapeObject != null ? {} : {
                     const SingleActivator(LogicalKeyboardKey.delete): () =>
                       _canvasBloc.add(ObjectsRemoved(
                         nodeIds: selectionState.selectedNodeIds,
@@ -1933,7 +1928,13 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                         onScaleStart: _onScaleStart,
                         onScaleUpdate: _onScaleUpdate,
                         onScaleEnd: _onScaleEnd,
-                        child: canvasChild,
+                        child: Stack(
+                          children: [
+                            canvasChild,
+                            if (_editingShapeObject != null)
+                              _buildInlineShapeTextEditor(canvasState),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -1942,6 +1943,60 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
               },
             );
           },
+        );
+      },
+    );
+  }
+
+  Widget _buildInlineShapeTextEditor(CanvasState canvasState) {
+    final shapeObject = _editingShapeObject!;
+    final zoom = canvasState.viewportZoom;
+    final offset = canvasState.viewportOffset;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final editorWidth = constraints.maxWidth;
+        final editorHeight = constraints.maxHeight;
+
+        final shapeCenter = shapeObject.rect.center;
+        final screenX = (shapeCenter.dx + offset.dx) * zoom + editorWidth / 2;
+        final screenY = (shapeCenter.dy + offset.dy) * zoom + editorHeight / 2;
+        final screenWidth = shapeObject.rect.width * zoom;
+
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _finishShapeTextEditing,
+              ),
+            ),
+            Positioned(
+              left: screenX - screenWidth / 2,
+              top: screenY - (_shapeTextStyle.fontSize! * zoom) / 2,
+              width: screenWidth,
+              child: Material(
+                color: Colors.transparent,
+                child: TextField(
+                  key: const ValueKey('shape_text_editor'),
+                  controller: _shapeTextController,
+                  focusNode: _shapeTextFocusNode,
+                  textAlign: TextAlign.center,
+                  style: _shapeTextStyle.copyWith(
+                    fontSize: _shapeTextStyle.fontSize! * zoom,
+                  ),
+                  maxLines: 1,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => _finishShapeTextEditing(),
+                ),
+              ),
+            ),
+          ],
         );
       },
     );

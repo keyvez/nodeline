@@ -268,8 +268,8 @@ class FlowDrawEditorRenderBox extends RenderBox
 
   @override
   void paint(PaintingContext context, Offset offset) {
-    final (viewport, startX, startY) = _prepareCanvas(context.canvas, size);
-    _paintGrid(context.canvas, viewport, startX, startY);
+    final viewport = _prepareCanvas(context.canvas, size);
+    _paintGrid(context.canvas, viewport);
 
     final visibleNodes = _spatialHashGrid.queryArea(viewport.inflate(300));
 
@@ -300,17 +300,11 @@ class FlowDrawEditorRenderBox extends RenderBox
       ..translate(canvasState.viewportOffset.dx, canvasState.viewportOffset.dy);
   }
 
-  (Rect, double, double) _prepareCanvas(Canvas canvas, Size size) {
+  Rect _prepareCanvas(Canvas canvas, Size size) {
     canvas.transform(_getTransformMatrix().storage);
     final viewport = _calculateViewport();
-    final startX =
-        (viewport.left / style.gridStyle.gridSpacingX).floor() *
-        style.gridStyle.gridSpacingX;
-    final startY =
-        (viewport.top / style.gridStyle.gridSpacingY).floor() *
-        style.gridStyle.gridSpacingY;
     canvas.clipRect(viewport, clipOp: ui.ClipOp.intersect, doAntiAlias: false);
-    return (viewport, startX, startY);
+    return viewport;
   }
 
   final _pencilOptions = StrokeOptions(
@@ -323,22 +317,56 @@ class FlowDrawEditorRenderBox extends RenderBox
 
   get zoom => canvasState.viewportZoom;
 
+  /// Inverse zoom factor clamped so strokes stay within a comfortable
+  /// screen-pixel range instead of growing/shrinking without bound.
+  /// At zoom 1.0 → 1.0, zoomed out → capped at 2.0, zoomed in → floored at 0.5.
+  double get clampedInverseZoom => (1.0 / zoom).clamp(0.5, 2.0);
+
   get drawingObjects => canvasState.drawingObjects;
 
-  void _paintGrid(Canvas canvas, Rect viewport, double startX, double startY) {
-    if (!canvasState.showGrid) return;
-    gridShader.setFloat(2, startX);
-    gridShader.setFloat(3, startY);
-    // Scale down dots and lines when zoomed out (half size at zoom <= 0.5, full at zoom >= 1.0)
+  void _paintGrid(Canvas canvas, Rect viewport) {
     final double z = canvasState.viewportZoom;
-    final double scale = z >= 1.0 ? 1.0 : (0.5 + 0.5 * ((z - 0.5) / 0.5).clamp(0.0, 1.0));
-    gridShader.setFloat(4, style.gridStyle.lineWidth * scale);
-    gridShader.setFloat(9, style.gridStyle.intersectionRadius * scale);
+    final gridStyle = style.gridStyle;
+    final bool showDots = canvasState.showGrid;
+
+    // Clamp screen-space dot spacing to a narrow range (12–32 px).
+    // When the base spacing * zoom falls outside this range, double or halve
+    // the world-space spacing to keep dots comfortable on screen.
+    const double minScreenSpacing = 12.0;
+    const double maxScreenSpacing = 32.0;
+    double spacingX = gridStyle.gridSpacingX;
+    double spacingY = gridStyle.gridSpacingY;
+    while (spacingX * z < minScreenSpacing) { spacingX *= 2; }
+    while (spacingX * z > maxScreenSpacing) { spacingX /= 2; }
+    while (spacingY * z < minScreenSpacing) { spacingY *= 2; }
+    while (spacingY * z > maxScreenSpacing) { spacingY /= 2; }
+
+    // Re-align start to the adjusted spacing
+    final adjustedStartX = (viewport.left / spacingX).floor() * spacingX;
+    final adjustedStartY = (viewport.top / spacingY).floor() * spacingY;
+
+    gridShader.setFloat(0, spacingX);
+    gridShader.setFloat(1, spacingY);
+    gridShader.setFloat(2, adjustedStartX.toDouble());
+    gridShader.setFloat(3, adjustedStartY.toDouble());
+    gridShader.setFloat(4, showDots ? gridStyle.lineWidth : 0);
+    final intersectionColor = gridStyle.intersectionColor;
+    gridShader.setFloat(9, showDots ? gridStyle.intersectionRadius : 0);
+    gridShader.setFloat(10, intersectionColor.red / 255.0);
+    gridShader.setFloat(11, intersectionColor.green / 255.0);
+    gridShader.setFloat(12, intersectionColor.blue / 255.0);
+    gridShader.setFloat(13, intersectionColor.opacity);
     gridShader.setFloat(14, viewport.left);
     gridShader.setFloat(15, viewport.top);
     gridShader.setFloat(16, viewport.right);
     gridShader.setFloat(17, viewport.bottom);
     gridShader.setFloat(18, z);
+    // Background color for paper texture
+    final bgColor = style.decoration.color ?? const Color(0xFF1A1A1A);
+    gridShader.setFloat(19, bgColor.red / 255.0);
+    gridShader.setFloat(20, bgColor.green / 255.0);
+    gridShader.setFloat(21, bgColor.blue / 255.0);
+    gridShader.setFloat(22, bgColor.opacity);
     canvas.drawRect(viewport, Paint()..shader = gridShader);
   }
 
@@ -351,25 +379,26 @@ class FlowDrawEditorRenderBox extends RenderBox
   double get dpr => WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
 
   void _paintDrawingObjects(Canvas canvas) {
+    final iz = clampedInverseZoom;
     final Paint objectPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5 / zoom;
+      ..strokeWidth = 1.5 * iz;
     final Paint selectedBorderPaint = Paint()
       ..color = Colors.blue
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0 / zoom;
+      ..strokeWidth = 2.0 * iz;
     final Paint selectedArrowPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0 / zoom;
+      ..strokeWidth = 2.0 * iz;
 
     final Paint handlePaint = Paint()..color = Colors.blue;
     final Paint handleHitAreaPaint = Paint()..color = Colors.transparent;
     final Paint selectedRectBorderPaint = Paint()
       ..color = Colors.blue
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0 / zoom;
+      ..strokeWidth = 2.0 * iz;
 
     for (final obj in drawingObjects.values) {
       final isSelected = selectionState.selectedDrawingObjectIds.contains(
@@ -392,7 +421,7 @@ class FlowDrawEditorRenderBox extends RenderBox
             ..color =
             obj.isSelected ? Colors.blue : Colors.white.withOpacity(0.5)
             ..style = PaintingStyle.stroke
-            ..strokeWidth = obj.isSelected ? 2.0 / zoom : 1.5 / zoom;
+            ..strokeWidth = obj.isSelected ? 2.0 * clampedInverseZoom : 1.5 * clampedInverseZoom;
           _paintDashedRect(canvas, obj.rect, paint);
           final textStyle = TextStyle(
               color: paint.color,
@@ -682,7 +711,7 @@ class FlowDrawEditorRenderBox extends RenderBox
         // Draw connection point dots at attached endpoints
         {
           final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-          final dotRadius = 1.5 * dpr / zoom;
+          final dotRadius = 1.5 * dpr * clampedInverseZoom;
           final dotPaint = Paint()
             ..color = paint.color
             ..style = PaintingStyle.fill;
@@ -788,7 +817,7 @@ class FlowDrawEditorRenderBox extends RenderBox
         // Draw connection point dots at attached endpoints
         {
           final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-          final dotRadius = 1.5 * dpr / zoom;
+          final dotRadius = 1.5 * dpr * clampedInverseZoom;
           final dotPaint = Paint()
             ..color = paint.color
             ..style = PaintingStyle.fill;
@@ -832,7 +861,7 @@ class FlowDrawEditorRenderBox extends RenderBox
     final Paint arrowPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5 / zoom
+      ..strokeWidth = 1.5 * clampedInverseZoom
       ..strokeCap = StrokeCap.round;
 
     // Find where connectors approach each edge from, using the other endpoint
@@ -991,7 +1020,7 @@ class FlowDrawEditorRenderBox extends RenderBox
     final arrowPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5 / zoom
+      ..strokeWidth = 1.5 * clampedInverseZoom
       ..strokeCap = StrokeCap.round;
 
     // Same arrow as quick action icons, slightly smaller, shifted toward edge
@@ -1060,9 +1089,10 @@ class FlowDrawEditorRenderBox extends RenderBox
 
   /// Paints centered text inside a shape's rect.
   void _paintShapeText(Canvas canvas, Rect shapeRect, String text, TextStyle? style) {
-    const defaultStyle = TextStyle(fontSize: 14, color: Colors.white);
+    const defaultStyle = TextStyle(fontSize: 84, color: Colors.white, fontFamily: 'Courier');
+    final scaledStyle = style ?? defaultStyle;
     final textPainter = TextPainter(
-      text: TextSpan(text: text, style: style ?? defaultStyle),
+      text: TextSpan(text: text, style: scaledStyle),
       textDirection: TextDirection.ltr,
       textAlign: TextAlign.center,
     )..layout(maxWidth: shapeRect.width - 8);
@@ -1184,7 +1214,7 @@ class FlowDrawEditorRenderBox extends RenderBox
   /// Draws evenly spaced dots along [path] using [paint].
   void _paintDottedPath(Canvas canvas, Path path, Paint paint) {
     final double spacing = 6.0 / zoom;
-    final double radius = 1.5 / zoom;
+    final double radius = 1.5 * clampedInverseZoom;
     final dotPaint = Paint()
       ..color = paint.color
       ..style = PaintingStyle.fill;
@@ -1267,7 +1297,7 @@ class FlowDrawEditorRenderBox extends RenderBox
     LineStyle lineStyle = LineStyle.solid,
   }) {
     final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-    final double arrowSize = 7.0 * dpr / zoom;
+    final double arrowSize = 7.0 * dpr * clampedInverseZoom;
     const double arrowAngle = 25 * (pi / 180);
 
     final lineVector = end - controlPoint;
@@ -1458,7 +1488,7 @@ class FlowDrawEditorRenderBox extends RenderBox
     final Paint tempPaint = Paint()
       ..color = Colors.grey.withOpacity(0.7)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5 / zoom;
+      ..strokeWidth = 1.5 * clampedInverseZoom;
     final start = tempDrawingObject!.start;
     final end = tempDrawingObject!.end;
     final rect = Rect.fromPoints(start, end);

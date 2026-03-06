@@ -18,7 +18,7 @@ final class CanvasState extends Equatable {
     this.drawingObjects = const {},
     this.viewportOffset = Offset.zero,
     this.viewportZoom = 1.0,
-    this.showGrid = false,
+    this.showGrid = true,
     this.undoStack = const [],
     this.redoStack = const [],
   });

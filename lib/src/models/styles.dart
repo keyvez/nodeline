@@ -16,12 +16,12 @@ class FlGridStyle {
   final bool showGrid;
 
   const FlGridStyle({
-    this.gridSpacingX = 64.0,
-    this.gridSpacingY = 64.0,
-    this.lineWidth = 1.0,
+    this.gridSpacingX = 16.0,
+    this.gridSpacingY = 16.0,
+    this.lineWidth = 0,
     this.lineColor = const Color.fromARGB(64, 100, 100, 100),
-    this.intersectionColor = const Color.fromARGB(128, 150, 150, 150),
-    this.intersectionRadius = 2,
+    this.intersectionColor = const Color.fromARGB(32, 150, 150, 150),
+    this.intersectionRadius = 1.2,
     this.showGrid = true,
   });
 
@@ -188,7 +188,7 @@ class FlowDrawEditorStyle {
   final FlSelectionAreaStyle selectionAreaStyle;
 
   const FlowDrawEditorStyle({
-    this.decoration = const BoxDecoration(color: Colors.black12),
+    this.decoration = const BoxDecoration(color: Color(0xFF1C1C1E)),
     this.padding = const EdgeInsets.all(8.0),
     this.gridStyle = const FlGridStyle(),
     this.selectionAreaStyle = const FlSelectionAreaStyle(),

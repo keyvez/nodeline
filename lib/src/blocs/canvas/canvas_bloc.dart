@@ -4,6 +4,7 @@ import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flow_draw/src/core/node_editor/clipboard.dart';
 import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
+import 'package:flow_draw/src/core/utils/snap_utils.dart';
 import 'package:flow_draw/src/core/utils/snackbar.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flow_draw/src/models/entities.dart';
@@ -242,14 +243,38 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     final newDrawingObjects = Map<String, DrawingObject>.from(
       state.drawingObjects,
     );
+
+    // Compute snapped delta from the first selected object's anchor point.
+    Offset effectiveDelta = event.delta;
+    final firstId = event.objectIds.first;
+    if (newNodes.containsKey(firstId)) {
+      final node = newNodes[firstId]!;
+      final currentPos = node.offset + event.delta;
+      final snappedPos = snapOffset(currentPos);
+      effectiveDelta = snappedPos - node.offset;
+    } else if (newDrawingObjects.containsKey(firstId)) {
+      final obj = newDrawingObjects[firstId]!;
+      if (obj is ArrowObject) {
+        final currentPos = obj.start + event.delta;
+        final snappedPos = snapOffset(currentPos);
+        effectiveDelta = snappedPos - obj.start;
+      } else if (obj is LineObject) {
+        final currentPos = obj.start + event.delta;
+        final snappedPos = snapOffset(currentPos);
+        effectiveDelta = snappedPos - obj.start;
+      } else {
+        final currentPos = obj.rect.topLeft + event.delta;
+        final snappedPos = snapOffset(currentPos);
+        effectiveDelta = snappedPos - obj.rect.topLeft;
+      }
+    }
+
     for (final id in event.objectIds) {
       if (newNodes.containsKey(id)) {
         final node = newNodes[id]!;
-        newNodes[id] = node.copyWith(offset: node.offset + event.delta);
+        newNodes[id] = node.copyWith(offset: node.offset + effectiveDelta);
       } else if (newDrawingObjects.containsKey(id)) {
         final object = newDrawingObjects[id]!;
-        // Your existing drag logic for drawing objects is correct...
-        final effectiveDelta = event.delta;
         if (object is ArrowObject) {
           object.start += effectiveDelta;
           object.end += effectiveDelta;
