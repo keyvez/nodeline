@@ -11,6 +11,7 @@ import 'package:flow_draw/src/core/utils/snap_utils.dart';
 import 'package:flow_draw/src/core/utils/renderbox.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flow_draw/src/ui/canvas/flow_draw_editor_render_object.dart';
+import 'package:flow_draw/src/ui/shared/context_menu.dart';
 import 'package:flow_draw/src/ui/shared/improved_listener.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -524,6 +525,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       _handleObjectDrawing(worldPos, event.pressure);
     } else {
       _updateHoveredHandle(event.position);
+      _updateHoveredDrawingObject(worldPos);
     }
   }
 
@@ -648,95 +650,84 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       ));
     }
 
-    // If nothing is selected after the above, bail
     final selectedIds = _selectionBloc.state.selectedDrawingObjectIds;
-    if (selectedIds.isEmpty && _selectionBloc.state.selectedNodeIds.isEmpty) {
-      return;
-    }
+    final selectedNodeIds = _selectionBloc.state.selectedNodeIds;
+    final hasSelection = selectedIds.isNotEmpty || selectedNodeIds.isNotEmpty;
 
-    final position = event.position;
-    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-
-    showMenu<String>(
+    showCanvasContextMenu(
       context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx,
-        position.dy,
-        overlay.size.width - position.dx,
-        overlay.size.height - position.dy,
-      ),
-      color: Theme.of(context).colorScheme.surfaceContainer,
-      items: [
-        if (selectedIds.length >= 2) ...[
-          const PopupMenuItem(value: 'align_left', child: Text('Align Left')),
-          const PopupMenuItem(value: 'align_center_h', child: Text('Align Center')),
-          const PopupMenuItem(value: 'align_right', child: Text('Align Right')),
-          const PopupMenuItem(value: 'align_top', child: Text('Align Top')),
-          const PopupMenuItem(value: 'align_center_v', child: Text('Align Middle')),
-          const PopupMenuItem(value: 'align_bottom', child: Text('Align Bottom')),
-          const PopupMenuDivider(),
-        ],
-        if (selectedIds.length >= 3) ...[
-          const PopupMenuItem(value: 'dist_h', child: Text('Distribute Horizontally')),
-          const PopupMenuItem(value: 'dist_v', child: Text('Distribute Vertically')),
-          const PopupMenuDivider(),
-        ],
-        const PopupMenuItem(value: 'bring_forward', child: Text('Bring Forward')),
-        const PopupMenuItem(value: 'send_backward', child: Text('Send Backward')),
-        const PopupMenuItem(value: 'bring_to_front', child: Text('Bring to Front')),
-        const PopupMenuItem(value: 'send_to_back', child: Text('Send to Back')),
-        const PopupMenuDivider(),
-        const PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
-        const PopupMenuItem(
-          value: 'delete',
-          child: Text('Delete', style: TextStyle(color: Colors.red)),
-        ),
-      ],
-    ).then((value) {
-      if (value == null) return;
-      final ids = _selectionBloc.state.selectedDrawingObjectIds;
-      switch (value) {
-        case 'align_left':
-          _canvasBloc.add(ObjectsAligned(ids, AlignmentType.left));
-        case 'align_center_h':
-          _canvasBloc.add(ObjectsAligned(ids, AlignmentType.centerH));
-        case 'align_right':
-          _canvasBloc.add(ObjectsAligned(ids, AlignmentType.right));
-        case 'align_top':
-          _canvasBloc.add(ObjectsAligned(ids, AlignmentType.top));
-        case 'align_center_v':
-          _canvasBloc.add(ObjectsAligned(ids, AlignmentType.centerV));
-        case 'align_bottom':
-          _canvasBloc.add(ObjectsAligned(ids, AlignmentType.bottom));
-        case 'dist_h':
-          _canvasBloc.add(ObjectsDistributed(ids, DistributionType.horizontal));
-        case 'dist_v':
-          _canvasBloc.add(ObjectsDistributed(ids, DistributionType.vertical));
-        case 'bring_forward':
-          _canvasBloc.add(ObjectsBroughtForward(ids));
-        case 'send_backward':
-          _canvasBloc.add(ObjectsSentBackward(ids));
-        case 'bring_to_front':
-          _canvasBloc.add(ObjectsBroughtToFront(ids));
-        case 'send_to_back':
-          _canvasBloc.add(ObjectsSentToBack(ids));
-        case 'duplicate':
-          _canvasBloc.add(SelectionDuplicated(ids));
-          final newIds = _canvasBloc.consumeLastDuplicatedIds();
-          if (newIds.isNotEmpty) {
-            _selectionBloc.add(SelectionReplaced(
-              nodeIds: {},
-              drawingObjectIds: newIds,
+      position: event.position,
+      hasSelection: hasSelection,
+      selectedCount: selectedIds.length,
+      onAction: (action) {
+        final ids = _selectionBloc.state.selectedDrawingObjectIds;
+        switch (action) {
+          case CanvasContextMenuAction.cut:
+            _canvasBloc.add(SelectionCut());
+            _canvasBloc.add(ObjectsRemoved(
+              nodeIds: _selectionBloc.state.selectedNodeIds,
+              drawingObjectIds: ids,
             ));
-          }
-        case 'delete':
-          _canvasBloc.add(ObjectsRemoved(
-            nodeIds: _selectionBloc.state.selectedNodeIds,
-            drawingObjectIds: ids,
-          ));
-          _selectionBloc.add(SelectionCleared());
-      }
-    });
+            _selectionBloc.add(SelectionCleared());
+          case CanvasContextMenuAction.copy:
+            _canvasBloc.add(SelectionCopied());
+          case CanvasContextMenuAction.paste:
+            final pasteWorldPos = screenToWorld(
+              _lastFocalPoint,
+              _canvasBloc.state.viewportOffset,
+              _canvasBloc.state.viewportZoom,
+            );
+            if (pasteWorldPos != null) {
+              _canvasBloc.add(SelectionPasted(pastePosition: pasteWorldPos));
+            }
+          case CanvasContextMenuAction.selectAll:
+            final canvasState = _canvasBloc.state;
+            _selectionBloc.add(SelectionReplaced(
+              nodeIds: canvasState.nodes.keys.toSet(),
+              drawingObjectIds: canvasState.drawingObjects.keys.toSet(),
+            ));
+          case CanvasContextMenuAction.duplicate:
+            _canvasBloc.add(SelectionDuplicated(ids));
+            final newIds = _canvasBloc.consumeLastDuplicatedIds();
+            if (newIds.isNotEmpty) {
+              _selectionBloc.add(SelectionReplaced(
+                nodeIds: {},
+                drawingObjectIds: newIds,
+              ));
+            }
+          case CanvasContextMenuAction.bringForward:
+            _canvasBloc.add(ObjectsBroughtForward(ids));
+          case CanvasContextMenuAction.sendBackward:
+            _canvasBloc.add(ObjectsSentBackward(ids));
+          case CanvasContextMenuAction.bringToFront:
+            _canvasBloc.add(ObjectsBroughtToFront(ids));
+          case CanvasContextMenuAction.sendToBack:
+            _canvasBloc.add(ObjectsSentToBack(ids));
+          case CanvasContextMenuAction.alignLeft:
+            _canvasBloc.add(ObjectsAligned(ids, AlignmentType.left));
+          case CanvasContextMenuAction.alignCenterH:
+            _canvasBloc.add(ObjectsAligned(ids, AlignmentType.centerH));
+          case CanvasContextMenuAction.alignRight:
+            _canvasBloc.add(ObjectsAligned(ids, AlignmentType.right));
+          case CanvasContextMenuAction.alignTop:
+            _canvasBloc.add(ObjectsAligned(ids, AlignmentType.top));
+          case CanvasContextMenuAction.alignCenterV:
+            _canvasBloc.add(ObjectsAligned(ids, AlignmentType.centerV));
+          case CanvasContextMenuAction.alignBottom:
+            _canvasBloc.add(ObjectsAligned(ids, AlignmentType.bottom));
+          case CanvasContextMenuAction.distributeHorizontal:
+            _canvasBloc.add(ObjectsDistributed(ids, DistributionType.horizontal));
+          case CanvasContextMenuAction.distributeVertical:
+            _canvasBloc.add(ObjectsDistributed(ids, DistributionType.vertical));
+          case CanvasContextMenuAction.delete:
+            _canvasBloc.add(ObjectsRemoved(
+              nodeIds: _selectionBloc.state.selectedNodeIds,
+              drawingObjectIds: ids,
+            ));
+            _selectionBloc.add(SelectionCleared());
+        }
+      },
+    );
   }
 
   void _handleArrowToolPointerDown(PointerDownEvent event, Offset worldPos) {
@@ -1454,6 +1445,32 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       }
     }
     return (nodeIds, drawingObjectIds);
+  }
+
+  /// Detects which shape (Rectangle, Circle, Diamond) the pointer is over
+  /// and dispatches a [DrawingObjectHovered] event so connection ports can
+  /// be shown on hover.
+  void _updateHoveredDrawingObject(Offset worldPos) {
+    final canvasState = _canvasBloc.state;
+    final hitPadding = 6.0 / canvasState.viewportZoom;
+    String? hoveredId;
+
+    for (final obj in canvasState.drawingObjects.values.toList().reversed) {
+      if (obj is RectangleObject ||
+          obj is CircleObject ||
+          obj is DiamondObject ||
+          obj is ParallelogramObject ||
+          obj is ForkJoinObject) {
+        if (obj.rect.inflate(hitPadding).contains(worldPos)) {
+          hoveredId = obj.id;
+          break;
+        }
+      }
+    }
+
+    if (hoveredId != _selectionBloc.state.hoveredDrawingObjectId) {
+      _selectionBloc.add(DrawingObjectHovered(drawingObjectId: hoveredId));
+    }
   }
 
   void _updateHoveredHandle(Offset screenPosition) {

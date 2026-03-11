@@ -8,6 +8,57 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
 
+/// Direction of a connection port on a shape's boundary.
+enum PortDirection { top, right, bottom, left }
+
+/// A connection port (anchor point) on a shape where arrows can attach.
+///
+/// Each shape exposes four cardinal ports. Ports are shown as small visual
+/// indicators when a shape is hovered or selected.
+class ConnectionPort {
+  /// The absolute position of this port in world coordinates.
+  final Offset portPosition;
+
+  /// Which side of the shape this port sits on.
+  final PortDirection direction;
+
+  /// The id of the [DrawingObject] that owns this port.
+  final String objectId;
+
+  const ConnectionPort({
+    required this.portPosition,
+    required this.direction,
+    required this.objectId,
+  });
+
+  /// Computes the four cardinal [ConnectionPort]s for any shape based on its
+  /// bounding [rect] and [objectId].
+  static List<ConnectionPort> portsForRect(Rect rect, String objectId) {
+    return [
+      ConnectionPort(
+        portPosition: Offset(rect.center.dx, rect.top),
+        direction: PortDirection.top,
+        objectId: objectId,
+      ),
+      ConnectionPort(
+        portPosition: Offset(rect.right, rect.center.dy),
+        direction: PortDirection.right,
+        objectId: objectId,
+      ),
+      ConnectionPort(
+        portPosition: Offset(rect.center.dx, rect.bottom),
+        direction: PortDirection.bottom,
+        objectId: objectId,
+      ),
+      ConnectionPort(
+        portPosition: Offset(rect.left, rect.center.dy),
+        direction: PortDirection.left,
+        objectId: objectId,
+      ),
+    ];
+  }
+}
+
 enum EditorTool {
   arrow,
   square,
@@ -64,6 +115,12 @@ abstract class DrawingObject {
 
   Map<String, dynamic> toJson();
 
+  /// Returns the four cardinal connection ports for this shape.
+  /// Only meaningful for shape objects (Rectangle, Circle, Diamond).
+  List<ConnectionPort> getConnectionPorts() {
+    return ConnectionPort.portsForRect(rect, id);
+  }
+
   DrawingObject copyWith({bool? isSelected, double? angle});
 }
 
@@ -74,7 +131,11 @@ class RectangleObject extends DrawingObject {
   bool isEditing;
   final LineStyle lineStyle;
 
-  RectangleObject({required super.id, required Rect rect, super.isSelected, super.angle, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid})
+  /// Corner radius for rounded rectangle variant.
+  /// When > 0, the rectangle renders with rounded corners.
+  final double borderRadius;
+
+  RectangleObject({required super.id, required Rect rect, super.isSelected, super.angle, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid, this.borderRadius = 0.0})
     : _rect = rect;
 
   @override
@@ -95,6 +156,7 @@ class RectangleObject extends DrawingObject {
       'color': textStyle!.color?.value,
     },
     'lineStyle': lineStyle.name,
+    if (borderRadius > 0) 'borderRadius': borderRadius,
   };
 
   factory RectangleObject.fromJson(Map<String, dynamic> json) {
@@ -114,11 +176,12 @@ class RectangleObject extends DrawingObject {
       text: json['text'] as String?,
       textStyle: style,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
+      borderRadius: (json['borderRadius'] as num?)?.toDouble() ?? 0.0,
     );
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle, bool? isEditing}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle, bool? isEditing, double? borderRadius}) {
     return RectangleObject(
       id: id,
       rect: rect ?? _rect,
@@ -127,6 +190,7 @@ class RectangleObject extends DrawingObject {
       text: text,
       textStyle: textStyle,
       lineStyle: lineStyle ?? this.lineStyle,
+      borderRadius: borderRadius ?? this.borderRadius,
       isEditing: isEditing ?? this.isEditing,
     );
   }
@@ -290,6 +354,160 @@ class DiamondObject extends DrawingObject {
   }
 }
 
+/// A parallelogram shape for process/data flow diagrams.
+class ParallelogramObject extends DrawingObject {
+  Rect _rect;
+  String? text;
+  TextStyle? textStyle;
+  bool isEditing;
+  final LineStyle lineStyle;
+  final double skewOffset;
+
+  ParallelogramObject({
+    required super.id,
+    required Rect rect,
+    super.isSelected,
+    super.angle,
+    this.text,
+    this.textStyle,
+    this.isEditing = false,
+    this.lineStyle = LineStyle.solid,
+    this.skewOffset = 20.0,
+  }) : _rect = rect;
+
+  @override
+  Rect get rect => _rect;
+
+  set rect(Rect newRect) => _rect = newRect;
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'type': 'parallelogram',
+    'rect': _rect.toJson(),
+    'isSelected': isSelected,
+    'angle': angle,
+    if (text != null) 'text': text,
+    if (textStyle != null) 'textStyle': {
+      'fontSize': textStyle!.fontSize,
+      'color': textStyle!.color?.value,
+    },
+    'lineStyle': lineStyle.name,
+    'skewOffset': skewOffset,
+  };
+
+  static ParallelogramObject fromJson(Map<String, dynamic> json) {
+    TextStyle? style;
+    if (json['textStyle'] != null) {
+      final ts = json['textStyle'] as Map<String, dynamic>;
+      style = TextStyle(
+        fontSize: (ts['fontSize'] as num?)?.toDouble(),
+        color: ts['color'] != null ? Color(ts['color'] as int) : null,
+      );
+    }
+    return ParallelogramObject(
+      id: json['id'],
+      rect: JSONRect.fromJson(json['rect']),
+      isSelected: json['isSelected'] ?? false,
+      angle: json['angle'] ?? 0.0,
+      text: json['text'] as String?,
+      textStyle: style,
+      lineStyle: json['lineStyle'] != null
+          ? LineStyle.values.byName(json['lineStyle'])
+          : LineStyle.solid,
+      skewOffset: (json['skewOffset'] as num?)?.toDouble() ?? 20.0,
+    );
+  }
+
+  Path get path {
+    final r = _rect;
+    return Path()
+      ..moveTo(r.left + skewOffset, r.top)
+      ..lineTo(r.right, r.top)
+      ..lineTo(r.right - skewOffset, r.bottom)
+      ..lineTo(r.left, r.bottom)
+      ..close();
+  }
+
+  @override
+  DrawingObject copyWith({
+    Rect? rect,
+    bool? isSelected,
+    double? angle,
+    LineStyle? lineStyle,
+    bool? isEditing,
+  }) {
+    return ParallelogramObject(
+      id: id,
+      rect: rect ?? _rect,
+      isSelected: isSelected ?? this.isSelected,
+      angle: angle ?? this.angle,
+      text: text,
+      textStyle: textStyle,
+      lineStyle: lineStyle ?? this.lineStyle,
+      isEditing: isEditing ?? this.isEditing,
+      skewOffset: skewOffset,
+    );
+  }
+}
+
+/// A fork/join horizontal bar for activity/UML diagrams.
+class ForkJoinObject extends DrawingObject {
+  Rect _rect;
+  final LineStyle lineStyle;
+
+  ForkJoinObject({
+    required super.id,
+    required Rect rect,
+    super.isSelected,
+    super.angle,
+    this.lineStyle = LineStyle.solid,
+  }) : _rect = rect;
+
+  @override
+  Rect get rect => _rect;
+
+  set rect(Rect newRect) => _rect = newRect;
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'type': 'fork_join',
+    'rect': _rect.toJson(),
+    'isSelected': isSelected,
+    'angle': angle,
+    'lineStyle': lineStyle.name,
+  };
+
+  static ForkJoinObject fromJson(Map<String, dynamic> json) {
+    return ForkJoinObject(
+      id: json['id'],
+      rect: JSONRect.fromJson(json['rect']),
+      isSelected: json['isSelected'] ?? false,
+      angle: json['angle'] ?? 0.0,
+      lineStyle: json['lineStyle'] != null
+          ? LineStyle.values.byName(json['lineStyle'])
+          : LineStyle.solid,
+    );
+  }
+
+  @override
+  DrawingObject copyWith({
+    Rect? rect,
+    bool? isSelected,
+    double? angle,
+    LineStyle? lineStyle,
+  }) {
+    return ForkJoinObject(
+      id: id,
+      rect: rect ?? _rect,
+      isSelected: isSelected ?? this.isSelected,
+      angle: angle ?? this.angle,
+      lineStyle: lineStyle ?? this.lineStyle,
+    );
+  }
+}
+
 class ArrowObject extends DrawingObject {
   Offset start;
   Offset end;
@@ -299,6 +517,8 @@ class ArrowObject extends DrawingObject {
   final ObjectAttachment? endAttachment;
   List<Offset>? waypoints;
   final LineStyle lineStyle;
+  /// Optional text label displayed at the midpoint of this arrow.
+  final String? arrowLabel;
 
   ArrowObject({
     required super.id,
@@ -312,6 +532,7 @@ class ArrowObject extends DrawingObject {
     this.endAttachment,
     this.waypoints,
     this.lineStyle = LineStyle.solid,
+    this.arrowLabel,
   });
 
   @override
@@ -390,6 +611,7 @@ class ArrowObject extends DrawingObject {
     'midPoint': midPoint?.toJson(),
     'angle': angle,
     'lineStyle': lineStyle.name,
+    if (arrowLabel != null) 'arrowLabel': arrowLabel,
   };
 
   factory ArrowObject.fromJson(Map<String, dynamic> json) {
@@ -404,6 +626,7 @@ class ArrowObject extends DrawingObject {
       angle: json['angle'] ?? 0.0,
       midPoint: json['midPoint'] != null ? JSONOffset.fromJson((json['midPoint'] as List).cast<double>()) : null,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
+      arrowLabel: json['arrowLabel'] as String?,
     );
   }
 
@@ -419,6 +642,7 @@ class ArrowObject extends DrawingObject {
     double? angle,
     List<Offset>? waypoints,
     LineStyle? lineStyle,
+    String? arrowLabel,
   }) {
     return ArrowObject(
       id: id,
@@ -432,6 +656,7 @@ class ArrowObject extends DrawingObject {
       angle: angle ?? this.angle,
       waypoints: waypoints ?? this.waypoints,
       lineStyle: lineStyle ?? this.lineStyle,
+      arrowLabel: arrowLabel ?? this.arrowLabel,
     );
   }
 }

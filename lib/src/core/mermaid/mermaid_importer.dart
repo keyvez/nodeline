@@ -80,7 +80,7 @@ class MermaidImporter {
 
     final fromId = match.group(1)!;
     final edgeType = match.group(2)!;
-    // final edgeLabel = match.group(3); // label on edge, currently unused
+    final edgeLabel = match.group(3);
     final toId = match.group(4)!;
 
     // Parse inline node declarations from the full line
@@ -95,6 +95,7 @@ class MermaidImporter {
       from: fromId,
       to: toId,
       type: edgeType == '-->' ? 'arrow' : 'line',
+      label: edgeLabel,
     );
   }
 
@@ -457,6 +458,7 @@ class MermaidImporter {
           end: end,
           startAttachment: startAttachment,
           endAttachment: endAttachment,
+          arrowLabel: edge.label,
         );
         drawingObjects.add(arrow.toJson());
       } else {
@@ -497,6 +499,7 @@ class _MermaidEdge {
   final String from;
   final String to;
   final String type; // 'arrow' or 'line'
+  final String? label;
 
-  _MermaidEdge({required this.from, required this.to, required this.type});
+  _MermaidEdge({required this.from, required this.to, required this.type, this.label});
 }

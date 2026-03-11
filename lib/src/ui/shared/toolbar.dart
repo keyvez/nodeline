@@ -302,6 +302,8 @@ class FlowDrawToolbar extends StatelessWidget {
               },
             ),
             Gap(8),
+            const PromptToWorkflowButton(),
+            Gap(8),
             const _SvgExportButton(),
             BlocBuilder<CanvasBloc, CanvasState>(
               builder: (context, canvasState) {

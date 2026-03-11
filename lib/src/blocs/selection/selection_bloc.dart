@@ -11,6 +11,7 @@ class SelectionBloc extends Bloc<SelectionEvent, SelectionState> {
         SelectionObjectsAdded e => _onSelectionObjectsAdded(e, emit),
         SelectionReplaced e => _onSelectionReplaced(e, emit),
         SelectionCleared e => _onSelectionCleared(e, emit),
+        DrawingObjectHovered e => _onDrawingObjectHovered(e, emit),
       });
     });
   }
@@ -37,5 +38,15 @@ class SelectionBloc extends Bloc<SelectionEvent, SelectionState> {
   void _onSelectionCleared(
       SelectionCleared event, Emitter<SelectionState> emit) {
     emit(const SelectionState());
+  }
+
+  void _onDrawingObjectHovered(
+      DrawingObjectHovered event, Emitter<SelectionState> emit) {
+    if (state.hoveredDrawingObjectId == event.drawingObjectId) return;
+    if (event.drawingObjectId == null) {
+      emit(state.copyWith(clearHoveredDrawingObjectId: true));
+    } else {
+      emit(state.copyWith(hoveredDrawingObjectId: event.drawingObjectId));
+    }
   }
 }

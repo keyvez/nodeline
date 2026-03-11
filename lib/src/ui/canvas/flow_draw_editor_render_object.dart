@@ -484,6 +484,27 @@ class FlowDrawEditorRenderBox extends RenderBox
           if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
             _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle);
           }
+        } else if (obj is ParallelogramObject) {
+          final paraPath = obj.path;
+          canvas.drawPath(paraPath, fillPaint);
+          if (obj.lineStyle == LineStyle.solid) {
+            canvas.drawPath(paraPath, objectPaint);
+          } else {
+            _paintStyledPath(canvas, paraPath, objectPaint, obj.lineStyle, seed: obj.id.hashCode);
+          }
+          if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
+            _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle);
+          }
+        } else if (obj is ForkJoinObject) {
+          // Fork/join renders as a thick bar
+          final barPaint = Paint()
+            ..color = objectPaint.color
+            ..style = PaintingStyle.fill;
+          final barRect = RRect.fromRectAndRadius(
+            obj.rect,
+            const Radius.circular(3),
+          );
+          canvas.drawRRect(barRect, barPaint);
         } else if (obj is SvgObject) {
           canvas.save();
           canvas.translate(obj.rect.left, obj.rect.top);
@@ -527,6 +548,14 @@ class FlowDrawEditorRenderBox extends RenderBox
           if (selectionState.selectedDrawingObjectIds.length == 1 && (obj is RectangleObject || obj is CircleObject)) {
             _paintQuickActionArrows(canvas, obj.rect, obj.id);
           }
+        }
+
+        // Paint connection port indicators when the shape is selected or hovered
+        final isHovered = selectionState.hoveredDrawingObjectId == obj.id;
+        if ((isSelected || isHovered) &&
+            (obj is RectangleObject || obj is CircleObject || obj is DiamondObject ||
+             obj is ParallelogramObject || obj is ForkJoinObject)) {
+          _paintConnectionPortIndicators(canvas, obj);
         }
 
         canvas.restore();
@@ -740,6 +769,77 @@ class FlowDrawEditorRenderBox extends RenderBox
           }
         }
 
+        // Draw arrow label at the midpoint of the arrow
+        if (obj.arrowLabel != null && obj.arrowLabel!.isNotEmpty) {
+          final labelText = obj.arrowLabel!;
+          final labelFontSize = 12.0 / zoom;
+          final labelParagraphBuilder = ui.ParagraphBuilder(
+            ui.ParagraphStyle(
+              textAlign: TextAlign.center,
+              fontSize: labelFontSize,
+              fontFamily: 'sans-serif',
+            ),
+          )
+            ..pushStyle(ui.TextStyle(color: const Color(0xFFE0E0E0)))
+            ..addText(labelText);
+          final labelParagraph = labelParagraphBuilder.build();
+          labelParagraph.layout(ui.ParagraphConstraints(width: 200.0 / zoom));
+
+          // Compute midpoint: for orthogonal paths use the path midpoint,
+          // otherwise use the quadratic bezier midpoint at t=0.5.
+          Offset labelCenter;
+          if (pathType == LinkPathType.orthogonal &&
+              waypoints != null &&
+              waypoints.isNotEmpty) {
+            final fullPath = [start, ...waypoints, end];
+            // Walk along segments to find the geometric midpoint
+            double totalLen = 0;
+            for (int i = 0; i < fullPath.length - 1; i++) {
+              totalLen += (fullPath[i + 1] - fullPath[i]).distance;
+            }
+            double halfLen = totalLen / 2;
+            labelCenter = fullPath.last;
+            for (int i = 0; i < fullPath.length - 1; i++) {
+              final segLen = (fullPath[i + 1] - fullPath[i]).distance;
+              if (halfLen <= segLen) {
+                final t = segLen > 0 ? halfLen / segLen : 0.0;
+                labelCenter = Offset.lerp(fullPath[i], fullPath[i + 1], t)!;
+                break;
+              }
+              halfLen -= segLen;
+            }
+          } else {
+            final cp = controlPoint;
+            labelCenter = Offset(
+              0.25 * start.dx + 0.5 * cp.dx + 0.25 * end.dx,
+              0.25 * start.dy + 0.5 * cp.dy + 0.25 * end.dy,
+            );
+          }
+
+          final textWidth = labelParagraph.longestLine;
+          final textHeight = labelParagraph.height;
+          final padding = 4.0 / zoom;
+          final bgRect = Rect.fromCenter(
+            center: labelCenter,
+            width: textWidth + padding * 2,
+            height: textHeight + padding * 2,
+          );
+          final bgPaint = Paint()
+            ..color = const Color(0xE0202020)
+            ..style = PaintingStyle.fill;
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(bgRect, Radius.circular(3.0 / zoom)),
+            bgPaint,
+          );
+          canvas.drawParagraph(
+            labelParagraph,
+            Offset(
+              labelCenter.dx - textWidth / 2,
+              labelCenter.dy - textHeight / 2,
+            ),
+          );
+        }
+
         if (obj.isSelected) {
           final double visibleHandleRadius = 4.0 / zoom;
           final double handleHitAreaRadius = 10.0 / zoom;
@@ -864,6 +964,28 @@ class FlowDrawEditorRenderBox extends RenderBox
         }
         continue;
       }
+    }
+  }
+
+  /// Paints small port indicator circles at each cardinal anchor point of a
+  /// shape. These visually communicate where arrows can connect.
+  void _paintConnectionPortIndicators(Canvas canvas, DrawingObject obj) {
+    final ports = obj.getConnectionPorts();
+    final double portRadius = 5.0 / zoom;
+    final double borderWidth = 1.5 / zoom;
+
+    final Paint portFillPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    final Paint portBorderPaint = Paint()
+      ..color = const Color(0xFF2196F3) // Blue
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = borderWidth;
+
+    for (final port in ports) {
+      // Draw filled circle with blue border at each anchorPoint position
+      canvas.drawCircle(port.portPosition, portRadius, portFillPaint);
+      canvas.drawCircle(port.portPosition, portRadius, portBorderPaint);
     }
   }
 

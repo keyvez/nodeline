@@ -118,7 +118,11 @@ class MermaidExporter {
       if (from == null || to == null) continue;
       shapesInEdges.add(startId);
       shapesInEdges.add(endId);
-      buffer.writeln('    $from --> $to');
+      if (arrow.arrowLabel != null && arrow.arrowLabel!.isNotEmpty) {
+        buffer.writeln('    $from -->|${_escapeLabel(arrow.arrowLabel!)}| $to');
+      } else {
+        buffer.writeln('    $from --> $to');
+      }
     }
 
     for (final line in lines) {

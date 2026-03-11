@@ -30,6 +30,8 @@ class SvgExporter {
       if (obj is RectangleObject ||
           obj is CircleObject ||
           obj is DiamondObject ||
+          obj is ParallelogramObject ||
+          obj is ForkJoinObject ||
           obj is FigureObject ||
           obj is TextObject ||
           obj is SvgObject) {
@@ -48,6 +50,10 @@ class SvgExporter {
           _renderCircle(obj, svgElements, allBounds);
         case DiamondObject():
           _renderDiamond(obj, svgElements, allBounds);
+        case ParallelogramObject():
+          _renderParallelogram(obj, svgElements, allBounds);
+        case ForkJoinObject():
+          _renderForkJoin(obj, svgElements, allBounds);
         case ArrowObject():
           _renderArrow(obj, objects, solidRects, svgElements, allBounds);
         case LineObject():
@@ -195,6 +201,44 @@ class SvgExporter {
     bounds.add(r);
   }
 
+  static void _renderParallelogram(
+    ParallelogramObject obj,
+    List<String> svg,
+    List<Rect> bounds,
+  ) {
+    final r = obj.rect;
+    final s = obj.skewOffset;
+    final points = '${r.left + s},${r.top} ${r.right},${r.top} ${r.right - s},${r.bottom} ${r.left},${r.bottom}';
+    final dashArray = _dashArray(obj.lineStyle);
+    final rotOpen = _rotateOpen(obj.angle, r.center);
+    final rotClose = _rotateClose(obj.angle);
+
+    if (rotOpen.isNotEmpty) svg.add(rotOpen);
+    svg.add('  <polygon points="$points" '
+        'fill="none" stroke="$_stroke" stroke-width="$_defaultStrokeWidth"'
+        '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
+        '/>');
+    if (obj.text != null && obj.text!.isNotEmpty) {
+      svg.add('  <text x="${r.center.dx}" y="${r.center.dy}" '
+          'fill="$_textColor" font-size="14" font-family="sans-serif" '
+          'text-anchor="middle" dominant-baseline="central">'
+          '${_escapeXml(obj.text!)}</text>');
+    }
+    if (rotClose.isNotEmpty) svg.add(rotClose);
+    bounds.add(r);
+  }
+
+  static void _renderForkJoin(
+    ForkJoinObject obj,
+    List<String> svg,
+    List<Rect> bounds,
+  ) {
+    final r = obj.rect;
+    svg.add('  <rect x="${r.left}" y="${r.top}" width="${r.width}" height="${r.height}" '
+        'rx="3" ry="3" fill="$_stroke" stroke="none"/>');
+    bounds.add(r);
+  }
+
   static void _renderArrow(
     ArrowObject obj,
     Map<String, DrawingObject> objects,
@@ -247,6 +291,53 @@ class SvgExporter {
 
       // Bounds: include control point for curves.
       _addPathBounds([obj.start, cp, obj.end], bounds);
+    }
+
+    // Render arrow label at the midpoint
+    if (obj.arrowLabel != null && obj.arrowLabel!.isNotEmpty) {
+      Offset labelCenter;
+      if (obj.pathType == LinkPathType.orthogonal) {
+        var fullPath = _computeOrthogonalPath(obj, solidRects);
+        if (fullPath.length < 2) fullPath = [obj.start, obj.end];
+        // Walk along segments to find the geometric midpoint
+        double totalLen = 0;
+        for (int i = 0; i < fullPath.length - 1; i++) {
+          totalLen += (fullPath[i + 1] - fullPath[i]).distance;
+        }
+        double halfLen = totalLen / 2;
+        labelCenter = fullPath.last;
+        for (int i = 0; i < fullPath.length - 1; i++) {
+          final segLen = (fullPath[i + 1] - fullPath[i]).distance;
+          if (halfLen <= segLen) {
+            final t = segLen > 0 ? halfLen / segLen : 0.0;
+            labelCenter = Offset(
+              fullPath[i].dx + (fullPath[i + 1].dx - fullPath[i].dx) * t,
+              fullPath[i].dy + (fullPath[i + 1].dy - fullPath[i].dy) * t,
+            );
+            break;
+          }
+          halfLen -= segLen;
+        }
+      } else {
+        final cp = obj.midPoint ?? (obj.start + obj.end) / 2;
+        labelCenter = Offset(
+          0.25 * obj.start.dx + 0.5 * cp.dx + 0.25 * obj.end.dx,
+          0.25 * obj.start.dy + 0.5 * cp.dy + 0.25 * obj.end.dy,
+        );
+      }
+
+      final escaped = _escapeXml(obj.arrowLabel!);
+      // Background rect for readability — approximate text bounds
+      final estWidth = escaped.length * 8.0 + 8;
+      final estHeight = 20.0;
+      svg.add('  <rect x="${labelCenter.dx - estWidth / 2}" '
+          'y="${labelCenter.dy - estHeight / 2}" '
+          'width="$estWidth" height="$estHeight" '
+          'rx="3" ry="3" fill="$_bg" fill-opacity="0.88"/>');
+      svg.add('  <text x="${labelCenter.dx}" y="${labelCenter.dy}" '
+          'fill="$_textColor" font-size="12" font-family="sans-serif" '
+          'text-anchor="middle" dominant-baseline="central">'
+          '$escaped</text>');
     }
   }
 

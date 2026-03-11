@@ -39,3 +39,13 @@ final class SelectionReplaced extends SelectionEvent {
 
 /// Event to clear the entire selection.
 final class SelectionCleared extends SelectionEvent {}
+
+/// Event to update which drawing object is currently hovered.
+final class DrawingObjectHovered extends SelectionEvent {
+  final String? drawingObjectId;
+
+  const DrawingObjectHovered({this.drawingObjectId});
+
+  @override
+  List<Object> get props => [drawingObjectId ?? ''];
+}

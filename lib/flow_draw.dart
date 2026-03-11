@@ -27,6 +27,10 @@ export 'package:flow_draw/src/models/drawing_entities.dart'
         FigureObject,
         TextObject,
         SvgObject,
+        ParallelogramObject,
+        ForkJoinObject,
+        ConnectionPort,
+        PortDirection,
         workflowTools;
 
 export 'package:flow_draw/src/models/entities.dart'
@@ -38,3 +42,8 @@ export 'package:flow_draw/src/core/mermaid/mermaid_importer.dart';
 export 'package:flow_draw/src/core/parser/flow_draw_parser.dart';
 export 'package:flow_draw/src/core/utils/workflow_templates.dart';
 export 'package:flow_draw/src/core/utils/workflow_validator.dart';
+export 'package:flow_draw/src/core/utils/png_exporter.dart';
+export 'package:flow_draw/src/ui/shared/prompt_to_workflow.dart';
+export 'package:flow_draw/src/ui/shared/color_picker.dart';
+export 'package:flow_draw/src/ui/shared/snap_guides.dart';
+export 'package:flow_draw/src/ui/shared/floating_toolbar.dart';

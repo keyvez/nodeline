@@ -94,7 +94,7 @@ void main() {
     'Rounded rectangle variant',
     2,
     anyFileInDirContains(libDir, 'borderRadius') &&
-        anyFileInDirContainsRegex(modelsFile, r'RoundedRect|cornerRadius|borderRadius'),
+        fileContainsRegex(modelsFile, r'RoundedRect|cornerRadius|borderRadius'),
   );
 
   check(
