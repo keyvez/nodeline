@@ -113,7 +113,7 @@ class MermaidImporter {
       // Stadium: A(["text"])
       RegExp(RegExp.escape(nodeId) + r'\(\["([^"]*)"\]\)'),
     ];
-    final types = ['circle', 'rect', 'rect', 'rect'];
+    final types = ['circle', 'rect', 'diamond', 'rect'];
 
     for (int i = 0; i < patterns.length; i++) {
       final match = patterns[i].firstMatch(line);
@@ -150,7 +150,7 @@ class MermaidImporter {
     if (diamondMatch != null) {
       final id = diamondMatch.group(1)!;
       final label = diamondMatch.group(2)!;
-      nodes[id] = _MermaidNode(id, label, 'rect');
+      nodes[id] = _MermaidNode(id, label, 'diamond');
       return;
     }
 
@@ -413,6 +413,13 @@ class MermaidImporter {
           text: node.label,
         );
         drawingObjects.add(circle.toJson());
+      } else if (node.type == 'diamond') {
+        final diamond = DiamondObject(
+          id: objectId,
+          rect: rect,
+          text: node.label,
+        );
+        drawingObjects.add(diamond.toJson());
       } else {
         final rectangle = RectangleObject(
           id: objectId,
@@ -479,7 +486,7 @@ class MermaidImporter {
 class _MermaidNode {
   final String id;
   final String label;
-  final String type; // 'rect' or 'circle'
+  final String type; // 'rect', 'circle', or 'diamond'
   Rect rect;
 
   _MermaidNode(this.id, this.label, this.type) : rect = Rect.zero;

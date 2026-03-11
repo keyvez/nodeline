@@ -625,7 +625,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         _beginTextEditing(existingObject: obj);
         return;
       }
-      if ((obj is RectangleObject || obj is CircleObject) &&
+      if ((obj is RectangleObject || obj is CircleObject || obj is DiamondObject) &&
           obj.rect.inflate(hitPadding).contains(worldPos)) {
         _beginShapeTextEditing(obj);
         return;
@@ -1031,6 +1031,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       if (isShiftPressed) {
         if (tool == EditorTool.square ||
             tool == EditorTool.circle ||
+            tool == EditorTool.diamond ||
             tool == EditorTool.figure) {
           final dx = worldPos.dx - _drawingStart.dx;
           final dy = worldPos.dy - _drawingStart.dy;
@@ -1181,6 +1182,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           break;
         case EditorTool.square:
           newObject = RectangleObject(id: id, rect: shapeRect, lineStyle: lineStyle);
+          break;
+        case EditorTool.diamond:
+          newObject = DiamondObject(id: id, rect: shapeRect, lineStyle: lineStyle);
           break;
         case EditorTool.arrowTopRight:
           if (!isTap) {
@@ -1808,6 +1812,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     } else if (shapeObject is CircleObject) {
       existingText = shapeObject.text;
       existingStyle = shapeObject.textStyle ?? defaultStyle;
+    } else if (shapeObject is DiamondObject) {
+      existingText = shapeObject.text;
+      existingStyle = shapeObject.textStyle ?? defaultStyle;
     }
 
     _shapeTextController?.dispose();
@@ -1829,6 +1836,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       _editingShapeObject = shapeObject;
       if (shapeObject is RectangleObject) shapeObject.isEditing = true;
       if (shapeObject is CircleObject) shapeObject.isEditing = true;
+      if (shapeObject is DiamondObject) shapeObject.isEditing = true;
     });
 
     // Explicitly request focus for the text field after the next frame
@@ -1855,6 +1863,10 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         shapeObject.text = newText.isEmpty ? null : newText;
         shapeObject.textStyle = newText.isEmpty ? null : _shapeTextStyle;
       } else if (shapeObject is CircleObject) {
+        shapeObject.isEditing = false;
+        shapeObject.text = newText.isEmpty ? null : newText;
+        shapeObject.textStyle = newText.isEmpty ? null : _shapeTextStyle;
+      } else if (shapeObject is DiamondObject) {
         shapeObject.isEditing = false;
         shapeObject.text = newText.isEmpty ? null : newText;
         shapeObject.textStyle = newText.isEmpty ? null : _shapeTextStyle;
@@ -2024,6 +2036,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                       _toolBloc.add(const ToolSelected(EditorTool.square)),
                     const SingleActivator(LogicalKeyboardKey.keyO): () =>
                       _toolBloc.add(const ToolSelected(EditorTool.circle)),
+                    const SingleActivator(LogicalKeyboardKey.keyG): () =>
+                      _toolBloc.add(const ToolSelected(EditorTool.diamond)),
                     const SingleActivator(LogicalKeyboardKey.keyA): () =>
                       _toolBloc.add(const ToolSelected(EditorTool.arrowTopRight)),
                     const SingleActivator(LogicalKeyboardKey.keyL): () =>

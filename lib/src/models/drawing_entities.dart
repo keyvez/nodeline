@@ -12,6 +12,7 @@ enum EditorTool {
   arrow,
   square,
   circle,
+  diamond,
   arrowTopRight,
   line,
   pencil,
@@ -169,6 +170,99 @@ class CircleObject extends DrawingObject {
   @override
   DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle, bool? isEditing}) {
     return CircleObject(
+      id: id,
+      rect: rect ?? _rect,
+      isSelected: isSelected ?? this.isSelected,
+      angle: angle ?? this.angle,
+      text: text,
+      textStyle: textStyle,
+      lineStyle: lineStyle ?? this.lineStyle,
+      isEditing: isEditing ?? this.isEditing,
+    );
+  }
+}
+
+class DiamondObject extends DrawingObject {
+  Rect _rect;
+  String? text;
+  TextStyle? textStyle;
+  bool isEditing;
+  final LineStyle lineStyle;
+
+  DiamondObject({
+    required super.id,
+    required Rect rect,
+    super.isSelected,
+    super.angle,
+    this.text,
+    this.textStyle,
+    this.isEditing = false,
+    this.lineStyle = LineStyle.solid,
+  }) : _rect = rect;
+
+  @override
+  Rect get rect => _rect;
+
+  set rect(Rect newRect) => _rect = newRect;
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'type': 'diamond',
+    'rect': _rect.toJson(),
+    'isSelected': isSelected,
+    'angle': angle,
+    if (text != null) 'text': text,
+    if (textStyle != null) 'textStyle': {
+      'fontSize': textStyle!.fontSize,
+      'color': textStyle!.color?.value,
+    },
+    'lineStyle': lineStyle.name,
+  };
+
+  static DiamondObject fromJson(Map<String, dynamic> json) {
+    TextStyle? style;
+    if (json['textStyle'] != null) {
+      final ts = json['textStyle'] as Map<String, dynamic>;
+      style = TextStyle(
+        fontSize: (ts['fontSize'] as num?)?.toDouble(),
+        color: ts['color'] != null ? Color(ts['color'] as int) : null,
+      );
+    }
+    return DiamondObject(
+      id: json['id'],
+      rect: JSONRect.fromJson(json['rect']),
+      isSelected: json['isSelected'] ?? false,
+      angle: json['angle'] ?? 0.0,
+      text: json['text'] as String?,
+      textStyle: style,
+      lineStyle: json['lineStyle'] != null
+          ? LineStyle.values.byName(json['lineStyle'])
+          : LineStyle.solid,
+    );
+  }
+
+  Path get path {
+    final c = _rect.center;
+    final hw = _rect.width / 2;
+    final hh = _rect.height / 2;
+    return Path()
+      ..moveTo(c.dx, c.dy - hh) // top
+      ..lineTo(c.dx + hw, c.dy) // right
+      ..lineTo(c.dx, c.dy + hh) // bottom
+      ..lineTo(c.dx - hw, c.dy) // left
+      ..close();
+  }
+
+  @override
+  DrawingObject copyWith({
+    Rect? rect,
+    bool? isSelected,
+    double? angle,
+    LineStyle? lineStyle,
+    bool? isEditing,
+  }) {
+    return DiamondObject(
       id: id,
       rect: rect ?? _rect,
       isSelected: isSelected ?? this.isSelected,

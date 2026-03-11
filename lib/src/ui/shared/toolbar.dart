@@ -47,10 +47,10 @@ class FlowDrawToolbar extends StatelessWidget {
                 return CustomTabs(
                   index: state.activeTool.index,
                   onChanged: (index) =>
-                      onToolSelected(index, index == 9 ? context : null),
+                      onToolSelected(index, index == 10 ? context : null),
                   children: [
                     TabItem(
-                      index: 9,
+                      index: 10,
                       child: SizedBox(
                         child: Padding(
                           padding: padding.copyWith(
@@ -137,6 +137,22 @@ class FlowDrawToolbar extends StatelessWidget {
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: [
+                        Icon(Icons.diamond_outlined, size: 16, color: Colors.white),
+                        Positioned(
+                          bottom: -10,
+                          right: -10,
+                          child: Text('G', style: TextStyle(fontSize: 10)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                TabItem(
+                  child: Padding(
+                    padding: padding,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
                         Assets.icons.arrowTopRight.svg(
                           width: 16,
                           color: Colors.white,
@@ -206,7 +222,7 @@ class FlowDrawToolbar extends StatelessWidget {
               onChanged: (index) => onToolSelected(index, null),
               children: [
                 TabItem(
-                  index: 7,
+                  index: 8,
                   child: Padding(
                     padding: padding.copyWith(
                       top: padding.top + 2,
@@ -226,7 +242,7 @@ class FlowDrawToolbar extends StatelessWidget {
                   ),
                 ),
                 TabItem(
-                  index: 8,
+                  index: 9,
                   child: Padding(
                     padding: padding,
                     child: Stack(

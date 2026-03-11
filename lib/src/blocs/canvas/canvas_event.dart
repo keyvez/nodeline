@@ -72,6 +72,7 @@ final class DrawingObjectAdded extends CanvasEvent {
   String get description {
     if (object is RectangleObject) return 'Added Rectangle';
     if (object is CircleObject) return 'Added Circle';
+    if (object is DiamondObject) return 'Added Diamond';
     if (object is ArrowObject) return 'Added Arrow';
     if (object is LineObject) return 'Added Line';
     if (object is TextObject) return 'Added Text';

@@ -180,6 +180,9 @@ class MermaidExporter {
     if (shape is CircleObject) {
       return '$id(("$escaped"))';
     }
+    if (shape is DiamondObject) {
+      return '$id{"$escaped"}';
+    }
     // Default: rectangle
     return '$id["$escaped"]';
   }

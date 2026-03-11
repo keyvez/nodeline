@@ -518,6 +518,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
                 return RectangleObject.fromJson(json);
               case 'circle':
                 return CircleObject.fromJson(json);
+              case 'diamond':
+                return DiamondObject.fromJson(json);
               case 'arrow':
                 return ArrowObject.fromJson(json);
               case 'line':
@@ -607,6 +609,15 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         );
       } else if (obj is CircleObject) {
         newDrawingObjects[newId] = CircleObject(
+          id: newId,
+          rect: obj.rect.shift(offset),
+          text: obj.text,
+          textStyle: obj.textStyle,
+          lineStyle: obj.lineStyle,
+          angle: obj.angle,
+        );
+      } else if (obj is DiamondObject) {
+        newDrawingObjects[newId] = DiamondObject(
           id: newId,
           rect: obj.rect.shift(offset),
           text: obj.text,
@@ -916,7 +927,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
 
     final sourceObject = state.drawingObjects[event.sourceObjectId];
     if (sourceObject == null ||
-        !(sourceObject is RectangleObject || sourceObject is CircleObject)) {
+        !(sourceObject is RectangleObject || sourceObject is CircleObject || sourceObject is DiamondObject)) {
       return;
     }
 
@@ -990,6 +1001,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       newShape = RectangleObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle);
     } else if (sourceObject is CircleObject) {
       newShape = CircleObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle);
+    } else if (sourceObject is DiamondObject) {
+      newShape = DiamondObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle);
     } else {
       return;
     }

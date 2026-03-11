@@ -473,6 +473,17 @@ class FlowDrawEditorRenderBox extends RenderBox
           if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
             _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle);
           }
+        } else if (obj is DiamondObject) {
+          final diamondPath = obj.path;
+          canvas.drawPath(diamondPath, fillPaint);
+          if (obj.lineStyle == LineStyle.solid) {
+            canvas.drawPath(diamondPath, objectPaint);
+          } else {
+            _paintStyledPath(canvas, diamondPath, objectPaint, obj.lineStyle, seed: obj.id.hashCode);
+          }
+          if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
+            _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle);
+          }
         } else if (obj is SvgObject) {
           canvas.save();
           canvas.translate(obj.rect.left, obj.rect.top);
@@ -1503,6 +1514,19 @@ class FlowDrawEditorRenderBox extends RenderBox
         break;
       case EditorTool.square:
         canvas.drawRect(rect.normalize, tempPaint);
+        break;
+      case EditorTool.diamond:
+        final nr = rect.normalize;
+        final c = nr.center;
+        final hw = nr.width / 2;
+        final hh = nr.height / 2;
+        final diamondPath = Path()
+          ..moveTo(c.dx, c.dy - hh)
+          ..lineTo(c.dx + hw, c.dy)
+          ..lineTo(c.dx, c.dy + hh)
+          ..lineTo(c.dx - hw, c.dy)
+          ..close();
+        canvas.drawPath(diamondPath, tempPaint);
         break;
       case EditorTool.arrowTopRight:
         if (tempDrawingObject!.pathType == LinkPathType.orthogonal) {

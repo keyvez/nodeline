@@ -29,6 +29,7 @@ class SvgExporter {
       final obj = entry.value;
       if (obj is RectangleObject ||
           obj is CircleObject ||
+          obj is DiamondObject ||
           obj is FigureObject ||
           obj is TextObject ||
           obj is SvgObject) {
@@ -45,6 +46,8 @@ class SvgExporter {
           _renderRectangle(obj, svgElements, allBounds);
         case CircleObject():
           _renderCircle(obj, svgElements, allBounds);
+        case DiamondObject():
+          _renderDiamond(obj, svgElements, allBounds);
         case ArrowObject():
           _renderArrow(obj, objects, solidRects, svgElements, allBounds);
         case LineObject():
@@ -156,6 +159,40 @@ class SvgExporter {
     if (rotClose.isNotEmpty) svg.add(rotClose);
 
     bounds.add(rect);
+  }
+
+  static void _renderDiamond(
+    DiamondObject obj,
+    List<String> svg,
+    List<Rect> bounds,
+  ) {
+    final r = obj.rect;
+    final cx = r.center.dx;
+    final cy = r.center.dy;
+    final hw = r.width / 2;
+    final hh = r.height / 2;
+    final points = '${cx},${cy - hh} ${cx + hw},$cy ${cx},${cy + hh} ${cx - hw},$cy';
+    final dashArray = _dashArray(obj.lineStyle);
+    final rotOpen = _rotateOpen(obj.angle, r.center);
+    final rotClose = _rotateClose(obj.angle);
+
+    if (rotOpen.isNotEmpty) svg.add(rotOpen);
+
+    svg.add('  <polygon points="$points" '
+        'fill="none" stroke="$_stroke" stroke-width="$_defaultStrokeWidth"'
+        '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
+        '/>');
+
+    if (obj.text != null && obj.text!.isNotEmpty) {
+      svg.add('  <text x="$cx" y="$cy" '
+          'fill="$_textColor" font-size="14" font-family="sans-serif" '
+          'text-anchor="middle" dominant-baseline="central">'
+          '${_escapeXml(obj.text!)}</text>');
+    }
+
+    if (rotClose.isNotEmpty) svg.add(rotClose);
+
+    bounds.add(r);
   }
 
   static void _renderArrow(
