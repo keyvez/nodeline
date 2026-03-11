@@ -3,6 +3,7 @@ import 'package:flutter/material.dart' show TextStyle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flow_draw/flow_draw.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:flow_draw/src/core/utils/svg_exporter.dart';
 
 void main() {
   group('DiamondObject', () {
@@ -623,6 +624,69 @@ flowchart TD
         fillColor: const Color(0xFFABCDEF),
       );
       expect((copy as RectangleObject).fillColor, const Color(0xFFABCDEF));
+    });
+
+    test('ParallelogramObject supports fill and stroke colors', () {
+      final para = ParallelogramObject(
+        id: 'color-p1',
+        rect: Rect.fromLTWH(0, 0, 120, 80),
+        fillColor: const Color(0xFF112233),
+        strokeColor: const Color(0xFF445566),
+      );
+      expect(para.fillColor, const Color(0xFF112233));
+      expect(para.strokeColor, const Color(0xFF445566));
+
+      final json = para.toJson();
+      final restored = ParallelogramObject.fromJson(json);
+      expect(restored.fillColor, const Color(0xFF112233));
+      expect(restored.strokeColor, const Color(0xFF445566));
+    });
+
+    test('ForkJoinObject supports fill and stroke colors', () {
+      final fj = ForkJoinObject(
+        id: 'color-fj1',
+        rect: Rect.fromLTWH(0, 0, 200, 10),
+        fillColor: const Color(0xFFAABBCC),
+        strokeColor: const Color(0xFFDDEEFF),
+      );
+      expect(fj.fillColor, const Color(0xFFAABBCC));
+
+      final json = fj.toJson();
+      final restored = ForkJoinObject.fromJson(json);
+      expect(restored.fillColor, const Color(0xFFAABBCC));
+      expect(restored.strokeColor, const Color(0xFFDDEEFF));
+    });
+  });
+
+  group('EditorTool', () {
+    test('parallelogram and forkJoin tools exist', () {
+      expect(EditorTool.parallelogram, isNotNull);
+      expect(EditorTool.forkJoin, isNotNull);
+    });
+
+    test('workflowTools contains new shape tools', () {
+      expect(workflowTools.contains(EditorTool.parallelogram), true);
+      expect(workflowTools.contains(EditorTool.forkJoin), true);
+    });
+  });
+
+  group('SVG export colors', () {
+    test('SVG exporter uses per-object fill/stroke colors', () {
+      final objects = <String, DrawingObject>{
+        'r1': RectangleObject(
+          id: 'r1',
+          rect: Rect.fromLTWH(0, 0, 100, 80),
+          fillColor: const Color(0xFFFF0000),
+          strokeColor: const Color(0xFF00FF00),
+          text: 'Red Box',
+        ),
+      };
+      // Just verify it doesn't crash and produces SVG
+      final svg = SvgExporter.export(objects);
+      expect(svg, contains('<svg'));
+      expect(svg, contains('Red Box'));
+      expect(svg, contains('#ff0000'));
+      expect(svg, contains('#00ff00'));
     });
   });
 }
