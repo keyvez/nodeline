@@ -71,6 +71,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   bool _isAreaSelecting = false;
   bool _isDraggingSelection = false;
   bool _isDrawing = false;
+  bool _isEditingText = false;
 
   bool _isRotating = false;
   Offset _rotationStartCenter = Offset.zero;
@@ -105,8 +106,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   double _totalDragDelta = 0.0;
   DateTime? _lastClickTime;
   Offset? _lastClickPosition;
-  int _consecutiveTaps = 0;
-  Timer? _tapTimer;
 
   Offset get offset => _canvasBloc.state.viewportOffset;
 
@@ -124,7 +123,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   void dispose() {
     _canvasFocusNode.dispose();
     _kineticTimer?.cancel();
-    _tapTimer?.cancel();
     _shapeTextController?.dispose();
     _shapeTextFocusNode?.dispose();
     super.dispose();
@@ -395,6 +393,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   }
 
   void _onPointerDown(PointerDownEvent event) {
+    // If text overlay is active, let the TextField handle all pointer events
+    if (_isEditingText) return;
+
     // If inline shape text editor is active, finish editing and proceed
     if (_editingShapeObject != null) {
       _finishShapeTextEditing();
@@ -424,50 +425,17 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     );
     if (worldPos == null) return;
 
-    // Multi-tap detection: double-tap = undo, triple-tap = redo, double-click = edit
+    // Double-click detection: double-click on an object → enter text editing
     final now = DateTime.now();
-    if (_lastClickTime != null &&
+    final isDoubleClick = _lastClickTime != null &&
         _lastClickPosition != null &&
-        now.difference(_lastClickTime!) < const Duration(milliseconds: 500) &&
-        (event.position - _lastClickPosition!).distance < 60) {
-      _consecutiveTaps++;
-      _tapTimer?.cancel();
-      if (_consecutiveTaps == 3) {
-        // Triple-tap: redo
-        _consecutiveTaps = 0;
-        _lastClickTime = null;
-        _lastClickPosition = null;
-        _canvasBloc.add(RedoRequested());
-        return;
-      }
-      // Check if this second tap hit an object — only fire double-tap
-      // actions (edit/undo) when tapping the same spot on an object.
-      // Tapping empty space should deselect, not trigger undo.
-      final hitObject = _findHitObject(worldPos);
-      _lastClickTime = now;
-      _lastClickPosition = event.position;
-      if (hitObject != null) {
-        // Wait briefly to distinguish double-tap from triple-tap.
-        // Don't return — fall through so drag can still start.
-        // The timer will fire text edit only if the user doesn't drag.
-        _tapTimer = Timer(const Duration(milliseconds: 300), () {
-          if (_consecutiveTaps == 2 && !_isDraggingSelection) {
-            _consecutiveTaps = 0;
-            _onDoubleClick();
-          }
-        });
-      }
-      // Second tap on empty space — fall through to normal tool handling
-      // for deselection. Reset multi-tap state since this isn't a real
-      // double-tap.
-      _consecutiveTaps = 1;
-    }
-    _consecutiveTaps = 1;
-    _tapTimer?.cancel();
+        now.difference(_lastClickTime!).inMilliseconds < 500 &&
+        (event.position - _lastClickPosition!).distance < 60;
     _lastClickTime = now;
     _lastClickPosition = event.position;
 
-    if (_checkAndHandleQuickAction(worldPos)) {
+    if (isDoubleClick) {
+      _onDoubleClick();
       return;
     }
 
@@ -478,15 +446,35 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       return;
     }
 
+    if (event.buttons == kSecondaryMouseButton) {
+      _handleRightClick(event, worldPos);
+      return;
+    }
+
     if (tool == EditorTool.arrow) {
       // Update hovered handle from tap position before checking —
       // on touch devices there are no hover events, so the handle
       // state can be stale from a previous interaction.
       _updateHoveredHandle(event.position);
+      // Check resize/rotation handles before quick actions so that
+      // handle taps are not swallowed by quick connector buttons.
       if (_hoveredHandle.handle == Handle.rotate) {
         _beginRotation(worldPos);
         return;
       }
+      if (_hoveredHandle.handle != Handle.none) {
+        _isResizing = _hoveredHandle;
+        _originalResizeRect =
+            _canvasBloc.state.drawingObjects[_isResizing.objectId]?.rect;
+        return;
+      }
+    }
+
+    if (_checkAndHandleQuickAction(worldPos)) {
+      return;
+    }
+
+    if (tool == EditorTool.arrow) {
       _handleArrowToolPointerDown(event, worldPos);
     } else {
       _handleDrawingToolPointerDown(event, worldPos);
@@ -537,7 +525,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   }
 
   void _onPointerUp(PointerUpEvent event) {
-    if (_editingShapeObject != null) return;
     _activePointers = (_activePointers - 1).clamp(0, 10);
 
     if (_isPanning) _onPanEnd();
@@ -617,7 +604,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   }
 
   void _onDoubleClick() {
-
     final worldPos = screenToWorld(
       _lastFocalPoint,
       _canvasBloc.state.viewportOffset,
@@ -625,34 +611,132 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     );
     if (worldPos == null) return;
 
-    final hitObjectId = _findHitObject(worldPos);
-    if (hitObjectId == null) return;
+    final hitPadding = 6.0 / _canvasBloc.state.viewportZoom;
+    final objects = _canvasBloc.state.drawingObjects.values;
 
-    final hitObject = _canvasBloc.state.drawingObjects[hitObjectId];
-    if (hitObject == null) return;
-
-    // Double-click on existing text → edit it
-    if (hitObject is TextObject) {
-      _beginTextEditing(existingObject: hitObject);
-      return;
-    }
-
-    // Double-click inside a closed shape → edit shape's inline text
-    if (hitObject is RectangleObject || hitObject is CircleObject) {
-      _beginShapeTextEditing(hitObject);
-      return;
+    // Prefer editable shapes (rectangle/circle/text) over arrows/lines
+    // so that double-tapping near an edge where an arrow overlaps still
+    // enters text editing for the shape underneath.
+    for (final obj in objects.toList().reversed) {
+      if (obj is TextObject && obj.rect.inflate(hitPadding).contains(worldPos)) {
+        _beginTextEditing(existingObject: obj);
+        return;
+      }
+      if ((obj is RectangleObject || obj is CircleObject) &&
+          obj.rect.inflate(hitPadding).contains(worldPos)) {
+        _beginShapeTextEditing(obj);
+        return;
+      }
     }
   }
 
-  void _handleArrowToolPointerDown(PointerDownEvent event, Offset worldPos) {
-    _updateHoveredHandle(event.position);
-    if (_hoveredHandle.handle != Handle.none) {
-      _isResizing = _hoveredHandle;
-      _originalResizeRect =
-          _canvasBloc.state.drawingObjects[_isResizing.objectId]?.rect;
+  void _handleRightClick(PointerDownEvent event, Offset worldPos) {
+    final hitObjectId = _findHitObject(worldPos);
+    final selectionState = _selectionBloc.state;
+
+    // If right-clicked on an object not yet selected, select it
+    if (hitObjectId != null &&
+        !selectionState.selectedDrawingObjectIds.contains(hitObjectId) &&
+        !selectionState.selectedNodeIds.contains(hitObjectId)) {
+      final isNode = _canvasBloc.state.nodes.containsKey(hitObjectId);
+      _selectionBloc.add(SelectionReplaced(
+        nodeIds: isNode ? {hitObjectId} : {},
+        drawingObjectIds: !isNode ? {hitObjectId} : {},
+      ));
+    }
+
+    // If nothing is selected after the above, bail
+    final selectedIds = _selectionBloc.state.selectedDrawingObjectIds;
+    if (selectedIds.isEmpty && _selectionBloc.state.selectedNodeIds.isEmpty) {
       return;
     }
 
+    final position = event.position;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        overlay.size.width - position.dx,
+        overlay.size.height - position.dy,
+      ),
+      color: Theme.of(context).colorScheme.surfaceContainer,
+      items: [
+        if (selectedIds.length >= 2) ...[
+          const PopupMenuItem(value: 'align_left', child: Text('Align Left')),
+          const PopupMenuItem(value: 'align_center_h', child: Text('Align Center')),
+          const PopupMenuItem(value: 'align_right', child: Text('Align Right')),
+          const PopupMenuItem(value: 'align_top', child: Text('Align Top')),
+          const PopupMenuItem(value: 'align_center_v', child: Text('Align Middle')),
+          const PopupMenuItem(value: 'align_bottom', child: Text('Align Bottom')),
+          const PopupMenuDivider(),
+        ],
+        if (selectedIds.length >= 3) ...[
+          const PopupMenuItem(value: 'dist_h', child: Text('Distribute Horizontally')),
+          const PopupMenuItem(value: 'dist_v', child: Text('Distribute Vertically')),
+          const PopupMenuDivider(),
+        ],
+        const PopupMenuItem(value: 'bring_forward', child: Text('Bring Forward')),
+        const PopupMenuItem(value: 'send_backward', child: Text('Send Backward')),
+        const PopupMenuItem(value: 'bring_to_front', child: Text('Bring to Front')),
+        const PopupMenuItem(value: 'send_to_back', child: Text('Send to Back')),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
+        const PopupMenuItem(
+          value: 'delete',
+          child: Text('Delete', style: TextStyle(color: Colors.red)),
+        ),
+      ],
+    ).then((value) {
+      if (value == null) return;
+      final ids = _selectionBloc.state.selectedDrawingObjectIds;
+      switch (value) {
+        case 'align_left':
+          _canvasBloc.add(ObjectsAligned(ids, AlignmentType.left));
+        case 'align_center_h':
+          _canvasBloc.add(ObjectsAligned(ids, AlignmentType.centerH));
+        case 'align_right':
+          _canvasBloc.add(ObjectsAligned(ids, AlignmentType.right));
+        case 'align_top':
+          _canvasBloc.add(ObjectsAligned(ids, AlignmentType.top));
+        case 'align_center_v':
+          _canvasBloc.add(ObjectsAligned(ids, AlignmentType.centerV));
+        case 'align_bottom':
+          _canvasBloc.add(ObjectsAligned(ids, AlignmentType.bottom));
+        case 'dist_h':
+          _canvasBloc.add(ObjectsDistributed(ids, DistributionType.horizontal));
+        case 'dist_v':
+          _canvasBloc.add(ObjectsDistributed(ids, DistributionType.vertical));
+        case 'bring_forward':
+          _canvasBloc.add(ObjectsBroughtForward(ids));
+        case 'send_backward':
+          _canvasBloc.add(ObjectsSentBackward(ids));
+        case 'bring_to_front':
+          _canvasBloc.add(ObjectsBroughtToFront(ids));
+        case 'send_to_back':
+          _canvasBloc.add(ObjectsSentToBack(ids));
+        case 'duplicate':
+          _canvasBloc.add(SelectionDuplicated(ids));
+          final newIds = _canvasBloc.consumeLastDuplicatedIds();
+          if (newIds.isNotEmpty) {
+            _selectionBloc.add(SelectionReplaced(
+              nodeIds: {},
+              drawingObjectIds: newIds,
+            ));
+          }
+        case 'delete':
+          _canvasBloc.add(ObjectsRemoved(
+            nodeIds: _selectionBloc.state.selectedNodeIds,
+            drawingObjectIds: ids,
+          ));
+          _selectionBloc.add(SelectionCleared());
+      }
+    });
+  }
+
+  void _handleArrowToolPointerDown(PointerDownEvent event, Offset worldPos) {
     final hitObjectId = _findHitObject(worldPos);
     if (hitObjectId != null) {
       final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
@@ -1585,6 +1669,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
     setState(() {
       object.isEditing = true;
+      _isEditingText = true;
     });
 
     final textEditingController = TextEditingController(text: object.text);
@@ -1599,6 +1684,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
       setState(() {
         object.isEditing = false;
+        _isEditingText = false;
       });
 
       if (newText.trim().isEmpty) {
@@ -1623,19 +1709,13 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         });
       }
 
+      // Remove the overlay. The controller and focus node are intentionally
+      // NOT disposed here — the gesture arena may still hold references to
+      // the TextField's RenderEditable, and disposing the controller while
+      // a gesture is pending causes "used after disposed" assertions.
+      // They will be garbage-collected once all references are released.
       overlayEntry?.remove();
-      // Defer disposal to avoid "used after being disposed" errors
-      // when triggered from a focus change notification.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        textEditingController.dispose();
-      });
     }
-
-    focusNode.addListener(() {
-      if (!focusNode.hasFocus) {
-        _submitAndClose();
-      }
-    });
 
     overlayEntry = OverlayEntry(
       builder: (context) {
@@ -1664,10 +1744,12 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           children: [
             Positioned.fill(
               child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: () {
-                  focusNode.unfocus();
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _submitAndClose();
+                  });
                 },
-                child: Container(color: Colors.transparent),
               ),
             ),
             Positioned(
@@ -1675,21 +1757,23 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
               top: globalPosition.dy,
               child: Material(
                 color: Colors.transparent,
-                child: IntrinsicWidth(
-                  child: TextField(
-                    controller: textEditingController,
-                    focusNode: focusNode,
-                    style: object.style.copyWith(
-                      fontSize: object.style.fontSize! * zoom,
+                child: DefaultTextEditingShortcuts(
+                  child: IntrinsicWidth(
+                    child: TextField(
+                      controller: textEditingController,
+                      focusNode: focusNode,
+                      style: object.style.copyWith(
+                        fontSize: object.style.fontSize! * zoom,
+                      ),
+                      maxLines: 1,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.zero,
+                        isDense: true,
+                      ),
+                      onSubmitted: (_) => _submitAndClose(),
                     ),
-                    maxLines: 1,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                      isDense: true,
-                    ),
-                    onSubmitted: (_) => _submitAndClose(),
                   ),
                 ),
               ),
@@ -1706,12 +1790,12 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   DrawingObject? _editingShapeObject;
   TextEditingController? _shapeTextController;
   FocusNode? _shapeTextFocusNode;
-  TextStyle _shapeTextStyle = const TextStyle(fontSize: 84, color: Colors.white, fontFamily: 'Courier');
+  TextStyle _shapeTextStyle = const TextStyle(fontSize: 16, color: Colors.white, fontFamily: 'Courier');
 
   DateTime? _shapeEditOpenedAt;
 
   void _beginShapeTextEditing(DrawingObject shapeObject) {
-    const defaultStyle = TextStyle(fontSize: 84, color: Colors.white, fontFamily: 'Courier');
+    const defaultStyle = TextStyle(fontSize: 16, color: Colors.white, fontFamily: 'Courier');
 
     String? existingText;
     TextStyle existingStyle = defaultStyle;
@@ -1768,11 +1852,10 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       }
       _editingShapeObject = null;
     });
-
-    _shapeTextController?.dispose();
-    _shapeTextController = null;
-    _shapeTextFocusNode?.dispose();
-    _shapeTextFocusNode = null;
+    // Don't dispose controller/focusNode here — they stay alive until
+    // _beginShapeTextEditing replaces them or the widget is disposed.
+    // This avoids "used after disposed" errors when gesture callbacks
+    // fire on the TextField after we've scheduled its removal.
   }
 
   @override
@@ -1803,7 +1886,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                 );
 
                 return CallbackShortcuts(
-                  bindings: _editingShapeObject != null ? {} : {
+                  bindings: (_editingShapeObject != null || _isEditingText) ? {} : {
                     const SingleActivator(LogicalKeyboardKey.delete): () =>
                       _canvasBloc.add(ObjectsRemoved(
                         nodeIds: selectionState.selectedNodeIds,
@@ -1987,25 +2070,32 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                         );
                       }
                     },
-                    child: Listener(
-                      behavior: HitTestBehavior.translucent,
-                      onPointerDown: _onPointerDown,
-                      onPointerMove: _onPointerMove,
-                      onPointerUp: _onPointerUp,
-                      onPointerCancel: _onPointerCancel,
-                      onPointerSignal: _onPointerSignal,
-                      child: GestureDetector(
-                        onScaleStart: _onScaleStart,
-                        onScaleUpdate: _onScaleUpdate,
-                        onScaleEnd: _onScaleEnd,
-                        child: Stack(
-                          children: [
-                            canvasChild,
-                            if (_editingShapeObject != null)
-                              _buildInlineShapeTextEditor(canvasState),
-                          ],
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Listener(
+                          behavior: HitTestBehavior.translucent,
+                          onPointerDown: _onPointerDown,
+                          onPointerMove: _onPointerMove,
+                          onPointerUp: _onPointerUp,
+                          onPointerCancel: _onPointerCancel,
+                          onPointerSignal: _onPointerSignal,
+                          child: GestureDetector(
+                            onScaleStart: _onScaleStart,
+                            onScaleUpdate: _onScaleUpdate,
+                            onScaleEnd: _onScaleEnd,
+                            child: Stack(
+                              children: [
+                                canvasChild,
+                                if (_editingShapeObject != null)
+                                  _buildInlineShapeTextEditor(canvasState),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
+                        if (selectionState.selectedDrawingObjectIds.length >= 2)
+                          _buildAlignmentToolbar(canvasState, selectionState),
+                      ],
                     ),
                   ),
                 ),
@@ -2015,6 +2105,129 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           },
         );
       },
+    );
+  }
+
+  Widget _buildAlignmentToolbar(
+    CanvasState canvasState,
+    SelectionState selectionState,
+  ) {
+    final selectedIds = selectionState.selectedDrawingObjectIds;
+    final zoom = canvasState.viewportZoom;
+    final vpOffset = canvasState.viewportOffset;
+
+    // Compute bounding box of selected objects in world coords
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    for (final id in selectedIds) {
+      final obj = canvasState.drawingObjects[id];
+      if (obj == null) continue;
+      final r = obj.rect;
+      if (r.left < minX) minX = r.left;
+      if (r.top < minY) minY = r.top;
+      if (r.right > maxX) maxX = r.right;
+      if (r.bottom > maxY) maxY = r.bottom;
+    }
+
+    // World top-center → screen position via worldToScreen
+    final worldTopCenter = Offset((minX + maxX) / 2, minY);
+    final screenPos = worldToScreen(worldTopCenter, vpOffset, zoom);
+    if (screenPos == null) return const SizedBox.shrink();
+
+    // Convert from global to local (relative to editor widget)
+    final editorBounds = getEditorBoundsInScreen(kNodeEditorWidgetKey);
+    if (editorBounds == null) return const SizedBox.shrink();
+    final localX = screenPos.dx - editorBounds.left;
+    final localY = screenPos.dy - editorBounds.top;
+
+    const toolbarGap = 8.0;
+
+    final bool canDistribute = selectedIds.length >= 3;
+
+    Widget iconBtn(IconData icon, String tooltip, VoidCallback? onPressed) {
+      return IconButton(
+        tooltip: tooltip,
+        iconSize: 16,
+        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+        padding: EdgeInsets.zero,
+        splashRadius: 14,
+        onPressed: onPressed,
+        icon: Icon(icon, size: 16),
+      );
+    }
+
+    return Positioned(
+      left: localX - 150,
+      top: localY - toolbarGap - 36,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              iconBtn(Icons.align_horizontal_left, 'Align left', () {
+                _canvasBloc.add(ObjectsAligned(selectedIds, AlignmentType.left));
+              }),
+              iconBtn(Icons.align_horizontal_center, 'Align center', () {
+                _canvasBloc.add(ObjectsAligned(selectedIds, AlignmentType.centerH));
+              }),
+              iconBtn(Icons.align_horizontal_right, 'Align right', () {
+                _canvasBloc.add(ObjectsAligned(selectedIds, AlignmentType.right));
+              }),
+              const SizedBox(width: 2),
+              iconBtn(Icons.align_vertical_top, 'Align top', () {
+                _canvasBloc.add(ObjectsAligned(selectedIds, AlignmentType.top));
+              }),
+              iconBtn(Icons.align_vertical_center, 'Align middle', () {
+                _canvasBloc.add(ObjectsAligned(selectedIds, AlignmentType.centerV));
+              }),
+              iconBtn(Icons.align_vertical_bottom, 'Align bottom', () {
+                _canvasBloc.add(ObjectsAligned(selectedIds, AlignmentType.bottom));
+              }),
+              const SizedBox(width: 2),
+              iconBtn(
+                Icons.horizontal_distribute,
+                'Distribute horizontal',
+                canDistribute
+                    ? () {
+                        _canvasBloc.add(ObjectsDistributed(
+                          selectedIds,
+                          DistributionType.horizontal,
+                        ));
+                      }
+                    : null,
+              ),
+              iconBtn(
+                Icons.vertical_distribute,
+                'Distribute vertical',
+                canDistribute
+                    ? () {
+                        _canvasBloc.add(ObjectsDistributed(
+                          selectedIds,
+                          DistributionType.vertical,
+                        ));
+                      }
+                    : null,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

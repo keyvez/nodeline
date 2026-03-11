@@ -300,6 +300,38 @@ final class ObjectsSentToBack extends CanvasEvent {
   List<Object> get props => [selectedIds];
 }
 
+enum AlignmentType { left, centerH, right, top, centerV, bottom }
+
+enum DistributionType { horizontal, vertical }
+
+final class ObjectsAligned extends CanvasEvent {
+  final Set<String> selectedIds;
+  final AlignmentType alignmentType;
+
+  const ObjectsAligned(this.selectedIds, this.alignmentType)
+      : super(isUndoable: true);
+
+  @override
+  String get description => 'Aligned objects (${alignmentType.name})';
+
+  @override
+  List<Object> get props => [selectedIds, alignmentType];
+}
+
+final class ObjectsDistributed extends CanvasEvent {
+  final Set<String> selectedIds;
+  final DistributionType distributionType;
+
+  const ObjectsDistributed(this.selectedIds, this.distributionType)
+      : super(isUndoable: true);
+
+  @override
+  String get description => 'Distributed objects (${distributionType.name})';
+
+  @override
+  List<Object> get props => [selectedIds, distributionType];
+}
+
 final class ObjectDuplicatedWithConnection extends CanvasEvent {
   final String sourceObjectId;
   final QuickActionDirection direction;

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
 
+import 'routing_test_helpers.dart';
+
 void main() {
   group('OrthogonalRouter.route', () {
     test('returns L-corner waypoint when no obstacles and not axis-aligned', () {
@@ -13,7 +15,7 @@ void main() {
       // Router inserts an L-corner to ensure axis-aligned segments
       expect(waypoints, hasLength(1));
       final fullPath = [const Offset(0, 0), ...waypoints, const Offset(200, 100)];
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
     });
 
     test('returns empty waypoints when obstacle is far away', () {
@@ -34,7 +36,7 @@ void main() {
       // Should have waypoints to route around the obstacle
       expect(waypoints, isNotEmpty);
       // All waypoints should form axis-aligned segments with start/end
-      _verifyAxisAligned([const Offset(0, 100), ...waypoints, const Offset(300, 100)]);
+      verifyAxisAligned([const Offset(0, 100), ...waypoints, const Offset(300, 100)]);
     });
 
     test('all segments are axis-aligned', () {
@@ -46,7 +48,7 @@ void main() {
         ],
       );
       final fullPath = [const Offset(50, 50), ...waypoints, const Offset(350, 250)];
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
     });
 
     test('path avoids inflated obstacle boundaries', () {
@@ -60,7 +62,7 @@ void main() {
       // No segment should pass through the obstacle
       for (int i = 0; i < fullPath.length - 1; i++) {
         expect(
-          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], obstacle),
+          segmentIntersectsRect(fullPath[i], fullPath[i + 1], obstacle),
           isFalse,
           reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses obstacle',
         );
@@ -78,7 +80,7 @@ void main() {
         endObjectRect: endRect,
       );
       final fullPath = [const Offset(100, 40), ...waypoints, const Offset(300, 40)];
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
     });
 
     test('exit stub projects from nearest edge', () {
@@ -121,7 +123,7 @@ void main() {
         ],
       );
       final fullPath = [const Offset(0, 100), ...waypoints, const Offset(500, 100)];
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
       // Path should avoid both obstacles
       for (final obstacle in [
         const Rect.fromLTWH(100, 50, 80, 100),
@@ -129,7 +131,7 @@ void main() {
       ]) {
         for (int i = 0; i < fullPath.length - 1; i++) {
           expect(
-            _segmentIntersectsRect(fullPath[i], fullPath[i + 1], obstacle),
+            segmentIntersectsRect(fullPath[i], fullPath[i + 1], obstacle),
             isFalse,
             reason: 'Segment crosses obstacle $obstacle',
           );
@@ -148,7 +150,7 @@ void main() {
         endObjectRect: bottomRect,
       );
       final fullPath = [const Offset(200, 100), ...waypoints, const Offset(225, 200)];
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
     });
 
     test('caps obstacles at max limit', () {
@@ -222,10 +224,10 @@ void main() {
         startObjectRect: startRect,
       );
       final fullPath = [const Offset(100, 175), ...waypoints, const Offset(400, 175)];
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
       // Path should have waypoints (not a simple straight line since it exits left)
       // and no two adjacent segments should perfectly overlap (U-turn should be expanded)
-      _verifyNoOverlappingSegments(fullPath);
+      verifyNoOverlappingSegments(fullPath);
     });
   });
 
@@ -247,12 +249,12 @@ void main() {
         endObjectRect: bottomRect,
       );
       final fullPath = [start, ...waypoints, end];
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       // No segment should pass through the bottom box (target)
       for (int i = 0; i < fullPath.length - 1; i++) {
         expect(
-          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
+          segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
           isFalse,
           reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box',
         );
@@ -277,12 +279,12 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Path: $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       // No segment should cross through either box
       for (int i = 0; i < fullPath.length - 1; i++) {
         expect(
-          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
+          segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
           isFalse,
           reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box',
         );
@@ -308,13 +310,13 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Path: $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       // The route should go LEFT from the source, then DOWN, then RIGHT to the target
       // NOT straight down through the target box
       for (int i = 0; i < fullPath.length - 1; i++) {
         expect(
-          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
+          segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
           isFalse,
           reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box',
         );
@@ -340,16 +342,16 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Close diagonal path: $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       for (int i = 0; i < fullPath.length - 1; i++) {
         expect(
-          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
+          segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
           isFalse,
           reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box',
         );
         expect(
-          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], topRect),
+          segmentIntersectsRect(fullPath[i], fullPath[i + 1], topRect),
           isFalse,
           reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses top box',
         );
@@ -373,12 +375,12 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Very close boxes path: $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       // Must not cross either box
       for (int i = 0; i < fullPath.length - 1; i++) {
         expect(
-          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
+          segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
           isFalse,
           reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box',
         );
@@ -420,19 +422,19 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Real-world path: $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       // No intermediate segment should pass through either box.
       // Skip the first segment (start→exit stub enters/exits source box)
       // and last segment (entry stub→end enters target box).
       for (int i = 1; i < fullPath.length - 2; i++) {
         expect(
-          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
+          segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect),
           isFalse,
           reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box',
         );
         expect(
-          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], topRect),
+          segmentIntersectsRect(fullPath[i], fullPath[i + 1], topRect),
           isFalse,
           reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses top box',
         );
@@ -465,12 +467,12 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Old-behavior path: $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       // Check if it crosses the bottom box
       bool crossesBottom = false;
       for (int i = 0; i < fullPath.length - 1; i++) {
-        if (_segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect)) {
+        if (segmentIntersectsRect(fullPath[i], fullPath[i + 1], bottomRect)) {
           crossesBottom = true;
           print('  OVERLAP: ${fullPath[i]} -> ${fullPath[i + 1]} crosses bottom box');
         }
@@ -498,12 +500,12 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Around-source path: $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       // No intermediate segment should cross through the source box
       for (int i = 1; i < fullPath.length - 2; i++) {
         expect(
-          _segmentIntersectsRect(fullPath[i], fullPath[i + 1], sourceRect),
+          segmentIntersectsRect(fullPath[i], fullPath[i + 1], sourceRect),
           isFalse,
           reason: 'Segment ${fullPath[i]} -> ${fullPath[i + 1]} crosses source box',
         );
@@ -527,7 +529,7 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Nearby target path: $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       // Should be a reasonably simple path — not more than 5 waypoints
       expect(waypoints.length, lessThanOrEqualTo(5),
@@ -553,7 +555,7 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Far apart path: $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       // Should be a simple path — at most 3 waypoints (exit stub, corner, entry stub)
       expect(waypoints.length, lessThanOrEqualTo(3),
@@ -580,7 +582,7 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Overlapping boxes path: $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       // Should not be overly complex — at most 5 waypoints
       expect(waypoints.length, lessThanOrEqualTo(5),
@@ -607,15 +609,15 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Clearance test path (dpr=2): $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       // Check that intermediate waypoints maintain minimum distance from
       // source and target objects
       const minClearance = 15.0; // exit stubs are close to edge; routing provides visual gap
       for (int i = 1; i < fullPath.length - 1; i++) {
         final p = fullPath[i];
-        final distToSource = _minDistToRect(p, sourceRect);
-        final distToTarget = _minDistToRect(p, targetRect);
+        final distToSource = minDistToRect(p, sourceRect);
+        final distToTarget = minDistToRect(p, targetRect);
         print('  waypoint $p: distSource=$distToSource, distTarget=$distToTarget');
         expect(distToSource, greaterThanOrEqualTo(minClearance),
             reason: 'Waypoint $p is too close to source ($distToSource < $minClearance)');
@@ -641,7 +643,7 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Clearance test path (dpr=1): $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
     });
 
     test('right-to-left connection routes around both objects', () {
@@ -663,14 +665,14 @@ void main() {
       );
       final fullPath = [start, ...waypoints, end];
       print('Around both objects path: $fullPath');
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
 
       // Intermediate waypoints (excluding exit/entry stubs which are at
       // object edges) should be outside source/target objects
       for (int i = 2; i < fullPath.length - 2; i++) {
         final p = fullPath[i];
-        final distToSource = _minDistToRect(p, sourceRect);
-        final distToTarget = _minDistToRect(p, targetRect);
+        final distToSource = minDistToRect(p, sourceRect);
+        final distToTarget = minDistToRect(p, targetRect);
         expect(distToSource, greaterThan(0),
             reason: 'Waypoint $p is inside source rect');
         expect(distToTarget, greaterThan(0),
@@ -715,7 +717,7 @@ void main() {
         obstacles: [obstacle],
       );
       final fullPath = [const Offset(0, 50), ...waypoints, const Offset(200, 50)];
-      _verifyAxisAligned(fullPath);
+      verifyAxisAligned(fullPath);
     });
 
     test('left-edge start with right-side target same Y gets U-turn', () {
@@ -760,91 +762,3 @@ void main() {
   });
 }
 
-/// Verifies all consecutive points in the path are axis-aligned.
-void _verifyAxisAligned(List<Offset> path) {
-  for (int i = 0; i < path.length - 1; i++) {
-    final a = path[i];
-    final b = path[i + 1];
-    final isHorizontal = (a.dy - b.dy).abs() < 1.0;
-    final isVertical = (a.dx - b.dx).abs() < 1.0;
-    expect(
-      isHorizontal || isVertical,
-      isTrue,
-      reason: 'Segment $a -> $b is not axis-aligned '
-          '(dx=${(a.dx - b.dx).abs()}, dy=${(a.dy - b.dy).abs()})',
-    );
-  }
-}
-
-/// Checks that no two adjacent segments overlap (fold back on themselves).
-void _verifyNoOverlappingSegments(List<Offset> path) {
-  for (int i = 0; i < path.length - 2; i++) {
-    final a = path[i];
-    final b = path[i + 1];
-    final c = path[i + 2];
-    // Check for fold-back: A→B→C where B→C reverses A→B on the same axis
-    final sameY = (a.dy - b.dy).abs() < 0.5 && (b.dy - c.dy).abs() < 0.5;
-    final sameX = (a.dx - b.dx).abs() < 0.5 && (b.dx - c.dx).abs() < 0.5;
-    if (sameY) {
-      final dirAB = (b.dx - a.dx).sign;
-      final dirBC = (c.dx - b.dx).sign;
-      if (dirAB != 0 && dirBC != 0) {
-        expect(
-          dirAB == dirBC || dirAB == 0 || dirBC == 0,
-          isTrue,
-          reason: 'Horizontal fold-back at index $i: $a -> $b -> $c',
-        );
-      }
-    }
-    if (sameX) {
-      final dirAB = (b.dy - a.dy).sign;
-      final dirBC = (c.dy - b.dy).sign;
-      if (dirAB != 0 && dirBC != 0) {
-        expect(
-          dirAB == dirBC || dirAB == 0 || dirBC == 0,
-          isTrue,
-          reason: 'Vertical fold-back at index $i: $a -> $b -> $c',
-        );
-      }
-    }
-  }
-}
-
-/// Minimum distance from a point to any edge of a rectangle.
-double _minDistToRect(Offset p, Rect rect) {
-  // If point is inside the rect, distance is 0
-  if (p.dx >= rect.left && p.dx <= rect.right &&
-      p.dy >= rect.top && p.dy <= rect.bottom) {
-    return 0;
-  }
-  // Clamp point to rect bounds and compute distance
-  final clampedX = p.dx.clamp(rect.left, rect.right);
-  final clampedY = p.dy.clamp(rect.top, rect.bottom);
-  final dx = p.dx - clampedX;
-  final dy = p.dy - clampedY;
-  return (dx.abs() > dy.abs()) ? dx.abs() : dy.abs();
-}
-
-/// Simplified segment-rect intersection for test verification.
-bool _segmentIntersectsRect(Offset a, Offset b, Rect rect) {
-  // Only checks axis-aligned segments (which is all our router produces)
-  if ((a.dy - b.dy).abs() < 0.01) {
-    // Horizontal segment
-    final y = a.dy;
-    final minX = a.dx < b.dx ? a.dx : b.dx;
-    final maxX = a.dx > b.dx ? a.dx : b.dx;
-    // Check if the horizontal segment passes through the rect interior
-    if (y > rect.top && y < rect.bottom && maxX > rect.left && minX < rect.right) {
-      return true;
-    }
-  } else if ((a.dx - b.dx).abs() < 0.01) {
-    // Vertical segment
-    final x = a.dx;
-    final minY = a.dy < b.dy ? a.dy : b.dy;
-    final maxY = a.dy > b.dy ? a.dy : b.dy;
-    if (x > rect.left && x < rect.right && maxY > rect.top && minY < rect.bottom) {
-      return true;
-    }
-  }
-  return false;
-}

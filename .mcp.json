@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "flan": {
+      "command": "dart",
+      "args": ["pub", "global", "run", "flan_mcp"]
+    }
+  }
+}

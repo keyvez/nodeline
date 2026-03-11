@@ -38,7 +38,7 @@ dependencies:
   flow_draw:
     path: ../
   flan_flutter:
-    path: /Users/gaurav/Documents/Code/flutter/flan_mcp/packages/flan_flutter
+    path: /Users/gaurav/dev/flan_mcp/packages/flan_flutter
   shared_preferences: ^2.5.4
 
 dev_dependencies:

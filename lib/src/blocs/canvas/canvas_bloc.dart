@@ -54,6 +54,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         ObjectsSentBackward e => _onObjectsSentBackward(e, emit),
         ObjectsBroughtToFront e => _onObjectsBroughtToFront(e, emit),
         ObjectsSentToBack e => _onObjectsSentToBack(e, emit),
+        ObjectsAligned e => _onObjectsAligned(e, emit),
+        ObjectsDistributed e => _onObjectsDistributed(e, emit),
         ObjectDuplicatedWithConnection e => _onObjectDuplicatedWithConnection(e, emit),
         GridToggled e => _onGridToggled(e, emit),
       });
@@ -762,6 +764,150 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     emit(state.copyWith(
       drawingObjects: Map.fromEntries([...selected, ...rest]),
     ));
+  }
+
+  void _shiftDrawingObject(DrawingObject object, Offset delta) {
+    if (object is ArrowObject) {
+      object.start += delta;
+      object.end += delta;
+      if (object.midPoint != null) {
+        object.midPoint = object.midPoint! + delta;
+      }
+    } else if (object is LineObject) {
+      object.start += delta;
+      object.end += delta;
+      if (object.midPoint != null) {
+        object.midPoint = object.midPoint! + delta;
+      }
+    } else if (object is PencilStrokeObject) {
+      object.points = object.points
+          .map((p) => PointVector(
+                p.x + delta.dx,
+                p.y + delta.dy,
+                p.pressure,
+              ))
+          .toList();
+    } else if (object is RectangleObject) {
+      object.rect = object.rect.shift(delta);
+    } else if (object is CircleObject) {
+      object.rect = object.rect.shift(delta);
+    } else if (object is FigureObject) {
+      object.rect = object.rect.shift(delta);
+    } else if (object is TextObject) {
+      object.rect = object.rect.shift(delta);
+    } else if (object is SvgObject) {
+      object.rect = object.rect.shift(delta);
+    }
+  }
+
+  void _onObjectsAligned(ObjectsAligned event, Emitter<CanvasState> emit) {
+    if (event.selectedIds.length < 2) return;
+    _pushToUndoStack(event, emit, state);
+
+    final newDrawingObjects = Map<String, DrawingObject>.from(
+      state.drawingObjects,
+    );
+
+    // Gather bounding boxes for selected objects
+    final selected = <String, Rect>{};
+    for (final id in event.selectedIds) {
+      final obj = newDrawingObjects[id];
+      if (obj != null) selected[id] = obj.rect;
+    }
+    if (selected.length < 2) return;
+
+    // Compute group bounding box
+    final rects = selected.values.toList();
+    final groupLeft = rects.map((r) => r.left).reduce(min);
+    final groupRight = rects.map((r) => r.right).reduce(max);
+    final groupTop = rects.map((r) => r.top).reduce(min);
+    final groupBottom = rects.map((r) => r.bottom).reduce(max);
+    final groupCenterX = (groupLeft + groupRight) / 2;
+    final groupCenterY = (groupTop + groupBottom) / 2;
+
+    for (final entry in selected.entries) {
+      final id = entry.key;
+      final rect = entry.value;
+      final Offset delta;
+
+      switch (event.alignmentType) {
+        case AlignmentType.left:
+          delta = Offset(groupLeft - rect.left, 0);
+        case AlignmentType.right:
+          delta = Offset(groupRight - rect.right, 0);
+        case AlignmentType.centerH:
+          delta = Offset(groupCenterX - rect.center.dx, 0);
+        case AlignmentType.top:
+          delta = Offset(0, groupTop - rect.top);
+        case AlignmentType.bottom:
+          delta = Offset(0, groupBottom - rect.bottom);
+        case AlignmentType.centerV:
+          delta = Offset(0, groupCenterY - rect.center.dy);
+      }
+
+      if (delta != Offset.zero) {
+        final obj = newDrawingObjects[id]!;
+        _shiftDrawingObject(obj, delta);
+        newDrawingObjects[id] = obj.copyWith();
+      }
+    }
+
+    emit(state.copyWith(drawingObjects: newDrawingObjects));
+  }
+
+  void _onObjectsDistributed(
+    ObjectsDistributed event,
+    Emitter<CanvasState> emit,
+  ) {
+    if (event.selectedIds.length < 3) return;
+    _pushToUndoStack(event, emit, state);
+
+    final newDrawingObjects = Map<String, DrawingObject>.from(
+      state.drawingObjects,
+    );
+
+    // Gather ids and their center positions
+    final entries = <(String, Rect)>[];
+    for (final id in event.selectedIds) {
+      final obj = newDrawingObjects[id];
+      if (obj != null) entries.add((id, obj.rect));
+    }
+    if (entries.length < 3) return;
+
+    final isHorizontal = event.distributionType == DistributionType.horizontal;
+
+    // Sort by center position along the relevant axis
+    entries.sort((a, b) {
+      final ca = isHorizontal ? a.$2.center.dx : a.$2.center.dy;
+      final cb = isHorizontal ? b.$2.center.dx : b.$2.center.dy;
+      return ca.compareTo(cb);
+    });
+
+    final firstCenter = isHorizontal
+        ? entries.first.$2.center.dx
+        : entries.first.$2.center.dy;
+    final lastCenter = isHorizontal
+        ? entries.last.$2.center.dx
+        : entries.last.$2.center.dy;
+    final step = (lastCenter - firstCenter) / (entries.length - 1);
+
+    for (int i = 1; i < entries.length - 1; i++) {
+      final (id, rect) = entries[i];
+      final targetCenter = firstCenter + step * i;
+      final currentCenter =
+          isHorizontal ? rect.center.dx : rect.center.dy;
+      final delta = isHorizontal
+          ? Offset(targetCenter - currentCenter, 0)
+          : Offset(0, targetCenter - currentCenter);
+
+      if (delta != Offset.zero) {
+        final obj = newDrawingObjects[id]!;
+        _shiftDrawingObject(obj, delta);
+        newDrawingObjects[id] = obj.copyWith();
+      }
+    }
+
+    emit(state.copyWith(drawingObjects: newDrawingObjects));
   }
 
   void _onObjectDuplicatedWithConnection(

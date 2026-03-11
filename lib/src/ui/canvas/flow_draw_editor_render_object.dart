@@ -1093,7 +1093,7 @@ class FlowDrawEditorRenderBox extends RenderBox
 
   /// Paints centered text inside a shape's rect.
   void _paintShapeText(Canvas canvas, Rect shapeRect, String text, TextStyle? style) {
-    const defaultStyle = TextStyle(fontSize: 84, color: Colors.white, fontFamily: 'Courier');
+    const defaultStyle = TextStyle(fontSize: 16, color: Colors.white, fontFamily: 'Courier');
     final scaledStyle = style ?? defaultStyle;
     final textPainter = TextPainter(
       text: TextSpan(text: text, style: scaledStyle),
