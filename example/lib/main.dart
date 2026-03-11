@@ -50,6 +50,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   String? _currentFileName;
   List<String> _savedFileNames = [];
+  bool _isWorkflowMode = false;
 
   @override
   void initState() {
@@ -487,7 +488,10 @@ start -> outputPhase
                     alignment: Alignment.topCenter,
                     child: Padding(
                       padding: const EdgeInsets.only(top: 32.0),
-                      child: FlowDrawToolbar(svgs: svgs),
+                      child: FlowDrawToolbar(
+                        svgs: svgs,
+                        allowedTools: _isWorkflowMode ? workflowTools : null,
+                      ),
                     ),
                   ),
                   // Drawer icon + file name (top-left)
@@ -513,6 +517,36 @@ start -> outputPhase
                           style: TextStyle(
                             color: Colors.white.withValues(alpha: 0.7),
                             fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Material(
+                          color: _isWorkflowMode ? Colors.blue.withValues(alpha: 0.3) : Colors.black54,
+                          borderRadius: BorderRadius.circular(8),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: () => setState(() => _isWorkflowMode = !_isWorkflowMode),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.account_tree_outlined,
+                                    color: _isWorkflowMode ? Colors.blue : Colors.white70,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Workflow',
+                                    style: TextStyle(
+                                      color: _isWorkflowMode ? Colors.blue : Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ],

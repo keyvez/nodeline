@@ -18,7 +18,13 @@ import 'custom_tab.dart';
 class FlowDrawToolbar extends StatelessWidget {
   final List<String> svgs;
 
-  const FlowDrawToolbar({super.key, required this.svgs});
+  /// When non-null, only these tools are shown in the toolbar.
+  /// This enables workflow mode or other restricted palettes.
+  final Set<EditorTool>? allowedTools;
+
+  const FlowDrawToolbar({super.key, required this.svgs, this.allowedTools});
+
+  bool _isAllowed(EditorTool tool) => allowedTools == null || allowedTools!.contains(tool);
 
   @override
   Widget build(BuildContext context) {
@@ -83,130 +89,146 @@ class FlowDrawToolbar extends StatelessWidget {
               index: state.activeTool.index,
               onChanged: (index) => onToolSelected(index, null),
               children: [
-                TabItem(
-                  child: Padding(
-                    padding: padding,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Assets.icons.arrow.svg(width: 16, color: Colors.white),
-                        Positioned(
-                          bottom: -10,
-                          right: -10,
-                          child: Text('V', style: TextStyle(fontSize: 10)),
-                        ),
-                      ],
+                if (_isAllowed(EditorTool.arrow))
+                  TabItem(
+                    index: EditorTool.arrow.index,
+                    child: Padding(
+                      padding: padding,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Assets.icons.arrow.svg(width: 16, color: Colors.white),
+                          Positioned(
+                            bottom: -10,
+                            right: -10,
+                            child: Text('V', style: TextStyle(fontSize: 10)),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                TabItem(
-                  child: Padding(
-                    padding: padding,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Assets.icons.square.svg(width: 16, color: Colors.white),
-                        Positioned(
-                          bottom: -10,
-                          right: -10,
-                          child: Text('R', style: TextStyle(fontSize: 10)),
-                        ),
-                      ],
+                if (_isAllowed(EditorTool.square))
+                  TabItem(
+                    index: EditorTool.square.index,
+                    child: Padding(
+                      padding: padding,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Assets.icons.square.svg(width: 16, color: Colors.white),
+                          Positioned(
+                            bottom: -10,
+                            right: -10,
+                            child: Text('R', style: TextStyle(fontSize: 10)),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                TabItem(
-                  child: Padding(
-                    padding: padding,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Assets.icons.circle.svg(width: 16, color: Colors.white),
-                        Positioned(
-                          bottom: -10,
-                          right: -10,
-                          child: Text('O', style: TextStyle(fontSize: 10)),
-                        ),
-                      ],
+                if (_isAllowed(EditorTool.circle))
+                  TabItem(
+                    index: EditorTool.circle.index,
+                    child: Padding(
+                      padding: padding,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Assets.icons.circle.svg(width: 16, color: Colors.white),
+                          Positioned(
+                            bottom: -10,
+                            right: -10,
+                            child: Text('O', style: TextStyle(fontSize: 10)),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                TabItem(
-                  child: Padding(
-                    padding: padding,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Icon(Icons.diamond_outlined, size: 16, color: Colors.white),
-                        Positioned(
-                          bottom: -10,
-                          right: -10,
-                          child: Text('G', style: TextStyle(fontSize: 10)),
-                        ),
-                      ],
+                if (_isAllowed(EditorTool.diamond))
+                  TabItem(
+                    index: EditorTool.diamond.index,
+                    child: Padding(
+                      padding: padding,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Icon(Icons.diamond_outlined, size: 16, color: Colors.white),
+                          Positioned(
+                            bottom: -10,
+                            right: -10,
+                            child: Text('G', style: TextStyle(fontSize: 10)),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                TabItem(
-                  child: Padding(
-                    padding: padding,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Assets.icons.arrowTopRight.svg(
-                          width: 16,
-                          color: Colors.white,
-                        ),
-                        Positioned(
-                          bottom: -10,
-                          right: -10,
-                          child: Text('A', style: TextStyle(fontSize: 10)),
-                        ),
-                      ],
+                if (_isAllowed(EditorTool.arrowTopRight))
+                  TabItem(
+                    index: EditorTool.arrowTopRight.index,
+                    child: Padding(
+                      padding: padding,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Assets.icons.arrowTopRight.svg(
+                            width: 16,
+                            color: Colors.white,
+                          ),
+                          Positioned(
+                            bottom: -10,
+                            right: -10,
+                            child: Text('A', style: TextStyle(fontSize: 10)),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                TabItem(
-                  child: Padding(
-                    padding: padding,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Assets.icons.line.svg(width: 16, color: Colors.white),
-                        Positioned(
-                          bottom: -10,
-                          right: -10,
-                          child: Text('L', style: TextStyle(fontSize: 10)),
-                        ),
-                      ],
+                if (_isAllowed(EditorTool.line))
+                  TabItem(
+                    index: EditorTool.line.index,
+                    child: Padding(
+                      padding: padding,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Assets.icons.line.svg(width: 16, color: Colors.white),
+                          Positioned(
+                            bottom: -10,
+                            right: -10,
+                            child: Text('L', style: TextStyle(fontSize: 10)),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                TabItem(
-                  child: Padding(
-                    padding: padding,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Assets.icons.pencil.svg(width: 16, color: Colors.white),
-                        Positioned(
-                          bottom: -10,
-                          right: -10,
-                          child: Text('D', style: TextStyle(fontSize: 10)),
-                        ),
-                      ],
+                if (_isAllowed(EditorTool.pencil))
+                  TabItem(
+                    index: EditorTool.pencil.index,
+                    child: Padding(
+                      padding: padding,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Assets.icons.pencil.svg(width: 16, color: Colors.white),
+                          Positioned(
+                            bottom: -10,
+                            right: -10,
+                            child: Text('D', style: TextStyle(fontSize: 10)),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                TabItem(
-                  child: Padding(
-                    padding: padding,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Assets.icons.text.svg(width: 16, color: Colors.white),
-                        Positioned(
-                          bottom: -10,
+                if (_isAllowed(EditorTool.text))
+                  TabItem(
+                    index: EditorTool.text.index,
+                    child: Padding(
+                      padding: padding,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Assets.icons.text.svg(width: 16, color: Colors.white),
+                          Positioned(
+                            bottom: -10,
                           right: -10,
                           child: Text('T', style: TextStyle(fontSize: 10)),
                         ),
@@ -216,53 +238,57 @@ class FlowDrawToolbar extends StatelessWidget {
                 ),
               ],
             ),
-            Gap(16),
-            CustomTabs(
-              index: state.activeTool.index,
-              onChanged: (index) => onToolSelected(index, null),
-              children: [
-                TabItem(
-                  index: 8,
-                  child: Padding(
-                    padding: padding.copyWith(
-                      top: padding.top + 2,
-                      bottom: padding.bottom + 2,
-                    ),
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Assets.icons.figure.svg(width: 16, color: Colors.white),
-                        Positioned(
-                          bottom: -10,
-                          right: -10,
-                          child: Text('F', style: TextStyle(fontSize: 10)),
+            if (_isAllowed(EditorTool.figure) || _isAllowed(EditorTool.comment)) ...[
+              Gap(16),
+              CustomTabs(
+                index: state.activeTool.index,
+                onChanged: (index) => onToolSelected(index, null),
+                children: [
+                  if (_isAllowed(EditorTool.figure))
+                    TabItem(
+                      index: EditorTool.figure.index,
+                      child: Padding(
+                        padding: padding.copyWith(
+                          top: padding.top + 2,
+                          bottom: padding.bottom + 2,
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-                TabItem(
-                  index: 9,
-                  child: Padding(
-                    padding: padding,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Assets.icons.comment.svg(
-                          width: 16,
-                          color: Colors.white,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Assets.icons.figure.svg(width: 16, color: Colors.white),
+                            Positioned(
+                              bottom: -10,
+                              right: -10,
+                              child: Text('F', style: TextStyle(fontSize: 10)),
+                            ),
+                          ],
                         ),
-                        Positioned(
-                          bottom: -10,
-                          right: -10,
-                          child: Text('C', style: TextStyle(fontSize: 10)),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-              ],
-            ),
+                  if (_isAllowed(EditorTool.comment))
+                    TabItem(
+                      index: EditorTool.comment.index,
+                      child: Padding(
+                        padding: padding,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Assets.icons.comment.svg(
+                              width: 16,
+                              color: Colors.white,
+                            ),
+                            Positioned(
+                              bottom: -10,
+                              right: -10,
+                              child: Text('C', style: TextStyle(fontSize: 10)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
             Gap(16),
             Builder(
               builder: (context) {

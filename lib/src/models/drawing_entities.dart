@@ -38,6 +38,21 @@ enum Handle {
 
 enum LinkPathType { straight, orthogonal }
 
+/// Arrowhead style for arrow objects.
+enum ArrowHeadType { none, triangle, diamond, dot, bar }
+
+/// Predefined tool sets for restricted modes.
+///
+/// Workflow mode limits the palette to boxes, connections, forks, and
+/// decision diamonds — perfect for building flowcharts and workflows.
+const Set<EditorTool> workflowTools = {
+  EditorTool.arrow,
+  EditorTool.square,
+  EditorTool.diamond,
+  EditorTool.arrowTopRight,
+  EditorTool.text,
+};
+
 abstract class DrawingObject {
   final String id;
   bool isSelected;

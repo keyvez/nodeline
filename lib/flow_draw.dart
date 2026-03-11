@@ -18,12 +18,15 @@ export 'package:flow_draw/src/models/drawing_entities.dart'
         DrawingObject,
         CircleObject,
         RectangleObject,
+        DiamondObject,
         ArrowObject,
+        ArrowHeadType,
         LineObject,
         PencilStrokeObject,
         FigureObject,
         TextObject,
-        SvgObject;
+        SvgObject,
+        workflowTools;
 
 export 'package:flow_draw/src/models/entities.dart'
     show NodeState, NodeInstance, NodeInfo;
