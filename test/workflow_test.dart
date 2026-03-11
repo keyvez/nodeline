@@ -35,7 +35,6 @@ void main() {
         rect: Rect.fromLTWH(0, 0, 100, 80),
       );
       final path = diamond.path;
-      // Path should have 4 points forming a diamond
       expect(path.getBounds().width, closeTo(100, 1));
       expect(path.getBounds().height, closeTo(80, 1));
     });
@@ -78,6 +77,234 @@ void main() {
       expect(copy.isSelected, true);
       expect((copy as DiamondObject).isEditing, false);
       expect(copy.id, 'test-6');
+    });
+  });
+
+  group('ParallelogramObject', () {
+    test('creates with required fields', () {
+      final para = ParallelogramObject(
+        id: 'para-1',
+        rect: Rect.fromLTWH(0, 0, 120, 60),
+      );
+      expect(para.id, 'para-1');
+      expect(para.rect.width, 120);
+      expect(para.skewOffset, 20.0);
+    });
+
+    test('creates with text', () {
+      final para = ParallelogramObject(
+        id: 'para-2',
+        rect: Rect.fromLTWH(0, 0, 120, 60),
+        text: 'Input Data',
+      );
+      expect(para.text, 'Input Data');
+    });
+
+    test('path creates correct parallelogram shape', () {
+      final para = ParallelogramObject(
+        id: 'para-3',
+        rect: Rect.fromLTWH(0, 0, 120, 60),
+        skewOffset: 20,
+      );
+      final path = para.path;
+      final bounds = path.getBounds();
+      expect(bounds.width, closeTo(120, 1));
+      expect(bounds.height, closeTo(60, 1));
+    });
+
+    test('toJson round-trips correctly', () {
+      final original = ParallelogramObject(
+        id: 'para-4',
+        rect: Rect.fromLTWH(10, 20, 120, 60),
+        text: 'Process',
+        lineStyle: LineStyle.dashed,
+        skewOffset: 25.0,
+      );
+      final json = original.toJson();
+      expect(json['type'], 'parallelogram');
+      expect(json['skewOffset'], 25.0);
+
+      final restored = ParallelogramObject.fromJson(json);
+      expect(restored.id, original.id);
+      expect(restored.rect, original.rect);
+      expect(restored.text, original.text);
+      expect(restored.lineStyle, LineStyle.dashed);
+      expect(restored.skewOffset, 25.0);
+    });
+
+    test('copyWith preserves and overrides fields', () {
+      final para = ParallelogramObject(
+        id: 'para-5',
+        rect: Rect.fromLTWH(0, 0, 120, 60),
+        text: 'Original',
+      );
+      final copy = para.copyWith(isSelected: true);
+      expect(copy.isSelected, true);
+      expect(copy.id, 'para-5');
+    });
+  });
+
+  group('ForkJoinObject', () {
+    test('creates with required fields', () {
+      final fork = ForkJoinObject(
+        id: 'fork-1',
+        rect: Rect.fromLTWH(0, 0, 200, 10),
+      );
+      expect(fork.id, 'fork-1');
+      expect(fork.rect.width, 200);
+      expect(fork.rect.height, 10);
+    });
+
+    test('toJson round-trips correctly', () {
+      final original = ForkJoinObject(
+        id: 'fork-2',
+        rect: Rect.fromLTWH(50, 100, 200, 8),
+        lineStyle: LineStyle.solid,
+      );
+      final json = original.toJson();
+      expect(json['type'], 'fork_join');
+
+      final restored = ForkJoinObject.fromJson(json);
+      expect(restored.id, original.id);
+      expect(restored.rect, original.rect);
+      expect(restored.lineStyle, LineStyle.solid);
+    });
+
+    test('copyWith preserves and overrides fields', () {
+      final fork = ForkJoinObject(
+        id: 'fork-3',
+        rect: Rect.fromLTWH(0, 0, 200, 10),
+      );
+      final copy = fork.copyWith(isSelected: true);
+      expect(copy.isSelected, true);
+      expect(copy.id, 'fork-3');
+    });
+  });
+
+  group('RectangleObject borderRadius', () {
+    test('default borderRadius is 0', () {
+      final rect = RectangleObject(
+        id: 'rect-1',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+      );
+      expect(rect.borderRadius, 0.0);
+    });
+
+    test('custom borderRadius is preserved', () {
+      final rect = RectangleObject(
+        id: 'rect-2',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+        borderRadius: 12.0,
+      );
+      expect(rect.borderRadius, 12.0);
+    });
+
+    test('borderRadius round-trips through JSON', () {
+      final original = RectangleObject(
+        id: 'rect-3',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+        borderRadius: 16.0,
+        text: 'Rounded',
+      );
+      final json = original.toJson();
+      expect(json['borderRadius'], 16.0);
+
+      final restored = RectangleObject.fromJson(json);
+      expect(restored.borderRadius, 16.0);
+      expect(restored.text, 'Rounded');
+    });
+
+    test('borderRadius 0 is not included in JSON', () {
+      final rect = RectangleObject(
+        id: 'rect-4',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+      );
+      final json = rect.toJson();
+      expect(json.containsKey('borderRadius'), false);
+    });
+
+    test('copyWith can update borderRadius', () {
+      final rect = RectangleObject(
+        id: 'rect-5',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+        borderRadius: 8.0,
+      );
+      final copy = rect.copyWith(borderRadius: 16.0);
+      expect((copy as RectangleObject).borderRadius, 16.0);
+    });
+  });
+
+  group('ConnectionPort', () {
+    test('computes 4 cardinal ports for rect', () {
+      final ports = ConnectionPort.portsForRect(
+        Rect.fromLTWH(100, 100, 200, 100),
+        'obj-1',
+      );
+      expect(ports.length, 4);
+      expect(ports.any((p) => p.direction == PortDirection.top), true);
+      expect(ports.any((p) => p.direction == PortDirection.right), true);
+      expect(ports.any((p) => p.direction == PortDirection.bottom), true);
+      expect(ports.any((p) => p.direction == PortDirection.left), true);
+    });
+
+    test('port positions are correct', () {
+      final rect = Rect.fromLTWH(100, 100, 200, 100);
+      final ports = ConnectionPort.portsForRect(rect, 'obj-2');
+
+      final topPort = ports.firstWhere((p) => p.direction == PortDirection.top);
+      expect(topPort.portPosition, Offset(200, 100)); // center x, top y
+
+      final rightPort = ports.firstWhere((p) => p.direction == PortDirection.right);
+      expect(rightPort.portPosition, Offset(300, 150)); // right x, center y
+
+      final bottomPort = ports.firstWhere((p) => p.direction == PortDirection.bottom);
+      expect(bottomPort.portPosition, Offset(200, 200)); // center x, bottom y
+
+      final leftPort = ports.firstWhere((p) => p.direction == PortDirection.left);
+      expect(leftPort.portPosition, Offset(100, 150)); // left x, center y
+    });
+
+    test('DrawingObject.getConnectionPorts returns ports', () {
+      final rect = RectangleObject(
+        id: 'rect-ports',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+      );
+      final ports = rect.getConnectionPorts();
+      expect(ports.length, 4);
+      expect(ports.first.objectId, 'rect-ports');
+    });
+  });
+
+  group('ArrowObject label', () {
+    test('creates with label', () {
+      final arrow = ArrowObject(
+        id: 'arr-1',
+        start: Offset(0, 0),
+        end: Offset(100, 100),
+        arrowLabel: 'Yes',
+      );
+      expect(arrow.arrowLabel, 'Yes');
+    });
+
+    test('label defaults to null', () {
+      final arrow = ArrowObject(
+        id: 'arr-2',
+        start: Offset(0, 0),
+        end: Offset(100, 100),
+      );
+      expect(arrow.arrowLabel, isNull);
+    });
+
+    test('label round-trips through JSON', () {
+      final original = ArrowObject(
+        id: 'arr-3',
+        start: Offset(10, 20),
+        end: Offset(110, 120),
+        arrowLabel: 'Condition',
+      );
+      final json = original.toJson();
+      final restored = ArrowObject.fromJson(json);
+      expect(restored.arrowLabel, 'Condition');
     });
   });
 
@@ -161,6 +388,37 @@ void main() {
       expect(mermaid, contains('Start'));
       expect(mermaid, contains('Check'));
     });
+
+    test('exports arrow labels in mermaid syntax', () {
+      final objects = <String, DrawingObject>{
+        'r1': RectangleObject(
+          id: 'r1',
+          rect: Rect.fromLTWH(0, 0, 100, 80),
+          text: 'Start',
+        ),
+        'r2': RectangleObject(
+          id: 'r2',
+          rect: Rect.fromLTWH(200, 0, 100, 80),
+          text: 'End',
+        ),
+        'a1': ArrowObject(
+          id: 'a1',
+          start: Offset(100, 40),
+          end: Offset(200, 40),
+          arrowLabel: 'yes',
+          startAttachment: ObjectAttachment(
+            objectId: 'r1',
+            relativePosition: Offset(1.0, 0.5),
+          ),
+          endAttachment: ObjectAttachment(
+            objectId: 'r2',
+            relativePosition: Offset(0.0, 0.5),
+          ),
+        ),
+      };
+      final mermaid = MermaidExporter.export(objects);
+      expect(mermaid, contains('yes'));
+    });
   });
 
   group('MermaidImporter', () {
@@ -176,6 +434,79 @@ flowchart TD
       final types = objects.map((o) => o['type']).toList();
       expect(types, contains('diamond'));
       expect(types, contains('rectangle'));
+    });
+  });
+
+  group('WorkflowValidator', () {
+    test('validates basic workflow', () {
+      final objects = <String, DrawingObject>{
+        'start': RectangleObject(
+          id: 'start',
+          rect: Rect.fromLTWH(0, 0, 100, 80),
+          text: 'Start',
+        ),
+        'end': RectangleObject(
+          id: 'end',
+          rect: Rect.fromLTWH(200, 0, 100, 80),
+          text: 'End',
+        ),
+        'a1': ArrowObject(
+          id: 'a1',
+          start: Offset(100, 40),
+          end: Offset(200, 40),
+          startAttachment: ObjectAttachment(
+            objectId: 'start',
+            relativePosition: Offset(1.0, 0.5),
+          ),
+          endAttachment: ObjectAttachment(
+            objectId: 'end',
+            relativePosition: Offset(0.0, 0.5),
+          ),
+        ),
+      };
+      final result = WorkflowValidator.validateWorkflow(objects);
+      expect(result.isValid, true);
+    });
+  });
+
+  group('WorkflowTemplate', () {
+    test('has available templates', () {
+      final templates = WorkflowTemplate.templates;
+      expect(templates, isNotEmpty);
+    });
+
+    test('templates have name and mermaid content', () {
+      for (final t in WorkflowTemplate.templates) {
+        expect(t.name, isNotEmpty);
+        expect(t.mermaidDiagram, contains('flowchart'));
+      }
+    });
+  });
+
+  group('SnapGuide', () {
+    test('AlignmentGuide finds horizontal alignment', () {
+      final objects = <String, DrawingObject>{
+        'ref': RectangleObject(
+          id: 'ref',
+          rect: Rect.fromLTWH(0, 100, 100, 50),
+        ),
+      };
+      final movingRect = Rect.fromLTWH(200, 102, 100, 50);
+      final guides = AlignmentGuide.findGuides(movingRect, objects, {});
+      // Should find horizontal guide (top edges near: 102 vs 100)
+      expect(guides.any((g) => g.axis == SnapGuideAxis.horizontal), true);
+    });
+
+    test('AlignmentGuide excludes specified IDs', () {
+      final objects = <String, DrawingObject>{
+        'self': RectangleObject(
+          id: 'self',
+          rect: Rect.fromLTWH(0, 100, 100, 50),
+        ),
+      };
+      final movingRect = Rect.fromLTWH(0, 100, 100, 50);
+      final guides = AlignmentGuide.findGuides(movingRect, objects, {'self'});
+      expect(guides, isEmpty);
     });
   });
 }
