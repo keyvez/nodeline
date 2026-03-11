@@ -23,6 +23,8 @@ class MermaidExporter {
         shapes.add(obj);
       } else if (obj is CircleObject) {
         shapes.add(obj);
+      } else if (obj is DiamondObject) {
+        shapes.add(obj);
       } else if (obj is ArrowObject) {
         arrows.add(obj);
       } else if (obj is LineObject) {
@@ -81,6 +83,10 @@ class MermaidExporter {
         continue;
       }
       if (shape is CircleObject && shape.text != null && shape.text!.isNotEmpty) {
+        shapeLabels[shape.id] = shape.text!;
+        continue;
+      }
+      if (shape is DiamondObject && shape.text != null && shape.text!.isNotEmpty) {
         shapeLabels[shape.id] = shape.text!;
         continue;
       }

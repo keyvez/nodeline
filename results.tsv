@@ -1,1 +1,5 @@
 commit	score	status	description
+1548f60	5	keep	baseline
+e28b6e9	5	keep	fix double-tap text editing focus + isEditing copyWith
+7da83ef	8	keep	diamond/rhombus shape with full integration
+44d542b	21	keep	workflow mode + allowedTools filtering + ArrowHeadType
