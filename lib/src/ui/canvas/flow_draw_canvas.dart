@@ -86,6 +86,16 @@ class FlowDrawCanvas extends StatelessWidget {
                             selectionState.selectedDrawingObjectIds,
                           ));
                     },
+                    onBringToFront: () {
+                      context.read<CanvasBloc>().add(
+                            ObjectsBroughtToFront(allSelected),
+                          );
+                    },
+                    onSendToBack: () {
+                      context.read<CanvasBloc>().add(
+                            ObjectsSentToBack(allSelected),
+                          );
+                    },
                   );
                 },
               );

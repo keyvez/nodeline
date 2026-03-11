@@ -723,7 +723,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         _beginTextEditing(existingObject: obj);
         return;
       }
-      if ((obj is RectangleObject || obj is CircleObject || obj is DiamondObject) &&
+      if ((obj is RectangleObject || obj is CircleObject || obj is DiamondObject || obj is ParallelogramObject) &&
           obj.rect.inflate(hitPadding).contains(worldPos)) {
         _beginShapeTextEditing(obj);
         return;
@@ -1321,7 +1321,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
     if (newObject != null) {
       _canvasBloc.add(DrawingObjectAdded(newObject));
-      if (isTapCreated && (newObject is RectangleObject || newObject is CircleObject)) {
+      if (isTapCreated && (newObject is RectangleObject || newObject is CircleObject || newObject is ParallelogramObject)) {
         _selectionBloc.add(SelectionReplaced(
           nodeIds: const {},
           drawingObjectIds: {newObject.id},
@@ -1333,7 +1333,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     }
 
     final autoEditObject = (isTapCreated && newObject != null &&
-        (newObject is RectangleObject || newObject is CircleObject))
+        (newObject is RectangleObject || newObject is CircleObject || newObject is ParallelogramObject))
         ? newObject
         : null;
 
@@ -1939,6 +1939,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     } else if (shapeObject is DiamondObject) {
       existingText = shapeObject.text;
       existingStyle = shapeObject.textStyle ?? defaultStyle;
+    } else if (shapeObject is ParallelogramObject) {
+      existingText = shapeObject.text;
+      existingStyle = shapeObject.textStyle ?? defaultStyle;
     }
 
     _shapeTextController?.dispose();
@@ -1991,6 +1994,10 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         shapeObject.text = newText.isEmpty ? null : newText;
         shapeObject.textStyle = newText.isEmpty ? null : _shapeTextStyle;
       } else if (shapeObject is DiamondObject) {
+        shapeObject.isEditing = false;
+        shapeObject.text = newText.isEmpty ? null : newText;
+        shapeObject.textStyle = newText.isEmpty ? null : _shapeTextStyle;
+      } else if (shapeObject is ParallelogramObject) {
         shapeObject.isEditing = false;
         shapeObject.text = newText.isEmpty ? null : newText;
         shapeObject.textStyle = newText.isEmpty ? null : _shapeTextStyle;

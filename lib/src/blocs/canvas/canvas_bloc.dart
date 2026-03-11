@@ -56,6 +56,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         ObjectsSentToBack e => _onObjectsSentToBack(e, emit),
         ObjectsAligned e => _onObjectsAligned(e, emit),
         ObjectsDistributed e => _onObjectsDistributed(e, emit),
+        ObjectColorsChanged e => _onObjectColorsChanged(e, emit),
         ObjectDuplicatedWithConnection e => _onObjectDuplicatedWithConnection(e, emit),
         GridToggled e => _onGridToggled(e, emit),
       });
@@ -638,6 +639,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           lineStyle: obj.lineStyle,
           angle: obj.angle,
           skewOffset: obj.skewOffset,
+          fillColor: obj.fillColor,
+          strokeColor: obj.strokeColor,
         );
       } else if (obj is ForkJoinObject) {
         newDrawingObjects[newId] = ForkJoinObject(
@@ -645,6 +648,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           rect: obj.rect.shift(offset),
           lineStyle: obj.lineStyle,
           angle: obj.angle,
+          fillColor: obj.fillColor,
+          strokeColor: obj.strokeColor,
         );
       } else if (obj is ArrowObject) {
         newDrawingObjects[newId] = ArrowObject(
@@ -943,6 +948,49 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     emit(state.copyWith(drawingObjects: newDrawingObjects));
   }
 
+  void _onObjectColorsChanged(
+      ObjectColorsChanged event, Emitter<CanvasState> emit) {
+    final updatedObjects = Map<String, DrawingObject>.from(state.drawingObjects);
+
+    for (final id in event.selectedIds) {
+      final obj = updatedObjects[id];
+      if (obj == null) continue;
+
+      if (obj is RectangleObject) {
+        updatedObjects[id] = obj.copyWith(
+          fillColor: event.clearFill ? null : event.fillColor ?? obj.fillColor,
+          strokeColor: event.clearStroke ? null : event.strokeColor ?? obj.strokeColor,
+        ) as DrawingObject;
+      } else if (obj is CircleObject) {
+        updatedObjects[id] = obj.copyWith(
+          fillColor: event.clearFill ? null : event.fillColor ?? obj.fillColor,
+          strokeColor: event.clearStroke ? null : event.strokeColor ?? obj.strokeColor,
+        ) as DrawingObject;
+      } else if (obj is DiamondObject) {
+        updatedObjects[id] = obj.copyWith(
+          fillColor: event.clearFill ? null : event.fillColor ?? obj.fillColor,
+          strokeColor: event.clearStroke ? null : event.strokeColor ?? obj.strokeColor,
+        ) as DrawingObject;
+      } else if (obj is ParallelogramObject) {
+        updatedObjects[id] = obj.copyWith(
+          fillColor: event.clearFill ? null : event.fillColor ?? obj.fillColor,
+          strokeColor: event.clearStroke ? null : event.strokeColor ?? obj.strokeColor,
+        ) as DrawingObject;
+      } else if (obj is ForkJoinObject) {
+        updatedObjects[id] = obj.copyWith(
+          fillColor: event.clearFill ? null : event.fillColor ?? obj.fillColor,
+          strokeColor: event.clearStroke ? null : event.strokeColor ?? obj.strokeColor,
+        ) as DrawingObject;
+      }
+    }
+
+    _emitWithHistory(
+      state.copyWith(drawingObjects: updatedObjects),
+      event,
+      emit,
+    );
+  }
+
   void _onObjectDuplicatedWithConnection(
       ObjectDuplicatedWithConnection event, Emitter<CanvasState> emit) {
     _pushToUndoStack(event, emit, state);
@@ -1020,15 +1068,15 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     final newObjectRect = newRectTopLeft & sourceRect.size;
 
     if (sourceObject is RectangleObject) {
-      newShape = RectangleObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle);
+      newShape = RectangleObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle, fillColor: sourceObject.fillColor, strokeColor: sourceObject.strokeColor);
     } else if (sourceObject is CircleObject) {
-      newShape = CircleObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle);
+      newShape = CircleObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle, fillColor: sourceObject.fillColor, strokeColor: sourceObject.strokeColor);
     } else if (sourceObject is DiamondObject) {
-      newShape = DiamondObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle);
+      newShape = DiamondObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle, fillColor: sourceObject.fillColor, strokeColor: sourceObject.strokeColor);
     } else if (sourceObject is ParallelogramObject) {
-      newShape = ParallelogramObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle);
+      newShape = ParallelogramObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle, fillColor: sourceObject.fillColor, strokeColor: sourceObject.strokeColor);
     } else if (sourceObject is ForkJoinObject) {
-      newShape = ForkJoinObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle);
+      newShape = ForkJoinObject(id: newId, rect: newObjectRect, lineStyle: sourceObject.lineStyle, fillColor: sourceObject.fillColor, strokeColor: sourceObject.strokeColor);
     } else {
       return;
     }

@@ -335,6 +335,28 @@ final class ObjectsDistributed extends CanvasEvent {
   List<Object> get props => [selectedIds, distributionType];
 }
 
+final class ObjectColorsChanged extends CanvasEvent {
+  final Set<String> selectedIds;
+  final Color? fillColor;
+  final Color? strokeColor;
+  final bool clearFill;
+  final bool clearStroke;
+
+  const ObjectColorsChanged(
+    this.selectedIds, {
+    this.fillColor,
+    this.strokeColor,
+    this.clearFill = false,
+    this.clearStroke = false,
+  }) : super(isUndoable: true);
+
+  @override
+  String get description => 'Changed object colors';
+
+  @override
+  List<Object> get props => [selectedIds, clearFill, clearStroke];
+}
+
 final class ObjectDuplicatedWithConnection extends CanvasEvent {
   final String sourceObjectId;
   final QuickActionDirection direction;
