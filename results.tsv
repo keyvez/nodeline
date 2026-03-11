@@ -7,3 +7,4 @@ e28b6e9	5	keep	fix double-tap text editing focus + isEditing copyWith
 bfba632	80	keep	12 features: shapes, UI, export, smart tools (max achievable)
 82ad4e1	80	keep	expanded tests to 38 cases
 43efa20	100	keep	fill/stroke colors, shortcuts overlay, evaluator expansion
+223a6ac	100	keep	integrate snap guides, floating toolbar, minimap, PNG export into app

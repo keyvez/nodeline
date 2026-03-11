@@ -1119,6 +1119,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         if (tool == EditorTool.square ||
             tool == EditorTool.circle ||
             tool == EditorTool.diamond ||
+            tool == EditorTool.parallelogram ||
+            tool == EditorTool.forkJoin ||
             tool == EditorTool.figure) {
           final dx = worldPos.dx - _drawingStart.dx;
           final dy = worldPos.dy - _drawingStart.dy;
@@ -1272,6 +1274,15 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           break;
         case EditorTool.diamond:
           newObject = DiamondObject(id: id, rect: shapeRect, lineStyle: lineStyle);
+          break;
+        case EditorTool.parallelogram:
+          newObject = ParallelogramObject(id: id, rect: shapeRect, lineStyle: lineStyle);
+          break;
+        case EditorTool.forkJoin:
+          final forkRect = isTap
+              ? snapRect(Rect.fromCenter(center: snappedStart, width: 1008, height: 10))
+              : snapRect(Rect.fromLTWH(rect.left, rect.top, rect.width, 10));
+          newObject = ForkJoinObject(id: id, rect: forkRect, lineStyle: lineStyle);
           break;
         case EditorTool.arrowTopRight:
           if (!isTap) {
@@ -2152,6 +2163,10 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                       _toolBloc.add(const ToolSelected(EditorTool.circle)),
                     const SingleActivator(LogicalKeyboardKey.keyG): () =>
                       _toolBloc.add(const ToolSelected(EditorTool.diamond)),
+                    const SingleActivator(LogicalKeyboardKey.keyP): () =>
+                      _toolBloc.add(const ToolSelected(EditorTool.parallelogram)),
+                    const SingleActivator(LogicalKeyboardKey.keyJ): () =>
+                      _toolBloc.add(const ToolSelected(EditorTool.forkJoin)),
                     const SingleActivator(LogicalKeyboardKey.keyA): () =>
                       _toolBloc.add(const ToolSelected(EditorTool.arrowTopRight)),
                     const SingleActivator(LogicalKeyboardKey.keyL): () =>

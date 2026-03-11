@@ -514,25 +514,29 @@ class FlowDrawEditorRenderBox extends RenderBox
           }
         } else if (obj is ParallelogramObject) {
           final paraPath = obj.path;
-          canvas.drawPath(paraPath, fillPaint);
+          final paraFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
+          final paraStroke = obj.strokeColor != null ? (Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = objectPaint.strokeWidth) : objectPaint;
+          canvas.drawPath(paraPath, paraFill);
           if (obj.lineStyle == LineStyle.solid) {
-            canvas.drawPath(paraPath, objectPaint);
+            canvas.drawPath(paraPath, paraStroke);
           } else {
-            _paintStyledPath(canvas, paraPath, objectPaint, obj.lineStyle, seed: obj.id.hashCode);
+            _paintStyledPath(canvas, paraPath, paraStroke, obj.lineStyle, seed: obj.id.hashCode);
           }
           if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
             _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle);
           }
         } else if (obj is ForkJoinObject) {
           // Fork/join renders as a thick bar
-          final barPaint = Paint()
-            ..color = objectPaint.color
-            ..style = PaintingStyle.fill;
+          final barFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : (Paint()..color = objectPaint.color..style = PaintingStyle.fill);
           final barRect = RRect.fromRectAndRadius(
             obj.rect,
             const Radius.circular(3),
           );
-          canvas.drawRRect(barRect, barPaint);
+          canvas.drawRRect(barRect, barFill);
+          if (obj.strokeColor != null) {
+            final barStroke = Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = objectPaint.strokeWidth;
+            canvas.drawRRect(barRect, barStroke);
+          }
         } else if (obj is SvgObject) {
           canvas.save();
           canvas.translate(obj.rect.left, obj.rect.top);
@@ -1677,6 +1681,25 @@ class FlowDrawEditorRenderBox extends RenderBox
           ..lineTo(c.dx - hw, c.dy)
           ..close();
         canvas.drawPath(diamondPath, tempPaint);
+        break;
+      case EditorTool.parallelogram:
+        final nr = rect.normalize;
+        const skew = 20.0;
+        final paraPath = Path()
+          ..moveTo(nr.left + skew, nr.top)
+          ..lineTo(nr.right, nr.top)
+          ..lineTo(nr.right - skew, nr.bottom)
+          ..lineTo(nr.left, nr.bottom)
+          ..close();
+        canvas.drawPath(paraPath, tempPaint);
+        break;
+      case EditorTool.forkJoin:
+        final nr = rect.normalize;
+        final barRect = Rect.fromLTWH(nr.left, nr.top, nr.width, 10);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(barRect, const Radius.circular(3)),
+          tempPaint,
+        );
         break;
       case EditorTool.arrowTopRight:
         if (tempDrawingObject!.pathType == LinkPathType.orthogonal) {

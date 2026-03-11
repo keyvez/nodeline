@@ -69,10 +69,10 @@ class MermaidImporter {
     // Match: ID --> ID, ID --- ID, ID -->|label| ID
     // Also handle node declarations inline: A["text"] --> B(("text"))
     final edgePattern = RegExp(
-      r'^(\S+?)(?:\[.*?\]|\(\(.*?\)\)|\{.*?\}|\(\[.*?\]\))?\s*'
+      r'^(\S+?)(?:\[/.*?/\]|\[.*?\]|\(\(.*?\)\)|\{.*?\}|\(\[.*?\]\))?\s*'
       r'(-->|---)'
       r'(?:\|([^|]*)\|)?\s*'
-      r'(\S+?)(?:\[.*?\]|\(\(.*?\)\)|\{.*?\}|\(\[.*?\]\))?$',
+      r'(\S+?)(?:\[/.*?/\]|\[.*?\]|\(\(.*?\)\)|\{.*?\}|\(\[.*?\]\))?$',
     );
 
     final match = edgePattern.firstMatch(line);
@@ -113,8 +113,10 @@ class MermaidImporter {
       RegExp(RegExp.escape(nodeId) + r'\{"([^"]*)"\}'),
       // Stadium: A(["text"])
       RegExp(RegExp.escape(nodeId) + r'\(\["([^"]*)"\]\)'),
+      // Parallelogram: A[/"text"/]
+      RegExp(RegExp.escape(nodeId) + r'\[/"([^"]*)"/\]'),
     ];
-    final types = ['circle', 'rect', 'diamond', 'rect'];
+    final types = ['circle', 'rect', 'diamond', 'rect', 'parallelogram'];
 
     for (int i = 0; i < patterns.length; i++) {
       final match = patterns[i].firstMatch(line);
@@ -161,6 +163,15 @@ class MermaidImporter {
       final id = stadiumMatch.group(1)!;
       final label = stadiumMatch.group(2)!;
       nodes[id] = _MermaidNode(id, label, 'rect');
+      return;
+    }
+
+    // Parallelogram: A[/"text"/]
+    final paraMatch = RegExp(r'^(\w+)\[/"([^"]*)"/\]$').firstMatch(line);
+    if (paraMatch != null) {
+      final id = paraMatch.group(1)!;
+      final label = paraMatch.group(2)!;
+      nodes[id] = _MermaidNode(id, label, 'parallelogram');
       return;
     }
 
@@ -421,6 +432,13 @@ class MermaidImporter {
           text: node.label,
         );
         drawingObjects.add(diamond.toJson());
+      } else if (node.type == 'parallelogram') {
+        final parallelogram = ParallelogramObject(
+          id: objectId,
+          rect: rect,
+          text: node.label,
+        );
+        drawingObjects.add(parallelogram.toJson());
       } else {
         final rectangle = RectangleObject(
           id: objectId,
@@ -488,7 +506,7 @@ class MermaidImporter {
 class _MermaidNode {
   final String id;
   final String label;
-  final String type; // 'rect', 'circle', or 'diamond'
+  final String type; // 'rect', 'circle', 'diamond', or 'parallelogram'
   Rect rect;
 
   _MermaidNode(this.id, this.label, this.type) : rect = Rect.zero;

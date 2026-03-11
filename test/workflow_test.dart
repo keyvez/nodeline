@@ -437,6 +437,46 @@ flowchart TD
     });
   });
 
+  group('MermaidExporter parallelogram', () {
+    test('exports parallelogram as slash syntax', () {
+      final objects = <String, DrawingObject>{
+        'p1': ParallelogramObject(
+          id: 'p1',
+          rect: Rect.fromLTWH(0, 0, 120, 80),
+          text: 'Input',
+        ),
+      };
+      final mermaid = MermaidExporter.export(objects);
+      expect(mermaid, contains('[/"Input"/]'));
+    });
+
+    test('exports forkJoin as stadium syntax', () {
+      final objects = <String, DrawingObject>{
+        'fj1': ForkJoinObject(
+          id: 'fj1',
+          rect: Rect.fromLTWH(0, 0, 200, 10),
+        ),
+      };
+      final mermaid = MermaidExporter.export(objects);
+      expect(mermaid, contains('(["'));
+    });
+  });
+
+  group('MermaidImporter parallelogram', () {
+    test('imports parallelogram from slash syntax', () {
+      const mermaid = '''
+flowchart TD
+    A["Start"] --> B[/"Input"/]
+    B --> C["End"]
+''';
+      final result = MermaidImporter.import(mermaid);
+      final objects = result['drawingObjects'] as List;
+      final types = objects.map((o) => o['type']).toList();
+      expect(types, contains('parallelogram'));
+      expect(types, contains('rectangle'));
+    });
+  });
+
   group('WorkflowValidator', () {
     test('validates basic workflow', () {
       final objects = <String, DrawingObject>{

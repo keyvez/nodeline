@@ -64,6 +64,8 @@ enum EditorTool {
   square,
   circle,
   diamond,
+  parallelogram,
+  forkJoin,
   arrowTopRight,
   line,
   pencil,
@@ -100,6 +102,8 @@ const Set<EditorTool> workflowTools = {
   EditorTool.arrow,
   EditorTool.square,
   EditorTool.diamond,
+  EditorTool.parallelogram,
+  EditorTool.forkJoin,
   EditorTool.arrowTopRight,
   EditorTool.text,
 };
@@ -394,6 +398,8 @@ class ParallelogramObject extends DrawingObject {
   bool isEditing;
   final LineStyle lineStyle;
   final double skewOffset;
+  final Color? fillColor;
+  final Color? strokeColor;
 
   ParallelogramObject({
     required super.id,
@@ -405,6 +411,8 @@ class ParallelogramObject extends DrawingObject {
     this.isEditing = false,
     this.lineStyle = LineStyle.solid,
     this.skewOffset = 20.0,
+    this.fillColor,
+    this.strokeColor,
   }) : _rect = rect;
 
   @override
@@ -426,6 +434,8 @@ class ParallelogramObject extends DrawingObject {
     },
     'lineStyle': lineStyle.name,
     'skewOffset': skewOffset,
+    if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
+    if (strokeColor != null) 'strokeColor': strokeColor!.toARGB32(),
   };
 
   static ParallelogramObject fromJson(Map<String, dynamic> json) {
@@ -448,6 +458,8 @@ class ParallelogramObject extends DrawingObject {
           ? LineStyle.values.byName(json['lineStyle'])
           : LineStyle.solid,
       skewOffset: (json['skewOffset'] as num?)?.toDouble() ?? 20.0,
+      fillColor: json['fillColor'] != null ? Color(json['fillColor'] as int) : null,
+      strokeColor: json['strokeColor'] != null ? Color(json['strokeColor'] as int) : null,
     );
   }
 
@@ -468,6 +480,8 @@ class ParallelogramObject extends DrawingObject {
     double? angle,
     LineStyle? lineStyle,
     bool? isEditing,
+    Color? fillColor,
+    Color? strokeColor,
   }) {
     return ParallelogramObject(
       id: id,
@@ -479,6 +493,8 @@ class ParallelogramObject extends DrawingObject {
       lineStyle: lineStyle ?? this.lineStyle,
       isEditing: isEditing ?? this.isEditing,
       skewOffset: skewOffset,
+      fillColor: fillColor ?? this.fillColor,
+      strokeColor: strokeColor ?? this.strokeColor,
     );
   }
 }
@@ -487,6 +503,8 @@ class ParallelogramObject extends DrawingObject {
 class ForkJoinObject extends DrawingObject {
   Rect _rect;
   final LineStyle lineStyle;
+  final Color? fillColor;
+  final Color? strokeColor;
 
   ForkJoinObject({
     required super.id,
@@ -494,6 +512,8 @@ class ForkJoinObject extends DrawingObject {
     super.isSelected,
     super.angle,
     this.lineStyle = LineStyle.solid,
+    this.fillColor,
+    this.strokeColor,
   }) : _rect = rect;
 
   @override
@@ -509,6 +529,8 @@ class ForkJoinObject extends DrawingObject {
     'isSelected': isSelected,
     'angle': angle,
     'lineStyle': lineStyle.name,
+    if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
+    if (strokeColor != null) 'strokeColor': strokeColor!.toARGB32(),
   };
 
   static ForkJoinObject fromJson(Map<String, dynamic> json) {
@@ -520,6 +542,8 @@ class ForkJoinObject extends DrawingObject {
       lineStyle: json['lineStyle'] != null
           ? LineStyle.values.byName(json['lineStyle'])
           : LineStyle.solid,
+      fillColor: json['fillColor'] != null ? Color(json['fillColor'] as int) : null,
+      strokeColor: json['strokeColor'] != null ? Color(json['strokeColor'] as int) : null,
     );
   }
 
@@ -529,6 +553,8 @@ class ForkJoinObject extends DrawingObject {
     bool? isSelected,
     double? angle,
     LineStyle? lineStyle,
+    Color? fillColor,
+    Color? strokeColor,
   }) {
     return ForkJoinObject(
       id: id,
@@ -536,6 +562,8 @@ class ForkJoinObject extends DrawingObject {
       isSelected: isSelected ?? this.isSelected,
       angle: angle ?? this.angle,
       lineStyle: lineStyle ?? this.lineStyle,
+      fillColor: fillColor ?? this.fillColor,
+      strokeColor: strokeColor ?? this.strokeColor,
     );
   }
 }

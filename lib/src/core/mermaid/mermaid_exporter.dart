@@ -25,6 +25,10 @@ class MermaidExporter {
         shapes.add(obj);
       } else if (obj is DiamondObject) {
         shapes.add(obj);
+      } else if (obj is ParallelogramObject) {
+        shapes.add(obj);
+      } else if (obj is ForkJoinObject) {
+        shapes.add(obj);
       } else if (obj is ArrowObject) {
         arrows.add(obj);
       } else if (obj is LineObject) {
@@ -87,6 +91,10 @@ class MermaidExporter {
         continue;
       }
       if (shape is DiamondObject && shape.text != null && shape.text!.isNotEmpty) {
+        shapeLabels[shape.id] = shape.text!;
+        continue;
+      }
+      if (shape is ParallelogramObject && shape.text != null && shape.text!.isNotEmpty) {
         shapeLabels[shape.id] = shape.text!;
         continue;
       }
@@ -192,6 +200,14 @@ class MermaidExporter {
     }
     if (shape is DiamondObject) {
       return '$id{"$escaped"}';
+    }
+    if (shape is ParallelogramObject) {
+      // Mermaid parallelogram: /text/
+      return '$id[/"$escaped"/]';
+    }
+    if (shape is ForkJoinObject) {
+      // No standard Mermaid syntax for fork/join bars; use stadium shape
+      return '$id(["$escaped"])';
     }
     // Default: rectangle
     return '$id["$escaped"]';

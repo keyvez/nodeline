@@ -53,10 +53,10 @@ class FlowDrawToolbar extends StatelessWidget {
                 return CustomTabs(
                   index: state.activeTool.index,
                   onChanged: (index) =>
-                      onToolSelected(index, index == 10 ? context : null),
+                      onToolSelected(index, index == EditorTool.add.index ? context : null),
                   children: [
                     TabItem(
-                      index: 10,
+                      index: EditorTool.add.index,
                       child: SizedBox(
                         child: Padding(
                           padding: padding.copyWith(
@@ -156,6 +156,45 @@ class FlowDrawToolbar extends StatelessWidget {
                             bottom: -10,
                             right: -10,
                             child: Text('G', style: TextStyle(fontSize: 10)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (_isAllowed(EditorTool.parallelogram))
+                  TabItem(
+                    index: EditorTool.parallelogram.index,
+                    child: Padding(
+                      padding: padding,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Transform.rotate(
+                            angle: 1.5708, // 90 degrees
+                            child: Icon(Icons.change_history, size: 16, color: Colors.white),
+                          ),
+                          Positioned(
+                            bottom: -10,
+                            right: -10,
+                            child: Text('P', style: TextStyle(fontSize: 10)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (_isAllowed(EditorTool.forkJoin))
+                  TabItem(
+                    index: EditorTool.forkJoin.index,
+                    child: Padding(
+                      padding: padding,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Icon(Icons.horizontal_rule, size: 16, color: Colors.white),
+                          Positioned(
+                            bottom: -10,
+                            right: -10,
+                            child: Text('J', style: TextStyle(fontSize: 10)),
                           ),
                         ],
                       ),

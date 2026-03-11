@@ -153,8 +153,10 @@ class SvgExporter {
 
     if (rotOpen.isNotEmpty) svg.add(rotOpen);
 
+    final fill = obj.fillColor != null ? _colorToHex(obj.fillColor!) : 'none';
+    final stroke = obj.strokeColor != null ? _colorToHex(obj.strokeColor!) : _stroke;
     svg.add('  <ellipse cx="$cx" cy="$cy" rx="$rx" ry="$ry" '
-        'fill="none" stroke="$_stroke" stroke-width="$_defaultStrokeWidth"'
+        'fill="$fill" stroke="$stroke" stroke-width="$_defaultStrokeWidth"'
         '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
         '/>');
 
@@ -187,8 +189,10 @@ class SvgExporter {
 
     if (rotOpen.isNotEmpty) svg.add(rotOpen);
 
+    final fill = obj.fillColor != null ? _colorToHex(obj.fillColor!) : 'none';
+    final stroke = obj.strokeColor != null ? _colorToHex(obj.strokeColor!) : _stroke;
     svg.add('  <polygon points="$points" '
-        'fill="none" stroke="$_stroke" stroke-width="$_defaultStrokeWidth"'
+        'fill="$fill" stroke="$stroke" stroke-width="$_defaultStrokeWidth"'
         '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
         '/>');
 
