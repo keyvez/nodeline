@@ -74,15 +74,22 @@ class PngExporter {
 
     for (final obj in objects.values) {
       if (obj is RectangleObject) {
-        final rrect = RRect.fromRectAndRadius(obj.rect, const Radius.circular(6));
-        canvas.drawRRect(rrect, fillPaint);
-        canvas.drawRRect(rrect, objectPaint);
+        final radius = obj.borderRadius > 0 ? obj.borderRadius : 6.0;
+        final rrect = RRect.fromRectAndRadius(obj.rect, Radius.circular(radius));
+        final rFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
+        final rStroke = obj.strokeColor != null ? (Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = 2.0) : objectPaint;
+        canvas.drawRRect(rrect, rFill);
+        canvas.drawRRect(rrect, rStroke);
       } else if (obj is CircleObject) {
-        canvas.drawOval(obj.rect, fillPaint);
-        canvas.drawOval(obj.rect, objectPaint);
+        final cFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
+        final cStroke = obj.strokeColor != null ? (Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = 2.0) : objectPaint;
+        canvas.drawOval(obj.rect, cFill);
+        canvas.drawOval(obj.rect, cStroke);
       } else if (obj is DiamondObject) {
-        canvas.drawPath(obj.path, fillPaint);
-        canvas.drawPath(obj.path, objectPaint);
+        final dFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
+        final dStroke = obj.strokeColor != null ? (Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = 2.0) : objectPaint;
+        canvas.drawPath(obj.path, dFill);
+        canvas.drawPath(obj.path, dStroke);
       } else if (obj is ArrowObject) {
         final arrowPaint = Paint()
           ..color = const ui.Color(0xFF90CAF9)

@@ -47,3 +47,4 @@ export 'package:flow_draw/src/ui/shared/prompt_to_workflow.dart';
 export 'package:flow_draw/src/ui/shared/color_picker.dart';
 export 'package:flow_draw/src/ui/shared/snap_guides.dart';
 export 'package:flow_draw/src/ui/shared/floating_toolbar.dart';
+export 'package:flow_draw/src/ui/shared/keyboard_shortcuts.dart';

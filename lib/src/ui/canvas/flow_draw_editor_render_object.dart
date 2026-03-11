@@ -9,6 +9,7 @@ import 'package:flow_draw/src/core/utils/renderbox.dart';
 import 'package:flow_draw/src/core/utils/spatial_hash_grid.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flow_draw/src/ui/nodes/node_widget.dart';
+import 'package:flow_draw/src/ui/shared/snap_guides.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
@@ -42,6 +43,7 @@ class FlowDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
   final FlNodeHeaderBuilder? headerBuilder;
   final FlNodeBuilder? nodeBuilder;
   final Offset? snapHandlePosition;
+  final List<SnapGuide> snapGuides;
 
   FlowDrawEditorRenderObjectWidget({
     super.key,
@@ -54,6 +56,7 @@ class FlowDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
     this.headerBuilder,
     this.nodeBuilder,
     this.snapHandlePosition,
+    this.snapGuides = const [],
   }) : super(
          children: canvasState.nodes.values.map((node) {
            node.state.isSelected = selectionState.selectedNodeIds.contains(
@@ -78,6 +81,7 @@ class FlowDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
       nodesData: _getNodeDrawData(),
       tempDrawingObject: tempDrawingObject,
       snapHandlePosition: snapHandlePosition,
+      snapGuides: snapGuides,
     );
   }
 
@@ -93,6 +97,7 @@ class FlowDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
       ..selectionArea = selectionArea
       ..tempDrawingObject = tempDrawingObject
       ..snapHandlePosition = snapHandlePosition
+      ..snapGuides = snapGuides
       ..updateNodes(_getNodeDrawData());
   }
 
@@ -122,11 +127,13 @@ class FlowDrawEditorRenderBox extends RenderBox
     required List<NodeDiffCheckData> nodesData,
     required this.tempDrawingObject,
     this.snapHandlePosition,
+    List<SnapGuide> snapGuides = const [],
   }) : _style = style,
        _gridShader = gridShader,
        _canvasState = canvasState,
        _selectionState = selectionState,
-       _selectionArea = selectionArea {
+       _selectionArea = selectionArea,
+       _snapGuides = snapGuides {
     _loadGridShader();
     updateNodes(nodesData);
   }
@@ -155,6 +162,16 @@ class FlowDrawEditorRenderBox extends RenderBox
   }
 
   Offset? snapHandlePosition;
+
+  List<SnapGuide> _snapGuides;
+
+  List<SnapGuide> get snapGuides => _snapGuides;
+
+  set snapGuides(List<SnapGuide> value) {
+    if (identical(_snapGuides, value)) return;
+    _snapGuides = value;
+    markNeedsPaint();
+  }
 
   FlowDrawEditorStyle _style;
 
@@ -286,6 +303,7 @@ class FlowDrawEditorRenderBox extends RenderBox
     _paintDrawingObjects(context.canvas);
     _paintSnapHandle(context.canvas);
     _paintTempDrawingObject(context.canvas);
+    _paintSnapGuides(context.canvas, viewport);
     _paintSelectionArea(context.canvas, viewport);
 
     _transformMatrixDirty = false;
@@ -374,6 +392,10 @@ class FlowDrawEditorRenderBox extends RenderBox
     if (snapHandlePosition == null) return;
     final paint = Paint()..color = Colors.cyan.withOpacity(0.8);
     canvas.drawCircle(snapHandlePosition!, 6.0 / zoom, paint);
+  }
+
+  void _paintSnapGuides(Canvas canvas, Rect viewport) {
+    AlignmentGuide.paintGuides(canvas, _snapGuides, viewport);
   }
 
   double get dpr => WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;

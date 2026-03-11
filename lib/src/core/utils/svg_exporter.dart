@@ -115,10 +115,13 @@ class SvgExporter {
 
     if (rotOpen.isNotEmpty) svg.add(rotOpen);
 
+    final fill = obj.fillColor != null ? _colorToHex(obj.fillColor!) : 'none';
+    final stroke = obj.strokeColor != null ? _colorToHex(obj.strokeColor!) : _stroke;
+    final radius = obj.borderRadius > 0 ? obj.borderRadius : _cornerRadius;
     svg.add('  <rect x="${rect.left}" y="${rect.top}" '
         'width="${rect.width}" height="${rect.height}" '
-        'rx="$_cornerRadius" ry="$_cornerRadius" '
-        'fill="none" stroke="$_stroke" stroke-width="$_defaultStrokeWidth"'
+        'rx="$radius" ry="$radius" '
+        'fill="$fill" stroke="$stroke" stroke-width="$_defaultStrokeWidth"'
         '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
         '/>');
 
@@ -624,5 +627,15 @@ class SvgExporter {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&apos;');
+  }
+
+  /// Converts a Color to an SVG hex color string.
+  static String _colorToHex(Color color) {
+    final r = (color.r * 255).round().clamp(0, 255);
+    final g = (color.g * 255).round().clamp(0, 255);
+    final b = (color.b * 255).round().clamp(0, 255);
+    return '#${r.toRadixString(16).padLeft(2, '0')}'
+        '${g.toRadixString(16).padLeft(2, '0')}'
+        '${b.toRadixString(16).padLeft(2, '0')}';
   }
 }

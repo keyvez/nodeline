@@ -12,6 +12,7 @@ import 'package:flow_draw/src/core/utils/renderbox.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flow_draw/src/ui/canvas/flow_draw_editor_render_object.dart';
 import 'package:flow_draw/src/ui/shared/context_menu.dart';
+import 'package:flow_draw/src/ui/shared/snap_guides.dart';
 import 'package:flow_draw/src/ui/shared/improved_listener.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -100,6 +101,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   Rect? _originalResizeRect;
   SnapPoint? _hoveredSnapPoint;
   SnapPoint? _startSnapPoint;
+  List<SnapGuide> _activeSnapGuides = const [];
 
   int _activePointers = 0;
   double _scaleStartZoom = 1.0;
@@ -127,6 +129,33 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     _shapeTextController?.dispose();
     _shapeTextFocusNode?.dispose();
     super.dispose();
+  }
+
+  /// Computes the bounding rect of all selected objects (drawing objects and
+  /// nodes) in world coordinates. Returns null if no objects are selected.
+  Rect? _getSelectionBoundingRect(Set<String> selectedIds) {
+    Rect? bounds;
+    final canvasState = _canvasBloc.state;
+
+    for (final id in selectedIds) {
+      Rect? objRect;
+
+      final drawingObj = canvasState.drawingObjects[id];
+      if (drawingObj != null) {
+        objRect = drawingObj.rect;
+      } else {
+        final node = canvasState.nodes[id];
+        if (node != null) {
+          objRect = getNodeBoundsInWorld(node);
+        }
+      }
+
+      if (objRect != null) {
+        bounds = bounds == null ? objRect : bounds.expandToInclude(objRect);
+      }
+    }
+
+    return bounds;
   }
 
   void _updateSnapHandle(Offset worldPos) {
@@ -508,14 +537,77 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       _handleObjectResizing(worldPos);
     } else if (_isDraggingSelection) {
       final dragDelta = event.delta / _canvasBloc.state.viewportZoom;
-      _canvasBloc.add(
-        ObjectsDragged(
-          _selectionBloc.state.selectedNodeIds.union(
-            _selectionBloc.state.selectedDrawingObjectIds,
-          ),
-          dragDelta,
-        ),
+      final selectedIds = _selectionBloc.state.selectedNodeIds.union(
+        _selectionBloc.state.selectedDrawingObjectIds,
       );
+
+      // Compute bounding rect of all selected objects for snap guide detection.
+      final movingRect = _getSelectionBoundingRect(selectedIds);
+      if (movingRect != null) {
+        // Build node rects so nodes also serve as snap references.
+        final nodeRects = <String, Rect>{};
+        for (final node in _canvasBloc.state.nodes.values) {
+          if (selectedIds.contains(node.id)) continue;
+          final bounds = getNodeBoundsInWorld(node);
+          if (bounds != null) nodeRects[node.id] = bounds;
+        }
+
+        final guides = AlignmentGuide.findGuides(
+          movingRect,
+          _canvasBloc.state.drawingObjects,
+          selectedIds,
+          additionalRects: nodeRects,
+        );
+
+        // Find the closest snap per axis and apply correction.
+        double? bestDx;
+        double bestDxAbs = double.infinity;
+        double? bestDy;
+        double bestDyAbs = double.infinity;
+        final appliedGuides = <SnapGuide>[];
+
+        for (final guide in guides) {
+          if (guide.axis == SnapGuideAxis.vertical) {
+            final leftDiff = movingRect.left - guide.position;
+            final rightDiff = movingRect.right - guide.position;
+            final centerDiff = movingRect.center.dx - guide.position;
+            final minDiff = [leftDiff, rightDiff, centerDiff]
+                .reduce((a, b) => a.abs() < b.abs() ? a : b);
+            if (minDiff.abs() < bestDxAbs) {
+              bestDxAbs = minDiff.abs();
+              bestDx = minDiff;
+            }
+          } else {
+            final topDiff = movingRect.top - guide.position;
+            final bottomDiff = movingRect.bottom - guide.position;
+            final centerDiff = movingRect.center.dy - guide.position;
+            final minDiff = [topDiff, bottomDiff, centerDiff]
+                .reduce((a, b) => a.abs() < b.abs() ? a : b);
+            if (minDiff.abs() < bestDyAbs) {
+              bestDyAbs = minDiff.abs();
+              bestDy = minDiff;
+            }
+          }
+        }
+
+        var snappedDelta = dragDelta;
+        if (bestDx != null) snappedDelta = Offset(snappedDelta.dx - bestDx, snappedDelta.dy);
+        if (bestDy != null) snappedDelta = Offset(snappedDelta.dx, snappedDelta.dy - bestDy);
+
+        // Only show guides whose axis was actually snapped.
+        for (final guide in guides) {
+          if (guide.axis == SnapGuideAxis.vertical && bestDx != null) {
+            appliedGuides.add(guide);
+          } else if (guide.axis == SnapGuideAxis.horizontal && bestDy != null) {
+            appliedGuides.add(guide);
+          }
+        }
+
+        setState(() => _activeSnapGuides = appliedGuides);
+        _canvasBloc.add(ObjectsDragged(selectedIds, snappedDelta));
+      } else {
+        _canvasBloc.add(ObjectsDragged(selectedIds, dragDelta));
+      }
       _totalDragDelta += event.delta.distance;
     } else if (_isAreaSelecting) {
       setState(
@@ -558,6 +650,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     _isDraggingSelection = false;
     _isResizing = (objectId: '', handle: Handle.none);
     _originalResizeRect = null;
+    if (_activeSnapGuides.isNotEmpty) {
+      setState(() => _activeSnapGuides = const []);
+    }
   }
 
   void _onPointerCancel(PointerCancelEvent event) {
@@ -570,6 +665,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       _isResizing = (objectId: '', handle: Handle.none);
       _isDraggingSelection = false;
       _isRotating = false;
+      _activeSnapGuides = const [];
     });
   }
 
@@ -1919,6 +2015,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                           headerBuilder: widget.headerBuilder,
                           nodeBuilder: widget.nodeBuilder,
                           snapHandlePosition: _hoveredSnapPoint?.worldPosition,
+                          snapGuides: _activeSnapGuides,
                         ),
                   ),
                 );

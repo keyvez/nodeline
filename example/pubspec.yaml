@@ -39,6 +39,7 @@ dependencies:
     path: ../
   flan_flutter:
     path: /Users/gaurav/dev/flan_mcp/packages/flan_flutter
+  flutter_bloc: ^9.1.1
   shared_preferences: ^2.5.4
 
 dev_dependencies:

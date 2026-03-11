@@ -36,11 +36,15 @@ class AlignmentGuide {
   static const double snapThreshold = 8.0;
 
   /// Finds snap guides for a moving rect relative to other objects.
+  ///
+  /// [additionalRects] allows passing extra reference rects (e.g. node bounds)
+  /// that are not part of the [allObjects] drawing-object map.
   static List<SnapGuide> findGuides(
     Rect movingRect,
     Map<String, DrawingObject> allObjects,
-    Set<String> excludeIds,
-  ) {
+    Set<String> excludeIds, {
+    Map<String, Rect> additionalRects = const {},
+  }) {
     final guides = <SnapGuide>[];
     final movingCx = movingRect.center.dx;
     final movingCy = movingRect.center.dy;
@@ -52,34 +56,38 @@ class AlignmentGuide {
         continue;
       }
 
-      final ref = obj.rect;
+      _checkRect(movingRect, movingCx, movingCy, obj.rect, entry.key, guides);
+    }
 
-      // Vertical guides (x alignment)
-      _checkSnap(movingRect.left, ref.left, SnapGuideAxis.vertical,
-          entry.key, guides);
-      _checkSnap(movingRect.right, ref.right, SnapGuideAxis.vertical,
-          entry.key, guides);
-      _checkSnap(movingCx, ref.center.dx, SnapGuideAxis.vertical,
-          entry.key, guides);
-      _checkSnap(movingRect.left, ref.right, SnapGuideAxis.vertical,
-          entry.key, guides);
-      _checkSnap(movingRect.right, ref.left, SnapGuideAxis.vertical,
-          entry.key, guides);
-
-      // Horizontal guides (y alignment)
-      _checkSnap(movingRect.top, ref.top, SnapGuideAxis.horizontal,
-          entry.key, guides);
-      _checkSnap(movingRect.bottom, ref.bottom, SnapGuideAxis.horizontal,
-          entry.key, guides);
-      _checkSnap(movingCy, ref.center.dy, SnapGuideAxis.horizontal,
-          entry.key, guides);
-      _checkSnap(movingRect.top, ref.bottom, SnapGuideAxis.horizontal,
-          entry.key, guides);
-      _checkSnap(movingRect.bottom, ref.top, SnapGuideAxis.horizontal,
-          entry.key, guides);
+    for (final entry in additionalRects.entries) {
+      if (excludeIds.contains(entry.key)) continue;
+      _checkRect(movingRect, movingCx, movingCy, entry.value, entry.key, guides);
     }
 
     return guides;
+  }
+
+  static void _checkRect(
+    Rect movingRect,
+    double movingCx,
+    double movingCy,
+    Rect ref,
+    String refId,
+    List<SnapGuide> guides,
+  ) {
+    // Vertical guides (x alignment)
+    _checkSnap(movingRect.left, ref.left, SnapGuideAxis.vertical, refId, guides);
+    _checkSnap(movingRect.right, ref.right, SnapGuideAxis.vertical, refId, guides);
+    _checkSnap(movingCx, ref.center.dx, SnapGuideAxis.vertical, refId, guides);
+    _checkSnap(movingRect.left, ref.right, SnapGuideAxis.vertical, refId, guides);
+    _checkSnap(movingRect.right, ref.left, SnapGuideAxis.vertical, refId, guides);
+
+    // Horizontal guides (y alignment)
+    _checkSnap(movingRect.top, ref.top, SnapGuideAxis.horizontal, refId, guides);
+    _checkSnap(movingRect.bottom, ref.bottom, SnapGuideAxis.horizontal, refId, guides);
+    _checkSnap(movingCy, ref.center.dy, SnapGuideAxis.horizontal, refId, guides);
+    _checkSnap(movingRect.top, ref.bottom, SnapGuideAxis.horizontal, refId, guides);
+    _checkSnap(movingRect.bottom, ref.top, SnapGuideAxis.horizontal, refId, guides);
   }
 
   static void _checkSnap(

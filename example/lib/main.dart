@@ -7,6 +7,7 @@ import 'package:flan_flutter/flan_flutter.dart';
 import 'package:flow_draw/flow_draw.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _storageKey = 'flow_draw_project';
@@ -51,6 +52,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String? _currentFileName;
   List<String> _savedFileNames = [];
   bool _isWorkflowMode = false;
+  bool _showShortcuts = false;
 
   @override
   void initState() {
@@ -353,6 +355,44 @@ start -> outputPhase
     _autoSaveTimer = Timer(const Duration(seconds: 3), _saveProject);
   }
 
+  Future<void> _exportPng(BuildContext blocContext) async {
+    final canvasBloc = blocContext.read<CanvasBloc>();
+    final objects = canvasBloc.state.drawingObjects;
+    if (objects.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Nothing to export')),
+        );
+      }
+      return;
+    }
+    try {
+      final pngBytes = await PngExporter.exportPng(objects);
+      if (pngBytes == null) return;
+      final home = Platform.environment['HOME'] ?? '';
+      final file = File('$home/Downloads/fldraw_export.png');
+      await file.writeAsBytes(pngBytes);
+      if (Platform.isMacOS) {
+        await Process.run('open', [file.path]);
+      } else if (Platform.isLinux) {
+        await Process.run('xdg-open', [file.path]);
+      } else if (Platform.isWindows) {
+        await Process.run('cmd', ['/c', 'start', '', file.path]);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('PNG saved to Downloads')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to export PNG: $e')),
+        );
+      }
+    }
+  }
+
   Widget _buildDrawer() {
     return Drawer(
       child: SafeArea(
@@ -470,6 +510,8 @@ start -> outputPhase
                 _saveCurrentFile,
             const SingleActivator(LogicalKeyboardKey.keyS, control: true):
                 _saveCurrentFile,
+            const SingleActivator(LogicalKeyboardKey.question):
+                () => setState(() => _showShortcuts = !_showShortcuts),
           },
           child: Focus(
             autofocus: true,
@@ -552,6 +594,50 @@ start -> outputPhase
                       ],
                     ),
                   ),
+                  // PNG export button (top-right)
+                  Positioned(
+                    top: 32,
+                    right: 16,
+                    child: Builder(
+                      builder: (blocContext) => Material(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(8),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () => _exportPng(blocContext),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.image_outlined,
+                                    color: Colors.white70, size: 16),
+                                SizedBox(width: 6),
+                                Text('PNG',
+                                    style: TextStyle(
+                                        color: Colors.white70, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Minimap (bottom-left)
+                  const Positioned(
+                    bottom: 16,
+                    left: 16,
+                    child: MiniMap(),
+                  ),
+                  // Shortcut overlay
+                  if (_showShortcuts)
+                    Positioned.fill(
+                      child: ShortcutOverlay(
+                        onClose: () =>
+                            setState(() => _showShortcuts = false),
+                      ),
+                    ),
                 ],
               ),
             ),
