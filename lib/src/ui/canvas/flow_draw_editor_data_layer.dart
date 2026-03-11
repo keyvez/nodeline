@@ -402,10 +402,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     }
 
     _activePointers++;
-    // Ensure keyboard shortcuts work by requesting focus on every click
-    if (!_canvasFocusNode.hasFocus) {
-      _canvasFocusNode.requestFocus();
-    }
 
     if (_activePointers > 1) {
       setState(() {
@@ -425,7 +421,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     );
     if (worldPos == null) return;
 
-    // Double-click detection: double-click on an object → enter text editing
+    // Double-click detection: check BEFORE requesting canvas focus so
+    // the text editor can acquire focus without contention.
     final now = DateTime.now();
     final isDoubleClick = _lastClickTime != null &&
         _lastClickPosition != null &&
@@ -437,6 +434,12 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     if (isDoubleClick) {
       _onDoubleClick();
       return;
+    }
+
+    // Request canvas focus for keyboard shortcuts only when NOT entering
+    // text editing (double-click already returned above).
+    if (!_canvasFocusNode.hasFocus) {
+      _canvasFocusNode.requestFocus();
     }
 
     final tool = _toolBloc.state.activeTool;
@@ -1826,6 +1829,12 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       _editingShapeObject = shapeObject;
       if (shapeObject is RectangleObject) shapeObject.isEditing = true;
       if (shapeObject is CircleObject) shapeObject.isEditing = true;
+    });
+
+    // Explicitly request focus for the text field after the next frame
+    // so the widget tree has rebuilt with the TextField present.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _shapeTextFocusNode?.requestFocus();
     });
   }
 

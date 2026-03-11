@@ -102,7 +102,7 @@ class RectangleObject extends DrawingObject {
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle, bool? isEditing}) {
     return RectangleObject(
       id: id,
       rect: rect ?? _rect,
@@ -111,6 +111,7 @@ class RectangleObject extends DrawingObject {
       text: text,
       textStyle: textStyle,
       lineStyle: lineStyle ?? this.lineStyle,
+      isEditing: isEditing ?? this.isEditing,
     );
   }
 }
@@ -166,7 +167,7 @@ class CircleObject extends DrawingObject {
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle, bool? isEditing}) {
     return CircleObject(
       id: id,
       rect: rect ?? _rect,
@@ -175,6 +176,7 @@ class CircleObject extends DrawingObject {
       text: text,
       textStyle: textStyle,
       lineStyle: lineStyle ?? this.lineStyle,
+      isEditing: isEditing ?? this.isEditing,
     );
   }
 }
