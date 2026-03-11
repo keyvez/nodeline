@@ -280,6 +280,66 @@ void main() {
         anyFileInDirContains(testDir, 'parallelogram'),
   );
 
+  // ---- INTEGRATION & DEPTH (0-20 pts) ----
+  print('');
+  print('--- Integration & Depth (0-20 pts) ---');
+
+  check(
+    'Keyboard shortcuts help/overlay',
+    2,
+    anyFileInDirContains(libDir, 'ShortcutOverlay') ||
+        anyFileInDirContains(libDir, 'KeyboardShortcuts') ||
+        anyFileInDirContains(libDir, 'shortcutsHelp') ||
+        anyFileInDirContains(libDir, 'HotkeyHelp'),
+  );
+
+  check(
+    'Undo/redo stack with descriptions',
+    2,
+    anyFileInDirContains(libDir, 'UndoStack') ||
+        anyFileInDirContainsRegex(libDir, r'undoStack.*description|undo.*history|_undoStack'),
+  );
+
+  check(
+    'Object fill color support',
+    3,
+    fileContainsRegex(modelsFile, r'fillColor|fill_color|backgroundColor.*Color') &&
+        fileContainsRegex(renderObjectFile, r'fillColor|fill.*color.*paint'),
+  );
+
+  check(
+    'Object stroke color support',
+    3,
+    fileContainsRegex(modelsFile, r'strokeColor|stroke_color|borderColor.*Color') &&
+        fileContainsRegex(renderObjectFile, r'strokeColor|stroke.*color.*paint'),
+  );
+
+  check(
+    'Shape text editing inline',
+    2,
+    fileContainsRegex(dataLayerFile, r'_beginShapeTextEditing|shapeTextEditing|isEditing.*true'),
+  );
+
+  check(
+    'Clipboard copy/paste drawing objects',
+    3,
+    fileContainsRegex(blocFile, r'clipboard|_clipboard|copyBuffer|pasteBuffer') ||
+        fileContainsRegex(dataLayerFile, r'clipboard|_copiedObjects|pasteObjects'),
+  );
+
+  check(
+    'JSON project save/load',
+    2,
+    anyFileInDirContains(libDir, 'saveProject') ||
+        anyFileInDirContains(libDir, 'loadProject'),
+  );
+
+  check(
+    'Mermaid import with arrow labels',
+    3,
+    fileContainsRegex('$libDir/core/mermaid/mermaid_importer.dart', r'label|arrowLabel|edgeLabel'),
+  );
+
   // ---- SUMMARY ----
   print('');
   print('=== RESULTS ===');

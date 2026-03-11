@@ -448,38 +448,44 @@ class FlowDrawEditorRenderBox extends RenderBox
               ..paint(canvas, obj.rect.topLeft);
           }
         } else if (obj is CircleObject) {
-          canvas.drawOval(obj.rect, fillPaint);
+          final circleFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
+          final circleStroke = obj.strokeColor != null ? (Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = objectPaint.strokeWidth) : objectPaint;
+          canvas.drawOval(obj.rect, circleFill);
           if (obj.lineStyle == LineStyle.solid) {
-            canvas.drawOval(obj.rect, objectPaint);
+            canvas.drawOval(obj.rect, circleStroke);
           } else {
             final ovalPath = Path()..addOval(obj.rect);
-            _paintStyledPath(canvas, ovalPath, objectPaint, obj.lineStyle, seed: obj.id.hashCode);
+            _paintStyledPath(canvas, ovalPath, circleStroke, obj.lineStyle, seed: obj.id.hashCode);
           }
           if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
             _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle);
           }
         } else if (obj is RectangleObject) {
           final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-          final objCornerRadius = 10.0 * dpr / zoom;
+          final objCornerRadius = obj.borderRadius > 0 ? obj.borderRadius : 10.0 * dpr / zoom;
           final rrect =
           RRect.fromRectAndRadius(obj.rect, Radius.circular(objCornerRadius));
-          canvas.drawRRect(rrect, fillPaint);
+          final rectFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
+          final rectStroke = obj.strokeColor != null ? (Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = objectPaint.strokeWidth) : objectPaint;
+          canvas.drawRRect(rrect, rectFill);
           if (obj.lineStyle == LineStyle.solid) {
-            canvas.drawRRect(rrect, objectPaint);
+            canvas.drawRRect(rrect, rectStroke);
           } else {
             final rrectPath = Path()..addRRect(rrect);
-            _paintStyledPath(canvas, rrectPath, objectPaint, obj.lineStyle, seed: obj.id.hashCode);
+            _paintStyledPath(canvas, rrectPath, rectStroke, obj.lineStyle, seed: obj.id.hashCode);
           }
           if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
             _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle);
           }
         } else if (obj is DiamondObject) {
           final diamondPath = obj.path;
-          canvas.drawPath(diamondPath, fillPaint);
+          final diaFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
+          final diaStroke = obj.strokeColor != null ? (Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = objectPaint.strokeWidth) : objectPaint;
+          canvas.drawPath(diamondPath, diaFill);
           if (obj.lineStyle == LineStyle.solid) {
-            canvas.drawPath(diamondPath, objectPaint);
+            canvas.drawPath(diamondPath, diaStroke);
           } else {
-            _paintStyledPath(canvas, diamondPath, objectPaint, obj.lineStyle, seed: obj.id.hashCode);
+            _paintStyledPath(canvas, diamondPath, diaStroke, obj.lineStyle, seed: obj.id.hashCode);
           }
           if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
             _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle);

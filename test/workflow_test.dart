@@ -509,4 +509,80 @@ flowchart TD
       expect(guides, isEmpty);
     });
   });
+
+  group('Object fillColor and strokeColor', () {
+    test('RectangleObject supports fill and stroke colors', () {
+      final rect = RectangleObject(
+        id: 'color-1',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+        fillColor: const Color(0xFFFF0000),
+        strokeColor: const Color(0xFF00FF00),
+      );
+      expect(rect.fillColor, const Color(0xFFFF0000));
+      expect(rect.strokeColor, const Color(0xFF00FF00));
+    });
+
+    test('RectangleObject colors round-trip through JSON', () {
+      final original = RectangleObject(
+        id: 'color-2',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+        fillColor: const Color(0xFF0000FF),
+        strokeColor: const Color(0xFFFFFF00),
+      );
+      final json = original.toJson();
+      expect(json['fillColor'], isNotNull);
+      expect(json['strokeColor'], isNotNull);
+
+      final restored = RectangleObject.fromJson(json);
+      expect(restored.fillColor, const Color(0xFF0000FF));
+      expect(restored.strokeColor, const Color(0xFFFFFF00));
+    });
+
+    test('CircleObject supports fill and stroke colors', () {
+      final circle = CircleObject(
+        id: 'color-3',
+        rect: Rect.fromLTWH(0, 0, 100, 100),
+        fillColor: const Color(0xFFFF00FF),
+      );
+      expect(circle.fillColor, const Color(0xFFFF00FF));
+      expect(circle.strokeColor, isNull);
+    });
+
+    test('DiamondObject supports fill and stroke colors', () {
+      final diamond = DiamondObject(
+        id: 'color-4',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+        fillColor: const Color(0xFF00FFFF),
+        strokeColor: const Color(0xFFFF8800),
+      );
+      expect(diamond.fillColor, const Color(0xFF00FFFF));
+      expect(diamond.strokeColor, const Color(0xFFFF8800));
+
+      final json = diamond.toJson();
+      final restored = DiamondObject.fromJson(json);
+      expect(restored.fillColor, const Color(0xFF00FFFF));
+      expect(restored.strokeColor, const Color(0xFFFF8800));
+    });
+
+    test('null colors are omitted from JSON', () {
+      final rect = RectangleObject(
+        id: 'color-5',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+      );
+      final json = rect.toJson();
+      expect(json.containsKey('fillColor'), false);
+      expect(json.containsKey('strokeColor'), false);
+    });
+
+    test('copyWith can update colors', () {
+      final rect = RectangleObject(
+        id: 'color-6',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+      );
+      final copy = rect.copyWith(
+        fillColor: const Color(0xFFABCDEF),
+      );
+      expect((copy as RectangleObject).fillColor, const Color(0xFFABCDEF));
+    });
+  });
 }

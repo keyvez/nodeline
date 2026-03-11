@@ -135,7 +135,13 @@ class RectangleObject extends DrawingObject {
   /// When > 0, the rectangle renders with rounded corners.
   final double borderRadius;
 
-  RectangleObject({required super.id, required Rect rect, super.isSelected, super.angle, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid, this.borderRadius = 0.0})
+  /// Custom fill color. When null, the default canvas fill is used.
+  final Color? fillColor;
+
+  /// Custom stroke/border color. When null, the default stroke is used.
+  final Color? strokeColor;
+
+  RectangleObject({required super.id, required Rect rect, super.isSelected, super.angle, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid, this.borderRadius = 0.0, this.fillColor, this.strokeColor})
     : _rect = rect;
 
   @override
@@ -157,6 +163,8 @@ class RectangleObject extends DrawingObject {
     },
     'lineStyle': lineStyle.name,
     if (borderRadius > 0) 'borderRadius': borderRadius,
+    if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
+    if (strokeColor != null) 'strokeColor': strokeColor!.toARGB32(),
   };
 
   factory RectangleObject.fromJson(Map<String, dynamic> json) {
@@ -177,11 +185,13 @@ class RectangleObject extends DrawingObject {
       textStyle: style,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
       borderRadius: (json['borderRadius'] as num?)?.toDouble() ?? 0.0,
+      fillColor: json['fillColor'] != null ? Color(json['fillColor'] as int) : null,
+      strokeColor: json['strokeColor'] != null ? Color(json['strokeColor'] as int) : null,
     );
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle, bool? isEditing, double? borderRadius}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle, bool? isEditing, double? borderRadius, Color? fillColor, Color? strokeColor}) {
     return RectangleObject(
       id: id,
       rect: rect ?? _rect,
@@ -192,6 +202,8 @@ class RectangleObject extends DrawingObject {
       lineStyle: lineStyle ?? this.lineStyle,
       borderRadius: borderRadius ?? this.borderRadius,
       isEditing: isEditing ?? this.isEditing,
+      fillColor: fillColor ?? this.fillColor,
+      strokeColor: strokeColor ?? this.strokeColor,
     );
   }
 }
@@ -202,8 +214,10 @@ class CircleObject extends DrawingObject {
   TextStyle? textStyle;
   bool isEditing;
   final LineStyle lineStyle;
+  final Color? fillColor;
+  final Color? strokeColor;
 
-  CircleObject({required super.id, required Rect rect, super.isSelected, super.angle, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid})
+  CircleObject({required super.id, required Rect rect, super.isSelected, super.angle, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid, this.fillColor, this.strokeColor})
     : _rect = rect;
 
   @override
@@ -224,6 +238,8 @@ class CircleObject extends DrawingObject {
       'color': textStyle!.color?.value,
     },
     'lineStyle': lineStyle.name,
+    if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
+    if (strokeColor != null) 'strokeColor': strokeColor!.toARGB32(),
   };
 
   factory CircleObject.fromJson(Map<String, dynamic> json) {
@@ -243,11 +259,13 @@ class CircleObject extends DrawingObject {
       text: json['text'] as String?,
       textStyle: style,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
+      fillColor: json['fillColor'] != null ? Color(json['fillColor'] as int) : null,
+      strokeColor: json['strokeColor'] != null ? Color(json['strokeColor'] as int) : null,
     );
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle, bool? isEditing}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle, bool? isEditing, Color? fillColor, Color? strokeColor}) {
     return CircleObject(
       id: id,
       rect: rect ?? _rect,
@@ -257,6 +275,8 @@ class CircleObject extends DrawingObject {
       textStyle: textStyle,
       lineStyle: lineStyle ?? this.lineStyle,
       isEditing: isEditing ?? this.isEditing,
+      fillColor: fillColor ?? this.fillColor,
+      strokeColor: strokeColor ?? this.strokeColor,
     );
   }
 }
@@ -267,6 +287,8 @@ class DiamondObject extends DrawingObject {
   TextStyle? textStyle;
   bool isEditing;
   final LineStyle lineStyle;
+  final Color? fillColor;
+  final Color? strokeColor;
 
   DiamondObject({
     required super.id,
@@ -277,6 +299,8 @@ class DiamondObject extends DrawingObject {
     this.textStyle,
     this.isEditing = false,
     this.lineStyle = LineStyle.solid,
+    this.fillColor,
+    this.strokeColor,
   }) : _rect = rect;
 
   @override
@@ -297,6 +321,8 @@ class DiamondObject extends DrawingObject {
       'color': textStyle!.color?.value,
     },
     'lineStyle': lineStyle.name,
+    if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
+    if (strokeColor != null) 'strokeColor': strokeColor!.toARGB32(),
   };
 
   static DiamondObject fromJson(Map<String, dynamic> json) {
@@ -318,6 +344,8 @@ class DiamondObject extends DrawingObject {
       lineStyle: json['lineStyle'] != null
           ? LineStyle.values.byName(json['lineStyle'])
           : LineStyle.solid,
+      fillColor: json['fillColor'] != null ? Color(json['fillColor'] as int) : null,
+      strokeColor: json['strokeColor'] != null ? Color(json['strokeColor'] as int) : null,
     );
   }
 
@@ -340,6 +368,8 @@ class DiamondObject extends DrawingObject {
     double? angle,
     LineStyle? lineStyle,
     bool? isEditing,
+    Color? fillColor,
+    Color? strokeColor,
   }) {
     return DiamondObject(
       id: id,
@@ -350,6 +380,8 @@ class DiamondObject extends DrawingObject {
       textStyle: textStyle,
       lineStyle: lineStyle ?? this.lineStyle,
       isEditing: isEditing ?? this.isEditing,
+      fillColor: fillColor ?? this.fillColor,
+      strokeColor: strokeColor ?? this.strokeColor,
     );
   }
 }
