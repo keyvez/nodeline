@@ -59,6 +59,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         ObjectColorsChanged e => _onObjectColorsChanged(e, emit),
         ObjectDuplicatedWithConnection e => _onObjectDuplicatedWithConnection(e, emit),
         GridToggled e => _onGridToggled(e, emit),
+        CrossingsMinimized e => _onCrossingsMinimized(e, emit),
       });
     });
   }
@@ -1126,5 +1127,204 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       ..[newArrow.id] = newArrow;
 
     emit(state.copyWith(drawingObjects: newDrawingObjects));
+  }
+
+  // ── Crossing Minimization ──────────────────────────────────────────────────
+
+  void _onCrossingsMinimized(
+      CrossingsMinimized event, Emitter<CanvasState> emit) {
+    _pushToUndoStack(event, emit, state);
+
+    // Collect all ArrowObjects in the selection (or all if selection includes shapes).
+    final arrows = <ArrowObject>[];
+    for (final id in event.selectedIds) {
+      final obj = state.drawingObjects[id];
+      if (obj is ArrowObject) arrows.add(obj);
+    }
+
+    // If no arrows were explicitly selected, fall back to ALL arrows on canvas.
+    final workingArrows = arrows.isNotEmpty
+        ? arrows
+        : state.drawingObjects.values.whereType<ArrowObject>().toList();
+
+    if (workingArrows.isEmpty) return;
+
+    // Build a lookup for all shape rects so we can find connection ports.
+    final shapeRects = <String, Rect>{};
+    for (final obj in state.drawingObjects.values) {
+      if (obj is! ArrowObject && obj is! LineObject && obj is! PencilStrokeObject) {
+        shapeRects[obj.id] = obj.rect;
+      }
+    }
+
+    // Build obstacle list for re-routing.
+    final obstacles = shapeRects.values.toList();
+
+    final newDrawingObjects = Map<String, DrawingObject>.from(state.drawingObjects);
+
+    if (event.changeConnectionPoints) {
+      // ── Mode A: reassign connection ports to minimize crossings ─────────
+      // Score = crossings * 10 + portSharingPenalty, so crossing reduction
+      // is preferred but ties are broken by avoiding shared ports.
+
+      // The four cardinal port relative positions.
+      const portPositions = [
+        Offset(0.5, 0.0), // top
+        Offset(1.0, 0.5), // right
+        Offset(0.5, 1.0), // bottom
+        Offset(0.0, 0.5), // left
+      ];
+
+      final bestArrows = List<ArrowObject>.from(workingArrows);
+
+      // Greedily optimize each arrow one by one.
+      for (int i = 0; i < bestArrows.length; i++) {
+        final arrow = bestArrows[i];
+        final startRect = arrow.startAttachment != null
+            ? shapeRects[arrow.startAttachment!.objectId]
+            : null;
+        final endRect = arrow.endAttachment != null
+            ? shapeRects[arrow.endAttachment!.objectId]
+            : null;
+
+        if (startRect == null || endRect == null) continue;
+
+        // Build a map of (objectId, relativePosition) → count of arrows
+        // already using that port, excluding arrow i.
+        final portUsage = <(String, Offset), int>{};
+        for (int j = 0; j < bestArrows.length; j++) {
+          if (j == i) continue;
+          final a = bestArrows[j];
+          if (a.startAttachment != null) {
+            final key = (a.startAttachment!.objectId, a.startAttachment!.relativePosition);
+            portUsage[key] = (portUsage[key] ?? 0) + 1;
+          }
+          if (a.endAttachment != null) {
+            final key = (a.endAttachment!.objectId, a.endAttachment!.relativePosition);
+            portUsage[key] = (portUsage[key] ?? 0) + 1;
+          }
+        }
+
+        int _score(ArrowObject a, int selfIdx) {
+          final crossings = _countCrossingsForArrow(a, bestArrows, selfIdx);
+          final startKey = (a.startAttachment!.objectId, a.startAttachment!.relativePosition);
+          final endKey = (a.endAttachment!.objectId, a.endAttachment!.relativePosition);
+          final sharing = (portUsage[startKey] ?? 0) + (portUsage[endKey] ?? 0);
+          return crossings * 10 + sharing;
+        }
+
+        ArrowObject best = bestArrows[i];
+        bestArrows[i] = best; // ensure self is in list for score baseline
+        int bestScore = _score(best, i);
+
+        for (final startRel in portPositions) {
+          for (final endRel in portPositions) {
+            final startPt = Offset(
+              startRect.left + startRel.dx * startRect.width,
+              startRect.top + startRel.dy * startRect.height,
+            );
+            final endPt = Offset(
+              endRect.left + endRel.dx * endRect.width,
+              endRect.top + endRel.dy * endRect.height,
+            );
+
+            final waypoints = arrow.pathType == LinkPathType.orthogonal
+                ? OrthogonalRouter.route(
+                    start: startPt,
+                    end: endPt,
+                    obstacles: obstacles,
+                    startObjectRect: startRect,
+                    endObjectRect: endRect,
+                  )
+                : null;
+
+            final candidate = arrow.copyWith(
+              start: startPt,
+              end: endPt,
+              startAttachment: arrow.startAttachment!.copyWith(relativePosition: startRel),
+              endAttachment: arrow.endAttachment!.copyWith(relativePosition: endRel),
+              waypoints: waypoints,
+            ) as ArrowObject;
+
+            bestArrows[i] = candidate;
+            final score = _score(candidate, i);
+            if (score < bestScore) {
+              bestScore = score;
+              best = candidate;
+            }
+          }
+        }
+        bestArrows[i] = best;
+      }
+
+      for (final arrow in bestArrows) {
+        newDrawingObjects[arrow.id] = arrow;
+      }
+    } else {
+      // ── Mode B: routing-only (keep attachment points, reroute waypoints) ──
+      for (final arrow in workingArrows) {
+        if (arrow.pathType != LinkPathType.orthogonal) continue;
+
+        final waypoints = OrthogonalRouter.route(
+          start: arrow.start,
+          end: arrow.end,
+          obstacles: obstacles,
+          startObjectRect: arrow.startAttachment != null
+              ? shapeRects[arrow.startAttachment!.objectId]
+              : null,
+          endObjectRect: arrow.endAttachment != null
+              ? shapeRects[arrow.endAttachment!.objectId]
+              : null,
+        );
+        newDrawingObjects[arrow.id] = arrow.copyWith(waypoints: waypoints);
+      }
+    }
+
+    emit(state.copyWith(drawingObjects: newDrawingObjects));
+  }
+
+  /// Returns the number of crossings that [arrow] creates with other arrows
+  /// in [arrows], excluding the arrow at [selfIndex].
+  ///
+  /// Each arrow is approximated as a sequence of straight segments via its
+  /// waypoints (for orthogonal paths) or a direct segment (for straight paths).
+  int _countCrossingsForArrow(
+      ArrowObject arrow, List<ArrowObject> arrows, int selfIndex) {
+    int count = 0;
+    final segsA = _arrowSegments(arrow);
+    for (int j = 0; j < arrows.length; j++) {
+      if (j == selfIndex) continue;
+      final segsB = _arrowSegments(arrows[j]);
+      for (final a in segsA) {
+        for (final b in segsB) {
+          if (_segmentsIntersect(a.$1, a.$2, b.$1, b.$2)) count++;
+        }
+      }
+    }
+    return count;
+  }
+
+  /// Decomposes an arrow into a list of (start, end) segments.
+  List<(Offset, Offset)> _arrowSegments(ArrowObject arrow) {
+    final pts = <Offset>[arrow.start];
+    if (arrow.waypoints != null) pts.addAll(arrow.waypoints!);
+    pts.add(arrow.end);
+    final segs = <(Offset, Offset)>[];
+    for (int i = 0; i < pts.length - 1; i++) {
+      segs.add((pts[i], pts[i + 1]));
+    }
+    return segs;
+  }
+
+  /// Returns true if segment (p1→p2) and (p3→p4) properly intersect.
+  bool _segmentsIntersect(Offset p1, Offset p2, Offset p3, Offset p4) {
+    final d1 = p2 - p1;
+    final d2 = p4 - p3;
+    final cross = d1.dx * d2.dy - d1.dy * d2.dx;
+    if (cross.abs() < 1e-10) return false; // parallel
+
+    final t = ((p3.dx - p1.dx) * d2.dy - (p3.dy - p1.dy) * d2.dx) / cross;
+    final u = ((p3.dx - p1.dx) * d1.dy - (p3.dy - p1.dy) * d1.dx) / cross;
+    return t > 0.01 && t < 0.99 && u > 0.01 && u < 0.99;
   }
 }

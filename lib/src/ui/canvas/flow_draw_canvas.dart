@@ -96,6 +96,14 @@ class FlowDrawCanvas extends StatelessWidget {
                             ObjectsSentToBack(allSelected),
                           );
                     },
+                    onMinimizeCrossings: (changeConnectionPoints) {
+                      context.read<CanvasBloc>().add(
+                            CrossingsMinimized(
+                              allSelected,
+                              changeConnectionPoints: changeConnectionPoints,
+                            ),
+                          );
+                    },
                   );
                 },
               );

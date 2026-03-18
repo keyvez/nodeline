@@ -358,11 +358,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       return false;
     }
 
-    final dpr = MediaQuery.of(context).devicePixelRatio;
-    // Match the render sizes from _paintQuickActionArrows
-    final double handleSize = 20.0 * dpr / sqrt(zoom);
+    // Match the render sizes from _paintQuickActionArrows exactly
+    final double iz = (1.0 / zoom).clamp(0.5, 2.0);
+    final double handleSize = 20.0 * iz;
     final double halfHandle = handleSize / 2;
-    final double spacing = 10.0 * dpr / sqrt(zoom);
+    final double spacing = 10.0 * iz;
 
     // Compute connector offsets (same logic as _paintQuickActionArrows)
     final edgeApproachFromLeft = <String, List<bool>>{};
@@ -426,8 +426,18 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     // If text overlay is active, let the TextField handle all pointer events
     if (_isEditingText) return;
 
-    // If inline shape text editor is active, finish editing and proceed
+    // If inline shape text editor is active, check if the tap is inside
+    // the editing shape — if so, let the TextField handle pointer events
+    // (for cursor repositioning). Otherwise finish editing.
     if (_editingShapeObject != null) {
+      final worldPos = screenToWorld(
+        event.position,
+        _canvasBloc.state.viewportOffset,
+        _canvasBloc.state.viewportZoom,
+      );
+      if (worldPos != null && _editingShapeObject!.rect.contains(worldPos)) {
+        return; // Let the TextField handle this tap
+      }
       _finishShapeTextEditing();
     }
 
@@ -750,11 +760,18 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     final selectedNodeIds = _selectionBloc.state.selectedNodeIds;
     final hasSelection = selectedIds.isNotEmpty || selectedNodeIds.isNotEmpty;
 
+    // Check if any selected objects are arrows or lines
+    final bool hasArrowSelected = selectedIds.any((id) {
+      final obj = _canvasBloc.state.drawingObjects[id];
+      return obj is ArrowObject || obj is LineObject;
+    });
+
     showCanvasContextMenu(
       context: context,
       position: event.position,
       hasSelection: hasSelection,
       selectedCount: selectedIds.length,
+      hasArrowSelected: hasArrowSelected,
       onAction: (action) {
         final ids = _selectionBloc.state.selectedDrawingObjectIds;
         switch (action) {
@@ -790,6 +807,40 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                 nodeIds: {},
                 drawingObjectIds: newIds,
               ));
+            }
+          case CanvasContextMenuAction.flipArrow:
+            for (final id in ids) {
+              final obj = _canvasBloc.state.drawingObjects[id];
+              if (obj is ArrowObject) {
+                final flipped = ArrowObject(
+                  id: obj.id,
+                  start: obj.end,
+                  end: obj.start,
+                  isSelected: obj.isSelected,
+                  midPoint: obj.midPoint,
+                  pathType: obj.pathType,
+                  startAttachment: obj.endAttachment,
+                  endAttachment: obj.startAttachment,
+                  waypoints: obj.waypoints?.reversed.toList(),
+                  lineStyle: obj.lineStyle,
+                  arrowLabel: obj.arrowLabel,
+                  angle: obj.angle,
+                );
+                _canvasBloc.add(DrawingObjectUpdated(flipped));
+              } else if (obj is LineObject) {
+                final flipped = LineObject(
+                  id: obj.id,
+                  start: obj.end,
+                  end: obj.start,
+                  isSelected: obj.isSelected,
+                  midPoint: obj.midPoint,
+                  startAttachment: obj.endAttachment,
+                  endAttachment: obj.startAttachment,
+                  lineStyle: obj.lineStyle,
+                  angle: obj.angle,
+                );
+                _canvasBloc.add(DrawingObjectUpdated(flipped));
+              }
             }
           case CanvasContextMenuAction.bringForward:
             _canvasBloc.add(ObjectsBroughtForward(ids));
@@ -1263,7 +1314,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       final isTap = rect.width <= 2 && rect.height <= 2;
       isTapCreated = isTap;
       final shapeRect = isTap
-          ? snapRect(Rect.fromCenter(center: snappedStart, width: 1008, height: 608))
+          ? snapRect(Rect.fromCenter(center: snappedStart, width: 160, height: 100))
           : snapRect(rect);
       switch (tool) {
         case EditorTool.circle:
@@ -1280,7 +1331,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           break;
         case EditorTool.forkJoin:
           final forkRect = isTap
-              ? snapRect(Rect.fromCenter(center: snappedStart, width: 1008, height: 10))
+              ? snapRect(Rect.fromCenter(center: snappedStart, width: 160, height: 10))
               : snapRect(Rect.fromLTWH(rect.left, rect.top, rect.width, 10));
           newObject = ForkJoinObject(id: id, rect: forkRect, lineStyle: lineStyle);
           break;
@@ -2288,6 +2339,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       if (r.bottom > maxY) maxY = r.bottom;
     }
 
+    // If no valid objects were found, bail out early to avoid NaN positions
+    if (minX == double.infinity || maxX == double.negativeInfinity) {
+      return const SizedBox.shrink();
+    }
+
     // World top-center → screen position via worldToScreen
     final worldTopCenter = Offset((minX + maxX) / 2, minY);
     final screenPos = worldToScreen(worldTopCenter, vpOffset, zoom);
@@ -2383,6 +2439,15 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                       }
                     : null,
               ),
+              const SizedBox(width: 2),
+              _MinimizeCrossingsMenuButton(
+                onSelected: (changeConnectionPoints) {
+                  _canvasBloc.add(CrossingsMinimized(
+                    selectedIds,
+                    changeConnectionPoints: changeConnectionPoints,
+                  ));
+                },
+              ),
             ],
           ),
         ),
@@ -2415,26 +2480,41 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
             ),
             Positioned(
               left: screenX - screenWidth / 2,
-              top: screenY - (_shapeTextStyle.fontSize! * zoom) / 2,
+              top: screenY - (shapeObject.rect.height * zoom) / 2,
               width: screenWidth,
+              height: shapeObject.rect.height * zoom,
               child: Material(
                 color: Colors.transparent,
-                child: TextField(
-                  key: const ValueKey('shape_text_editor'),
-                  controller: _shapeTextController,
-                  focusNode: _shapeTextFocusNode,
-                  textAlign: TextAlign.center,
-                  style: _shapeTextStyle.copyWith(
-                    fontSize: _shapeTextStyle.fontSize! * zoom,
+                child: Center(
+                  child: Focus(
+                    onKeyEvent: (node, event) {
+                      if (event is KeyDownEvent &&
+                          event.logicalKey == LogicalKeyboardKey.enter &&
+                          !HardwareKeyboard.instance.isShiftPressed &&
+                          !HardwareKeyboard.instance.isAltPressed) {
+                        _finishShapeTextEditing();
+                        return KeyEventResult.handled;
+                      }
+                      return KeyEventResult.ignored;
+                    },
+                    child: TextField(
+                      key: const ValueKey('shape_text_editor'),
+                      controller: _shapeTextController,
+                      focusNode: _shapeTextFocusNode,
+                      textAlign: TextAlign.center,
+                      textAlignVertical: TextAlignVertical.center,
+                      style: _shapeTextStyle.copyWith(
+                        fontSize: _shapeTextStyle.fontSize! * zoom,
+                      ),
+                      maxLines: null,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(horizontal: 4),
+                        isDense: true,
+                      ),
+                    ),
                   ),
-                  maxLines: 1,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.zero,
-                    isDense: true,
-                  ),
-                  onSubmitted: (_) => _finishShapeTextEditing(),
                 ),
               ),
             ),
@@ -2472,5 +2552,46 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       default:
         return SystemMouseCursors.precise;
     }
+  }
+}
+
+/// A popup menu button that offers two crossing-minimization strategies.
+class _MinimizeCrossingsMenuButton extends StatelessWidget {
+  final ValueChanged<bool> onSelected;
+
+  const _MinimizeCrossingsMenuButton({required this.onSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<bool>(
+      tooltip: 'Minimize Crossings',
+      onSelected: onSelected,
+      itemBuilder: (_) => const [
+        PopupMenuItem(
+          value: true,
+          child: Row(
+            children: [
+              Icon(Icons.route, size: 16),
+              SizedBox(width: 8),
+              Text('Reroute & change ports'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: false,
+          child: Row(
+            children: [
+              Icon(Icons.alt_route, size: 16),
+              SizedBox(width: 8),
+              Text('Reroute only'),
+            ],
+          ),
+        ),
+      ],
+      child: const Padding(
+        padding: EdgeInsets.all(6),
+        child: Icon(Icons.device_hub, size: 16),
+      ),
+    );
   }
 }

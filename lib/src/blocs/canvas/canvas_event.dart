@@ -369,3 +369,30 @@ final class ObjectDuplicatedWithConnection extends CanvasEvent {
   @override
   List<Object> get props => [sourceObjectId, direction];
 }
+
+/// Minimizes edge crossings among the selected arrows.
+///
+/// When [changeConnectionPoints] is true, the algorithm is free to reassign
+/// which port on each endpoint the arrow connects to (top/right/bottom/left).
+/// When false, only the routing (waypoints) is re-optimized while keeping
+/// the same attachment relative positions.
+final class CrossingsMinimized extends CanvasEvent {
+  /// IDs of the arrows (and optionally shapes) to consider.
+  final Set<String> selectedIds;
+
+  /// Whether the algorithm may change which port an arrow connects to.
+  final bool changeConnectionPoints;
+
+  const CrossingsMinimized(
+    this.selectedIds, {
+    required this.changeConnectionPoints,
+  }) : super(isUndoable: true);
+
+  @override
+  String get description => changeConnectionPoints
+      ? 'Minimized crossings (with rerouting)'
+      : 'Minimized crossings (routing only)';
+
+  @override
+  List<Object> get props => [selectedIds, changeConnectionPoints];
+}

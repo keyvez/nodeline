@@ -16,6 +16,10 @@ class FloatingToolbar extends StatelessWidget {
   final VoidCallback? onSendToBack;
   final ValueChanged<LineStyle>? onLineStyleChanged;
   final LineStyle currentLineStyle;
+  /// Called when the user requests crossing minimization.
+  /// The [changeConnectionPoints] parameter controls whether port reassignment
+  /// is allowed (true) or only waypoint re-routing (false).
+  final ValueChanged<bool>? onMinimizeCrossings;
 
   const FloatingToolbar({
     super.key,
@@ -28,6 +32,7 @@ class FloatingToolbar extends StatelessWidget {
     this.onSendToBack,
     this.onLineStyleChanged,
     this.currentLineStyle = LineStyle.solid,
+    this.onMinimizeCrossings,
   });
 
   @override
@@ -81,6 +86,12 @@ class FloatingToolbar extends StatelessWidget {
                 currentStyle: currentLineStyle,
                 onStyleChanged: onLineStyleChanged,
               ),
+              if (onMinimizeCrossings != null) ...[
+                const _ToolbarDivider(),
+                _MinimizeCrossingsButton(
+                  onMinimize: onMinimizeCrossings!,
+                ),
+              ],
             ],
           ),
         ),
@@ -231,4 +242,45 @@ class _LineStylePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_LineStylePainter old) => old.style != style;
+}
+
+/// A popup button that offers two crossing-minimization strategies.
+class _MinimizeCrossingsButton extends StatelessWidget {
+  final ValueChanged<bool> onMinimize;
+
+  const _MinimizeCrossingsButton({required this.onMinimize});
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<bool>(
+      tooltip: 'Minimize Crossings',
+      onSelected: onMinimize,
+      itemBuilder: (_) => const [
+        PopupMenuItem(
+          value: true,
+          child: Row(
+            children: [
+              Icon(Icons.route, size: 16),
+              SizedBox(width: 8),
+              Text('Reroute & change ports'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: false,
+          child: Row(
+            children: [
+              Icon(Icons.alt_route, size: 16),
+              SizedBox(width: 8),
+              Text('Reroute only'),
+            ],
+          ),
+        ),
+      ],
+      child: const Padding(
+        padding: EdgeInsets.all(6),
+        child: Icon(Icons.device_hub, size: 18, color: Colors.white70),
+      ),
+    );
+  }
 }
