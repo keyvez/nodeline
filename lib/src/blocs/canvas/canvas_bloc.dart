@@ -1228,6 +1228,18 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
               endRect.top + endRel.dy * endRect.height,
             );
 
+            // Build existing segments from arrows already finalized (0..i-1).
+            final existingSegs = <(Offset, Offset)>[];
+            for (int k = 0; k < i; k++) {
+              final a = bestArrows[k];
+              final pts = <Offset>[a.start];
+              if (a.waypoints != null) pts.addAll(a.waypoints!);
+              pts.add(a.end);
+              for (int s = 0; s < pts.length - 1; s++) {
+                existingSegs.add((pts[s], pts[s + 1]));
+              }
+            }
+
             final waypoints = arrow.pathType == LinkPathType.orthogonal
                 ? OrthogonalRouter.route(
                     start: startPt,
@@ -1235,6 +1247,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
                     obstacles: obstacles,
                     startObjectRect: startRect,
                     endObjectRect: endRect,
+                    existingSegments: existingSegs,
                   )
                 : null;
 
@@ -1260,8 +1273,172 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       for (final arrow in bestArrows) {
         newDrawingObjects[arrow.id] = arrow;
       }
+
+      // ── Phase 2: nudge shapes to reduce segment overlaps ────────────────
+      // Collect the shape IDs that are endpoints of selected arrows and are
+      // moveable (present in selectedIds, or all shapes if selection is all arrows).
+      final connectedShapeIds = <String>{};
+      for (final arrow in bestArrows) {
+        if (arrow.startAttachment != null) {
+          connectedShapeIds.add(arrow.startAttachment!.objectId);
+        }
+        if (arrow.endAttachment != null) {
+          connectedShapeIds.add(arrow.endAttachment!.objectId);
+        }
+      }
+      // Only move shapes that were part of the original selection, or all
+      // connected shapes when the selection contained no shapes directly.
+      final selectionHasShapes = event.selectedIds.any((id) {
+        final obj = state.drawingObjects[id];
+        return obj != null && obj is! ArrowObject && obj is! LineObject && obj is! PencilStrokeObject;
+      });
+      final moveableShapeIds = selectionHasShapes
+          ? connectedShapeIds.intersection(event.selectedIds)
+          : connectedShapeIds;
+
+      if (moveableShapeIds.isNotEmpty) {
+        // Working copy of rects (mutable).
+        final workingRects = Map<String, Rect>.from(shapeRects);
+        for (final id in moveableShapeIds) {
+          if (newDrawingObjects[id] != null) {
+            workingRects[id] = newDrawingObjects[id]!.rect;
+          }
+        }
+        var workingArrowsCopy = List<ArrowObject>.from(bestArrows);
+
+        const int maxIterations = 30;
+        const double nudge = 20.0; // world-space pixels per iteration
+
+        for (int iter = 0; iter < maxIterations; iter++) {
+          // Collect all segments from all working arrows.
+          final allSegs = <(Offset, Offset, String)>[]; // (a, b, arrowId)
+          for (final arrow in workingArrowsCopy) {
+            for (final seg in _arrowSegments(arrow)) {
+              allSegs.add((seg.$1, seg.$2, arrow.id));
+            }
+          }
+
+          // Compute per-shape displacement from overlapping/collinear segments.
+          final displacements = <String, Offset>{};
+          for (int a = 0; a < allSegs.length; a++) {
+            for (int b = a + 1; b < allSegs.length; b++) {
+              if (allSegs[a].$3 == allSegs[b].$3) continue; // same arrow
+              final overlap = _segmentOverlapVector(
+                allSegs[a].$1, allSegs[a].$2,
+                allSegs[b].$1, allSegs[b].$2,
+              );
+              if (overlap == Offset.zero) continue;
+
+              // Find which moveable shapes are connected to each arrow.
+              final arrowA = workingArrowsCopy.firstWhere((x) => x.id == allSegs[a].$3);
+              final arrowB = workingArrowsCopy.firstWhere((x) => x.id == allSegs[b].$3);
+
+              final shapesA = [
+                if (arrowA.startAttachment != null) arrowA.startAttachment!.objectId,
+                if (arrowA.endAttachment != null) arrowA.endAttachment!.objectId,
+              ].where(moveableShapeIds.contains).toList();
+              final shapesB = [
+                if (arrowB.startAttachment != null) arrowB.startAttachment!.objectId,
+                if (arrowB.endAttachment != null) arrowB.endAttachment!.objectId,
+              ].where(moveableShapeIds.contains).toList();
+
+              // Push shapes connected to arrowA away along the overlap vector,
+              // and shapes connected to arrowB in the opposite direction.
+              for (final id in shapesA) {
+                displacements[id] = (displacements[id] ?? Offset.zero) + overlap * nudge;
+              }
+              for (final id in shapesB) {
+                displacements[id] = (displacements[id] ?? Offset.zero) - overlap * nudge;
+              }
+            }
+          }
+
+          if (displacements.isEmpty) break;
+
+          // Apply displacements and re-route all arrows.
+          bool anyMoved = false;
+          for (final entry in displacements.entries) {
+            final id = entry.key;
+            final delta = entry.value;
+            if (delta.distance < 1.0) continue;
+            // Clamp to nudge magnitude to avoid huge jumps.
+            final clamped = delta.distance > nudge
+                ? delta / delta.distance * nudge
+                : delta;
+            workingRects[id] = workingRects[id]!.shift(clamped);
+            anyMoved = true;
+          }
+          if (!anyMoved) break;
+
+          // Re-route all arrows with updated rects.
+          final updatedObstacles = workingRects.values.toList();
+          final reroutedArrows = <ArrowObject>[];
+          for (final arrow in workingArrowsCopy) {
+            if (arrow.pathType != LinkPathType.orthogonal) {
+              reroutedArrows.add(arrow);
+              continue;
+            }
+            final sRect = arrow.startAttachment != null
+                ? workingRects[arrow.startAttachment!.objectId]
+                : null;
+            final eRect = arrow.endAttachment != null
+                ? workingRects[arrow.endAttachment!.objectId]
+                : null;
+            final sRel = arrow.startAttachment?.relativePosition ?? const Offset(0.5, 0.5);
+            final eRel = arrow.endAttachment?.relativePosition ?? const Offset(0.5, 0.5);
+            final startPt = sRect != null
+                ? Offset(sRect.left + sRel.dx * sRect.width, sRect.top + sRel.dy * sRect.height)
+                : arrow.start;
+            final endPt = eRect != null
+                ? Offset(eRect.left + eRel.dx * eRect.width, eRect.top + eRel.dy * eRect.height)
+                : arrow.end;
+            // Collect segments from arrows already rerouted this iteration.
+            final existingSegs = <(Offset, Offset)>[];
+            for (final a in reroutedArrows) {
+              final pts = <Offset>[a.start];
+              if (a.waypoints != null) pts.addAll(a.waypoints!);
+              pts.add(a.end);
+              for (int s = 0; s < pts.length - 1; s++) {
+                existingSegs.add((pts[s], pts[s + 1]));
+              }
+            }
+            final wps = OrthogonalRouter.route(
+              start: startPt,
+              end: endPt,
+              obstacles: updatedObstacles,
+              startObjectRect: sRect,
+              endObjectRect: eRect,
+              existingSegments: existingSegs,
+            );
+            reroutedArrows.add(arrow.copyWith(start: startPt, end: endPt, waypoints: wps) as ArrowObject);
+          }
+          workingArrowsCopy = reroutedArrows;
+        }
+
+        // Commit moved shapes and re-routed arrows into newDrawingObjects.
+        for (final id in moveableShapeIds) {
+          final obj = newDrawingObjects[id];
+          if (obj == null) continue;
+          final newRect = workingRects[id]!;
+          if (obj is RectangleObject) {
+            newDrawingObjects[id] = obj.copyWith(rect: newRect);
+          } else if (obj is CircleObject) {
+            newDrawingObjects[id] = obj.copyWith(rect: newRect);
+          } else if (obj is DiamondObject) {
+            newDrawingObjects[id] = obj.copyWith(rect: newRect);
+          } else if (obj is ParallelogramObject) {
+            newDrawingObjects[id] = obj.copyWith(rect: newRect);
+          } else if (obj is ForkJoinObject) {
+            newDrawingObjects[id] = obj.copyWith(rect: newRect);
+          }
+        }
+        for (final arrow in workingArrowsCopy) {
+          newDrawingObjects[arrow.id] = arrow;
+        }
+      }
     } else {
       // ── Mode B: routing-only (keep attachment points, reroute waypoints) ──
+      final existingSegs = <(Offset, Offset)>[];
       for (final arrow in workingArrows) {
         if (arrow.pathType != LinkPathType.orthogonal) continue;
 
@@ -1275,8 +1452,15 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           endObjectRect: arrow.endAttachment != null
               ? shapeRects[arrow.endAttachment!.objectId]
               : null,
+          existingSegments: existingSegs,
         );
-        newDrawingObjects[arrow.id] = arrow.copyWith(waypoints: waypoints);
+        final rerouted = arrow.copyWith(waypoints: waypoints);
+        newDrawingObjects[arrow.id] = rerouted;
+        // Accumulate this arrow's new segments for subsequent arrows.
+        final pts = <Offset>[arrow.start, ...waypoints, arrow.end];
+        for (int s = 0; s < pts.length - 1; s++) {
+          existingSegs.add((pts[s], pts[s + 1]));
+        }
       }
     }
 
@@ -1314,6 +1498,48 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       segs.add((pts[i], pts[i + 1]));
     }
     return segs;
+  }
+
+  /// Returns a unit vector perpendicular to the overlap direction when two
+  /// segments are collinear and overlap, or [Offset.zero] if they don't overlap.
+  ///
+  /// Used to compute a push direction for shape nudging.
+  Offset _segmentOverlapVector(Offset p1, Offset p2, Offset q1, Offset q2) {
+    final d1 = p2 - p1;
+    final d2 = q2 - q1;
+    final len1 = d1.distance;
+    final len2 = d2.distance;
+    if (len1 < 1e-6 || len2 < 1e-6) return Offset.zero;
+
+    final u1 = d1 / len1;
+    // Check collinearity: cross product of directions must be ~0.
+    final cross = u1.dx * (d2.dy / len2) - u1.dy * (d2.dx / len2);
+    if (cross.abs() > 0.05) return Offset.zero; // not parallel
+
+    // Check that they lie on the same line: distance from q1 to line p1→p2 must be ~0.
+    final toQ1 = q1 - p1;
+    final distToLine = (toQ1.dx * u1.dy - toQ1.dy * u1.dx).abs();
+    if (distToLine > 8.0) return Offset.zero; // parallel but not collinear
+
+    // Project both segments onto the line axis and check for overlap.
+    final pA = 0.0;
+    final pB = len1;
+    final qA = (q1 - p1).dx * u1.dx + (q1 - p1).dy * u1.dy;
+    final qB = (q2 - p1).dx * u1.dx + (q2 - p1).dy * u1.dy;
+    final qMin = min(qA, qB);
+    final qMax = max(qA, qB);
+
+    final overlapLen = min(pB, qMax) - max(pA, qMin);
+    if (overlapLen <= 1.0) return Offset.zero; // no meaningful overlap
+
+    // Push perpendicular to the segment direction.
+    // Choose the perpendicular that points away from the other segment's midpoint.
+    final perp = Offset(-u1.dy, u1.dx);
+    final midQ = (q1 + q2) / 2;
+    final midP = (p1 + p2) / 2;
+    final dot = (midQ - midP).dx * perp.dx + (midQ - midP).dy * perp.dy;
+    // If dot > 0, perp points toward Q, so push A in -perp direction.
+    return dot >= 0 ? -perp : perp;
   }
 
   /// Returns true if segment (p1→p2) and (p3→p4) properly intersect.

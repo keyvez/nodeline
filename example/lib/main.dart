@@ -71,7 +71,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive) {
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
       _saveProject();
     }
   }
@@ -104,9 +105,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     final lastName = prefs.getString(_lastFileKey);
 
-    if (lastName != null && _savedFileNames.contains(lastName)) {
-      await _loadFileByName(lastName, autoSaveCurrent: false);
-      return;
+    if (lastName != null) {
+      // Try loading by name even if it's not in the file list (list may be stale)
+      final savedData = prefs.getString(_fileKey(lastName));
+      if (savedData != null) {
+        try {
+          final data = jsonDecode(savedData) as Map<String, dynamic>;
+          controller.loadProject(data);
+          setState(() => _currentFileName = lastName);
+          // Re-add to list if missing
+          if (!_savedFileNames.contains(lastName)) {
+            _savedFileNames.add(lastName);
+            await _saveFileList();
+          }
+          return;
+        } catch (_) {}
+      }
     }
 
     // Legacy migration: check old single-project key
@@ -317,8 +331,9 @@ start -> outputPhase
     await _saveProjectToPrefs();
     setState(() => _currentFileName = null);
     controller.loadProject({
-      'objects': <dynamic>[],
-      'connections': <dynamic>[],
+      'viewport': {'offset': [0.0, 0.0], 'zoom': 1.0},
+      'nodes': <dynamic>[],
+      'drawingObjects': <dynamic>[],
     });
     await _setLastFile(null);
     if (mounted) Navigator.pop(context); // close drawer

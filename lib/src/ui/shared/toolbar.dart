@@ -707,7 +707,7 @@ class _MermaidButton extends StatelessWidget {
               builder: (context, setState) {
                 return ModalContainer(
                   child: SizedBox(
-                    width: 320,
+                    width: 380,
                     child: _MermaidPopoverContent(
                       popoverContext: popoverContext,
                       canvasBloc: canvasBloc,
@@ -791,24 +791,31 @@ class _MermaidPopoverContent extends StatefulWidget {
 }
 
 class _MermaidPopoverContentState extends State<_MermaidPopoverContent> {
-  bool _showImport = false;
+  bool _showExport = false;
   final _importController = TextEditingController();
+  final _exportController = TextEditingController();
 
   @override
   void dispose() {
     _importController.dispose();
+    _exportController.dispose();
     super.dispose();
   }
 
   void _handleExport() {
     final selectedIds = widget.selectionBloc.state.selectedDrawingObjectIds;
-
     final mermaid = MermaidExporter.export(
       widget.canvasBloc.state.drawingObjects,
       selectedIds: selectedIds.isNotEmpty ? selectedIds : null,
     );
+    setState(() {
+      _exportController.text = mermaid;
+      _showExport = true;
+    });
+  }
 
-    Clipboard.setData(ClipboardData(text: mermaid));
+  void _handleCopyExport() {
+    Clipboard.setData(ClipboardData(text: _exportController.text));
     closeOverlay(widget.popoverContext);
     showNodeEditorSnackbar('Mermaid copied to clipboard', SnackbarType.success);
   }
@@ -829,7 +836,7 @@ class _MermaidPopoverContentState extends State<_MermaidPopoverContent> {
 
   @override
   Widget build(BuildContext context) {
-    if (_showImport) {
+    if (_showExport) {
       return Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -838,26 +845,25 @@ class _MermaidPopoverContentState extends State<_MermaidPopoverContent> {
             children: [
               GhostButton(
                 density: ButtonDensity.compact,
-                onPressed: () => setState(() => _showImport = false),
+                onPressed: () => setState(() => _showExport = false),
                 child: Icon(Icons.arrow_back, size: 14),
               ),
               const Gap(8),
-              Text('Import Mermaid', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              Text('Export as Mermaid', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
             ],
           ),
           const Gap(8),
           TextField(
-            controller: _importController,
-            placeholder: Text('Paste Mermaid flowchart...'),
+            controller: _exportController,
             maxLines: 8,
-            autofocus: true,
+            readOnly: true,
             style: TextStyle(fontSize: 12, fontFamily: 'monospace'),
           ),
           const Gap(8),
           PrimaryButton(
             density: ButtonDensity.compact,
-            onPressed: _handleImport,
-            child: Text('Import'),
+            onPressed: _handleCopyExport,
+            child: Text('Copy to clipboard'),
           ),
         ],
       );
@@ -865,26 +871,41 @@ class _MermaidPopoverContentState extends State<_MermaidPopoverContent> {
 
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        Text(
+          'Paste Mermaid diagram',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+        ),
+        const Gap(4),
+        Text(
+          'Supports flowchart (graph) syntax',
+          style: TextStyle(fontSize: 11, color: Color(0x8AFFFFFF)),
+        ),
+        const Gap(8),
+        TextField(
+          controller: _importController,
+          placeholder: Text('graph TD\n  A[Start] --> B[End]'),
+          maxLines: 8,
+          autofocus: true,
+          style: TextStyle(fontSize: 12, fontFamily: 'monospace'),
+        ),
+        const Gap(8),
+        PrimaryButton(
+          density: ButtonDensity.compact,
+          onPressed: _handleImport,
+          child: Text('Render diagram'),
+        ),
+        const Gap(4),
         GhostButton(
           density: ButtonDensity.compact,
           onPressed: _handleExport,
           child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(Icons.upload, size: 14),
-              const Gap(8),
-              Expanded(child: Text('Export to clipboard', style: TextStyle(fontSize: 12))),
-            ],
-          ),
-        ),
-        GhostButton(
-          density: ButtonDensity.compact,
-          onPressed: () => setState(() => _showImport = true),
-          child: Row(
-            children: [
-              Icon(Icons.download, size: 14),
-              const Gap(8),
-              Expanded(child: Text('Import from Mermaid', style: TextStyle(fontSize: 12))),
+              const Gap(6),
+              Text('Export current diagram', style: TextStyle(fontSize: 12)),
             ],
           ),
         ),

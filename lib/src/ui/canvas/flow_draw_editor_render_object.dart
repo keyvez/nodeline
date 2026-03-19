@@ -748,11 +748,49 @@ class FlowDrawEditorRenderBox extends RenderBox
           cornerPoint = Offset(start.dx, end.dy);
         }
 
+        // Connection dot radius and arrowhead pullback
+        final dotRadius = 2.0 * clampedInverseZoom;
+        final pullback = dotRadius * 3;
+
+        // Compute the shortened end point for the line so it stops at the
+        // arrowhead tip rather than extending past it to the connection dot.
+        Offset lineEnd = end;
+        Offset? arrowControl;
+
+        if (pathType == LinkPathType.orthogonal) {
+          // Find a control point distinct from `end` for arrowhead direction
+          if (waypoints != null && waypoints.isNotEmpty) {
+            for (int i = waypoints.length - 1; i >= 0; i--) {
+              if ((waypoints[i] - end).distanceSquared > 1e-6) {
+                arrowControl = waypoints[i];
+                break;
+              }
+            }
+          }
+          arrowControl ??= ((end - start).distanceSquared > 1e-6) ? start : null;
+          if (arrowControl != null && obj.endAttachment != null) {
+            final dir = (end - arrowControl);
+            final len = dir.distance;
+            if (len > pullback) {
+              lineEnd = end - dir * (pullback / len);
+            }
+          }
+        } else {
+          if (obj.endAttachment != null) {
+            final dir = (end - controlPoint);
+            final len = dir.distance;
+            if (len > pullback) {
+              lineEnd = end - dir * (pullback / len);
+            }
+          }
+        }
+
+        // Draw the line/path with shortened end
         if (pathType == LinkPathType.orthogonal) {
           if (obj.lineStyle == LineStyle.solid) {
-            _paintOrthogonalPath(canvas, start, end, paint, waypoints: waypoints);
+            _paintOrthogonalPath(canvas, start, lineEnd, paint, waypoints: waypoints);
           } else {
-            final orthoPath = _buildOrthogonalPath(start, end, waypoints: waypoints);
+            final orthoPath = _buildOrthogonalPath(start, lineEnd, waypoints: waypoints);
             _paintStyledPath(canvas, orthoPath, paint, obj.lineStyle, seed: obj.id.hashCode);
           }
         } else {
@@ -761,35 +799,23 @@ class FlowDrawEditorRenderBox extends RenderBox
             ..quadraticBezierTo(
               controlPoint.dx,
               controlPoint.dy,
-              end.dx,
-              end.dy,
+              lineEnd.dx,
+              lineEnd.dy,
             );
           _paintStyledPath(canvas, path, paint, obj.lineStyle, seed: obj.id.hashCode);
         }
 
+        // Draw the arrowhead at the shortened end
         if (pathType == LinkPathType.orthogonal) {
-          // Arrowhead tip at the target edge
-          final arrowEnd = end;
-          if (waypoints != null && waypoints.isNotEmpty) {
-            controlPoint = waypoints.last;
-          } else {
-            final dx = end.dx - start.dx;
-            final dy = end.dy - start.dy;
-            if (dx.abs() > dy.abs()) {
-              controlPoint = Offset(end.dx, start.dy);
-            } else {
-              controlPoint = Offset(start.dx, end.dy);
-            }
+          if (arrowControl != null) {
+            _paintArrowHead(canvas, arrowControl, lineEnd, paint, lineStyle: obj.lineStyle);
           }
-          _paintArrowHead(canvas, controlPoint, arrowEnd, paint, lineStyle: obj.lineStyle);
         } else {
-          _paintArrowHead(canvas, controlPoint, end, paint, lineStyle: obj.lineStyle);
+          _paintArrowHead(canvas, controlPoint, lineEnd, paint, lineStyle: obj.lineStyle);
         }
 
         // Draw connection point dots at attached endpoints
         {
-          final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-          final dotRadius = 1.5 * dpr * clampedInverseZoom;
           final dotPaint = Paint()
             ..color = paint.color
             ..style = PaintingStyle.fill;
@@ -965,8 +991,7 @@ class FlowDrawEditorRenderBox extends RenderBox
 
         // Draw connection point dots at attached endpoints
         {
-          final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-          final dotRadius = 1.5 * dpr * clampedInverseZoom;
+          final dotRadius = 2.0 * clampedInverseZoom;
           final dotPaint = Paint()
             ..color = paint.color
             ..style = PaintingStyle.fill;

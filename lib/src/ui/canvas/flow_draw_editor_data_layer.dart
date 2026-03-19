@@ -109,6 +109,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   double _totalDragDelta = 0.0;
   DateTime? _lastClickTime;
   Offset? _lastClickPosition;
+  Size? _lastCanvasSize;
 
   Offset get offset => _canvasBloc.state.viewportOffset;
 
@@ -120,10 +121,24 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     _canvasBloc = context.read<CanvasBloc>();
     _selectionBloc = context.read<SelectionBloc>();
     _toolBloc = context.read<ToolBloc>();
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_globalPointerRoute);
+  }
+
+  void _globalPointerRoute(PointerEvent event) {
+    if (!mounted) return;
+    debugPrint('globalRoute: ${event.runtimeType} kind=${event.kind}');
+    if (event is PointerPanZoomStartEvent) {
+      _onPointerPanZoomStart(event);
+    } else if (event is PointerPanZoomUpdateEvent) {
+      _onPointerPanZoomUpdate(event);
+    } else if (event is PointerPanZoomEndEvent) {
+      _onPointerPanZoomEnd(event);
+    }
   }
 
   @override
   void dispose() {
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(_globalPointerRoute);
     _canvasFocusNode.dispose();
     _kineticTimer?.cancel();
     _shapeTextController?.dispose();
@@ -271,42 +286,35 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   }
 
   void _onScaleStart(ScaleStartDetails details) {
-    // If there's more than one pointer, it's a genuine multi-touch gesture.
+    _scaleStartZoom = _canvasBloc.state.viewportZoom;
     if (details.pointerCount > 1) {
-      _isScaling = true; // Set the flag to lock single-finger moves.
-
-      // Immediately cancel any single-finger actions that might have started.
+      _isScaling = true;
       setState(() {
         _isAreaSelecting = false;
         _isDrawing = false;
         _tempDrawingObject = null;
         _selectionArea = Rect.zero;
       });
-
-      _scaleStartZoom = _canvasBloc.state.viewportZoom;
       _onPanStart();
     }
   }
 
   void _onScaleUpdate(ScaleUpdateDetails details) {
+    // Only handle genuine multi-touch (e.g. touchscreen). Trackpad pinch is
+    // handled via onPointerPanZoomUpdate in the Listener instead.
     if (details.pointerCount < 2) return;
 
     final state = _canvasBloc.state;
-
     final newZoom = (_scaleStartZoom * details.scale).clamp(0.1, 10.0);
-    final panDelta = details.focalPointDelta;
 
     final editorBounds = getEditorBoundsInScreen(kNodeEditorWidgetKey);
     if (editorBounds == null) return;
 
-    final focalPointOnScreen = details.focalPoint;
-    final focalPointRelativeToCenter = focalPointOnScreen - editorBounds.center;
-
+    final focalPointRelativeToCenter = details.focalPoint - editorBounds.center;
     final zoomPanCorrection =
         focalPointRelativeToCenter * (1 / newZoom - 1 / state.viewportZoom);
-
-    final newOffset =
-        state.viewportOffset + (panDelta / state.viewportZoom) + zoomPanCorrection;
+    final panDelta = details.focalPointDelta / state.viewportZoom;
+    final newOffset = state.viewportOffset + panDelta + zoomPanCorrection;
 
     _canvasBloc.add(CanvasTransformed(zoom: newZoom, offset: newOffset));
   }
@@ -318,13 +326,46 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     }
   }
 
+  void _onPointerPanZoomStart(PointerPanZoomStartEvent event) {
+    debugPrint('panZoomStart: pos=${event.position}');
+    _scaleStartZoom = _canvasBloc.state.viewportZoom;
+  }
+
+  void _onPointerPanZoomUpdate(PointerPanZoomUpdateEvent event) {
+    debugPrint('panZoomUpdate: scale=${event.scale} pan=${event.panDelta}');
+    // Pure pan (no pinch) is already handled by PointerScrollEvent in
+    // _onPointerSignal. Only handle scale changes here to avoid double-applying
+    // pan and incorrectly snapping zoom when scale == 1.0.
+    if (event.scale == 1.0) return;
+    final state = _canvasBloc.state;
+    final newZoom = (_scaleStartZoom * event.scale).clamp(0.1, 10.0);
+    final editorBounds = getEditorBoundsInScreen(kNodeEditorWidgetKey);
+    if (editorBounds == null) return;
+    final focalPointRelativeToCenter = event.position - editorBounds.center;
+    final zoomPanCorrection =
+        focalPointRelativeToCenter * (1 / newZoom - 1 / state.viewportZoom);
+    final panDelta = event.panDelta / state.viewportZoom;
+    final newOffset = state.viewportOffset + panDelta + zoomPanCorrection;
+    _canvasBloc.add(CanvasTransformed(zoom: newZoom, offset: newOffset));
+  }
+
+  void _onPointerPanZoomEnd(PointerPanZoomEndEvent event) {}
+
   void _onPointerSignal(PointerSignalEvent event) {
+    debugPrint('pointerSignal: ${event.runtimeType} scrollDelta=${event is PointerScrollEvent ? event.scrollDelta : "n/a"} kind=${event.kind}');
     if (_isPanning) return;
     if (event is PointerScrollEvent) {
       final state = _canvasBloc.state;
-      final zoomDelta = -event.scrollDelta.dy * 0.001;
-      final newZoom = state.viewportZoom * (1 + zoomDelta);
-      _canvasBloc.add(CanvasZoomed(newZoom.clamp(0.1, 10.0)));
+      final isZoomModifier = HardwareKeyboard.instance.isMetaPressed ||
+          HardwareKeyboard.instance.isControlPressed;
+      if (isZoomModifier) {
+        final zoomDelta = -event.scrollDelta.dy * 0.001;
+        final newZoom = state.viewportZoom * (1 + zoomDelta);
+        _canvasBloc.add(CanvasZoomed(newZoom.clamp(0.1, 10.0)));
+      } else {
+        final panDelta = Offset(event.scrollDelta.dx, event.scrollDelta.dy) / state.viewportZoom;
+        _canvasBloc.add(CanvasPanned(-panDelta));
+      }
     }
   }
 
@@ -962,15 +1003,45 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       final (start, end) = _getDynamicEndpoints(object);
       final pathType = object.pathType;
 
+      // Show a preview temp line for endpoint drags; midpoint updates live.
+      if (handle == Handle.arrowStart || handle == Handle.arrowEnd) {
+        final dragPos = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
+        final tempStart = handle == Handle.arrowStart ? dragPos : start;
+        final tempEnd = handle == Handle.arrowEnd ? dragPos : end;
+
+        List<Offset>? waypoints;
+        if (pathType == LinkPathType.orthogonal) {
+          final obstacles = _collectObstacles(excludeId: objectId);
+          final startObjRect = handle == Handle.arrowStart ? null : _getAttachedObjectRect(object.startAttachment);
+          final endObjRect = handle == Handle.arrowEnd ? null : _getAttachedObjectRect(object.endAttachment);
+          waypoints = OrthogonalRouter.route(
+            start: tempStart,
+            end: tempEnd,
+            obstacles: obstacles,
+            startObjectRect: startObjRect,
+            endObjectRect: endObjRect,
+            devicePixelRatio: MediaQuery.of(context).devicePixelRatio,
+            zoom: _canvasBloc.state.viewportZoom,
+          );
+        }
+
+        setState(() {
+          _tempDrawingObject = TempDrawingObject(
+            tool: EditorTool.arrowTopRight,
+            start: tempStart,
+            end: tempEnd,
+            pathType: pathType,
+            waypoints: waypoints,
+          );
+        });
+        return;
+      }
+
       if (pathType == LinkPathType.orthogonal) {
         Offset newStart = start;
         Offset newEnd = end;
 
-        if (handle == Handle.arrowStart) {
-          newStart = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
-        } else if (handle == Handle.arrowEnd) {
-          newEnd = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
-        } else if (handle == Handle.midPoint) {
+        if (handle == Handle.midPoint) {
           final dx = end.dx - start.dx;
           final dy = end.dy - start.dy;
           if (dx.abs() > dy.abs()) {
@@ -1003,16 +1074,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         );
         _canvasBloc.add(DrawingObjectUpdated(updatedObject));
 
-      }  else {
-        if (handle == Handle.arrowStart) {
-          final pos = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
-          final updatedObject = object.copyWith(start: pos);
-          _canvasBloc.add(DrawingObjectUpdated(updatedObject));
-        } else if (handle == Handle.arrowEnd) {
-          final pos = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
-          final updatedObject = object.copyWith(end: pos);
-          _canvasBloc.add(DrawingObjectUpdated(updatedObject));
-        } else if (handle == Handle.midPoint) {
+      } else {
+        if (handle == Handle.midPoint) {
           final midPoint = (worldPos * 2) - (start * 0.5) - (end * 0.5);
           final updatedObject = object.copyWith(midPoint: midPoint);
           _canvasBloc.add(DrawingObjectUpdated(updatedObject));
@@ -1022,14 +1085,17 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     } else if (object is LineObject) {
       final (start, end) = _getDynamicEndpoints(object);
 
-      if (_isResizing.handle == Handle.arrowStart) {
-        final pos = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
-        final updatedObject = object.copyWith(start: pos);
-        _canvasBloc.add(DrawingObjectUpdated(updatedObject));
-      } else if (_isResizing.handle == Handle.arrowEnd) {
-        final pos = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
-        final updatedObject = object.copyWith(end: pos);
-        _canvasBloc.add(DrawingObjectUpdated(updatedObject));
+      if (_isResizing.handle == Handle.arrowStart || _isResizing.handle == Handle.arrowEnd) {
+        final dragPos = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
+        final tempStart = _isResizing.handle == Handle.arrowStart ? dragPos : start;
+        final tempEnd = _isResizing.handle == Handle.arrowEnd ? dragPos : end;
+        setState(() {
+          _tempDrawingObject = TempDrawingObject(
+            tool: EditorTool.line,
+            start: tempStart,
+            end: tempEnd,
+          );
+        });
       } else if (_isResizing.handle == Handle.midPoint) {
         final midPoint = (worldPos * 2) - (start * 0.5) - (end * 0.5);
         final updatedObject = object.copyWith(midPoint: midPoint);
@@ -1412,6 +1478,51 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     if (object == null) return;
 
     dynamic finalObject = object;
+
+    // For arrow/line endpoint drags, commit the position from the temp preview.
+    final temp = _tempDrawingObject;
+    if (temp != null &&
+        (_isResizing.handle == Handle.arrowStart ||
+            _isResizing.handle == Handle.arrowEnd)) {
+      final newPos = _isResizing.handle == Handle.arrowEnd ? temp.end : temp.start;
+      final attachment = _hoveredSnapPoint != null
+          ? ObjectAttachment(
+              objectId: _hoveredSnapPoint!.objectId,
+              relativePosition: _hoveredSnapPoint!.relativePosition,
+            )
+          : null;
+      if (object is ArrowObject) {
+        finalObject = ArrowObject(
+          id: object.id,
+          start: _isResizing.handle == Handle.arrowStart ? newPos : object.start,
+          end: _isResizing.handle == Handle.arrowEnd ? newPos : object.end,
+          midPoint: object.midPoint,
+          isSelected: object.isSelected,
+          pathType: object.pathType,
+          startAttachment: _isResizing.handle == Handle.arrowStart ? attachment : object.startAttachment,
+          endAttachment: _isResizing.handle == Handle.arrowEnd ? attachment : object.endAttachment,
+          angle: object.angle,
+          waypoints: temp.waypoints ?? object.waypoints,
+          lineStyle: object.lineStyle,
+          arrowLabel: object.arrowLabel,
+        );
+      } else if (object is LineObject) {
+        finalObject = LineObject(
+          id: object.id,
+          start: _isResizing.handle == Handle.arrowStart ? newPos : object.start,
+          end: _isResizing.handle == Handle.arrowEnd ? newPos : object.end,
+          midPoint: object.midPoint,
+          isSelected: object.isSelected,
+          startAttachment: _isResizing.handle == Handle.arrowStart ? attachment : object.startAttachment,
+          endAttachment: _isResizing.handle == Handle.arrowEnd ? attachment : object.endAttachment,
+          angle: object.angle,
+          lineStyle: object.lineStyle,
+        );
+      }
+      setState(() => _tempDrawingObject = null);
+      _canvasBloc.add(DrawingObjectUpdated(finalObject));
+      return;
+    }
 
     if (_hoveredSnapPoint != null && (object is ArrowObject)) {
       final endAttachment = ObjectAttachment(
@@ -2061,9 +2172,45 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     // fire on the TextField after we've scheduled its removal.
   }
 
+  /// Called when the canvas widget size changes (e.g. window resize).
+  /// Adjusts viewportOffset so the visible world content stays centered.
+  void _onCanvasSizeChanged(Size newSize) {
+    final prev = _lastCanvasSize;
+    _lastCanvasSize = newSize;
+    if (prev == null) return;
+    final zoom = _canvasBloc.state.viewportZoom;
+    // The canvas centers the world at (size.width/2, size.height/2).
+    // When size shrinks, the center moves left/up, making content appear to
+    // drift right/down. Compensate by shifting the viewport offset.
+    final delta = Offset(
+      (newSize.width - prev.width) / 2 / zoom,
+      (newSize.height - prev.height) / 2 / zoom,
+    );
+    _canvasBloc.add(CanvasPanned(delta));
+  }
+
   @override
   Widget build(BuildContext context) {
-    return BlocBuilder<CanvasBloc, CanvasState>(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = Size(constraints.maxWidth, constraints.maxHeight);
+        if (_lastCanvasSize != size) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _onCanvasSizeChanged(size);
+          });
+        }
+        return _buildContent();
+      },
+    );
+  }
+
+  Widget _buildContent() {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerPanZoomStart: _onPointerPanZoomStart,
+      onPointerPanZoomUpdate: _onPointerPanZoomUpdate,
+      onPointerPanZoomEnd: _onPointerPanZoomEnd,
+      child: BlocBuilder<CanvasBloc, CanvasState>(
       builder: (context, canvasState) {
         return BlocBuilder<SelectionBloc, SelectionState>(
           builder: (context, selectionState) {
@@ -2290,10 +2437,25 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                           onPointerUp: _onPointerUp,
                           onPointerCancel: _onPointerCancel,
                           onPointerSignal: _onPointerSignal,
-                          child: GestureDetector(
-                            onScaleStart: _onScaleStart,
-                            onScaleUpdate: _onScaleUpdate,
-                            onScaleEnd: _onScaleEnd,
+                          child: RawGestureDetector(
+                            gestures: {
+                              ScaleGestureRecognizer: GestureRecognizerFactoryWithHandlers<ScaleGestureRecognizer>(
+                                () => ScaleGestureRecognizer(
+                                  supportedDevices: {
+                                    PointerDeviceKind.touch,
+                                    // Trackpad is handled via Listener onPointerPanZoom
+                                    // and _onPointerSignal to avoid double-processing.
+                                    PointerDeviceKind.mouse,
+                                  },
+                                ),
+                                (instance) {
+                                  instance
+                                    ..onStart = _onScaleStart
+                                    ..onUpdate = _onScaleUpdate
+                                    ..onEnd = _onScaleEnd;
+                                },
+                              ),
+                            },
                             child: Stack(
                               children: [
                                 canvasChild,
@@ -2315,6 +2477,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           },
         );
       },
+    ),
     );
   }
 

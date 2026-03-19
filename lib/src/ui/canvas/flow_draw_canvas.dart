@@ -32,6 +32,7 @@ class FlowDrawCanvas extends StatelessWidget {
     final Widget editor = Container(
       decoration: style.decoration,
       padding: style.padding,
+      clipBehavior: Clip.none,
       child: Stack(
         clipBehavior: Clip.none,
         children: [

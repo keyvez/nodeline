@@ -43,9 +43,7 @@ class _DefaultNodeWidgetState extends State<DefaultNodeWidget> {
   @override
   void didUpdateWidget(DefaultNodeWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.node != oldWidget.node) {
-      _updateBuiltStyles();
-    }
+    _updateBuiltStyles();
   }
 
   void _updateBuiltStyles() {

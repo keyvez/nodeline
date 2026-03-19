@@ -177,6 +177,9 @@ FlNodeStyle defaultNodeStyle(NodeState state, {double devicePixelRatio = 1.0}) {
     decoration: BoxDecoration(
       color: Color(0xFF27272A),
       borderRadius: BorderRadius.all(Radius.circular(r)),
+      border: state.isSelected
+          ? Border.all(color: Color(0xFF3B82F6), width: 2.0)
+          : null,
     ),
   );
 }

@@ -8,6 +8,7 @@ enum CanvasContextMenuAction {
   delete,
   selectAll,
   duplicate,
+  flipArrow,
   bringForward,
   sendBackward,
   bringToFront,
@@ -28,6 +29,7 @@ enum CanvasContextMenuAction {
 /// [hasSelection] -- whether any objects are currently selected.
 /// [selectedCount] -- the number of selected drawing objects (used to
 ///   conditionally show alignment / distribution items).
+/// [hasArrowSelected] -- whether a single arrow object is selected.
 /// [onAction] -- callback invoked with the chosen action.
 ///
 /// The menu adapts its items based on the current selection state:
@@ -35,6 +37,7 @@ enum CanvasContextMenuAction {
 ///     are disabled when nothing is selected.
 ///   - Select All is always available.
 ///   - Duplicate, Bring to Front, Send to Back, etc. require a selection.
+///   - Flip Arrow appears only when a single arrow is selected.
 ///   - Alignment items appear only when >= 2 objects are selected.
 ///   - Distribution items appear only when >= 3 objects are selected.
 Future<void> showCanvasContextMenu({
@@ -42,6 +45,7 @@ Future<void> showCanvasContextMenu({
   required Offset position,
   required bool hasSelection,
   required int selectedCount,
+  bool hasArrowSelected = false,
   required ValueChanged<CanvasContextMenuAction> onAction,
 }) async {
   final overlay =
@@ -49,6 +53,7 @@ Future<void> showCanvasContextMenu({
 
   final result = await showMenu<CanvasContextMenuAction>(
     context: context,
+    useRootNavigator: false,
     position: RelativeRect.fromLTRB(
       position.dx,
       position.dy,
@@ -59,6 +64,7 @@ Future<void> showCanvasContextMenu({
     items: _buildContextMenuItems(
       hasSelection: hasSelection,
       selectedCount: selectedCount,
+      hasArrowSelected: hasArrowSelected,
     ),
   );
 
@@ -70,17 +76,22 @@ Future<void> showCanvasContextMenu({
 List<PopupMenuEntry<CanvasContextMenuAction>> _buildContextMenuItems({
   required bool hasSelection,
   required int selectedCount,
+  required bool hasArrowSelected,
 }) {
   return [
     _item(CanvasContextMenuAction.cut, 'Cut', enabled: hasSelection),
     _item(CanvasContextMenuAction.copy, 'Copy', enabled: hasSelection),
     _item(CanvasContextMenuAction.paste, 'Paste'),
-    const PopupMenuDivider(),
+    const PopupMenuDivider(height: 4),
     _item(CanvasContextMenuAction.selectAll, 'Select All'),
-    const PopupMenuDivider(),
+    const PopupMenuDivider(height: 4),
     if (hasSelection) ...[
       _item(CanvasContextMenuAction.duplicate, 'Duplicate'),
-      const PopupMenuDivider(),
+      const PopupMenuDivider(height: 4),
+    ],
+    if (hasArrowSelected) ...[
+      _item(CanvasContextMenuAction.flipArrow, 'Flip Arrow'),
+      const PopupMenuDivider(height: 4),
     ],
     if (selectedCount >= 2) ...[
       _item(CanvasContextMenuAction.alignLeft, 'Align Left'),
@@ -89,7 +100,7 @@ List<PopupMenuEntry<CanvasContextMenuAction>> _buildContextMenuItems({
       _item(CanvasContextMenuAction.alignTop, 'Align Top'),
       _item(CanvasContextMenuAction.alignCenterV, 'Align Middle'),
       _item(CanvasContextMenuAction.alignBottom, 'Align Bottom'),
-      const PopupMenuDivider(),
+      const PopupMenuDivider(height: 4),
     ],
     if (selectedCount >= 3) ...[
       _item(
@@ -98,14 +109,14 @@ List<PopupMenuEntry<CanvasContextMenuAction>> _buildContextMenuItems({
       _item(
           CanvasContextMenuAction.distributeVertical,
           'Distribute Vertically'),
-      const PopupMenuDivider(),
+      const PopupMenuDivider(height: 4),
     ],
     if (hasSelection) ...[
       _item(CanvasContextMenuAction.bringForward, 'Bring Forward'),
       _item(CanvasContextMenuAction.sendBackward, 'Send Backward'),
       _item(CanvasContextMenuAction.bringToFront, 'Bring to Front'),
       _item(CanvasContextMenuAction.sendToBack, 'Send to Back'),
-      const PopupMenuDivider(),
+      const PopupMenuDivider(height: 4),
     ],
     _item(
       CanvasContextMenuAction.delete,
@@ -125,6 +136,7 @@ PopupMenuItem<CanvasContextMenuAction> _item(
   return PopupMenuItem<CanvasContextMenuAction>(
     value: value,
     enabled: enabled,
-    child: Text(label, style: textStyle),
+    height: 32,
+    child: Text(label, style: textStyle?.copyWith(fontSize: 13) ?? const TextStyle(fontSize: 13)),
   );
 }

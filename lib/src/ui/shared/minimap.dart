@@ -1,6 +1,8 @@
 import 'dart:math';
 
 import 'package:flow_draw/flow_draw.dart';
+import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
+import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -16,17 +18,22 @@ class MiniMap extends StatelessWidget {
   /// Height of the minimap widget.
   final double height;
 
+  /// The actual size of the canvas viewport in screen pixels.
+  /// When null, the widget uses a LayoutBuilder to obtain the parent size.
+  final Size? canvasSize;
+
   const MiniMap({
     super.key,
     this.width = 200,
     this.height = 150,
+    this.canvasSize,
   });
 
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<CanvasBloc, CanvasState>(
       builder: (context, state) {
-        return Material(
+        final miniMapWidget = Material(
           color: Colors.black.withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(8),
           clipBehavior: Clip.antiAlias,
@@ -34,16 +41,33 @@ class MiniMap extends StatelessWidget {
           child: SizedBox(
             width: width,
             height: height,
-            child: CustomPaint(
-              painter: _MiniMapPainter(
-                drawingObjects: state.drawingObjects,
-                viewportOffset: state.viewportOffset,
-                viewportZoom: state.viewportZoom,
-                miniMapSize: Size(width, height),
-              ),
-            ),
+            child: canvasSize != null
+                ? CustomPaint(
+                    painter: _MiniMapPainter(
+                      drawingObjects: state.drawingObjects,
+                      viewportOffset: state.viewportOffset,
+                      viewportZoom: state.viewportZoom,
+                      miniMapSize: Size(width, height),
+                      canvasSize: canvasSize!,
+                    ),
+                  )
+                : Builder(
+                    builder: (ctx) {
+                      final screenSize = MediaQuery.of(ctx).size;
+                      return CustomPaint(
+                        painter: _MiniMapPainter(
+                          drawingObjects: state.drawingObjects,
+                          viewportOffset: state.viewportOffset,
+                          viewportZoom: state.viewportZoom,
+                          miniMapSize: Size(width, height),
+                          canvasSize: screenSize,
+                        ),
+                      );
+                    },
+                  ),
           ),
         );
+        return miniMapWidget;
       },
     );
   }
@@ -54,6 +78,7 @@ class _MiniMapPainter extends CustomPainter {
   final Offset viewportOffset;
   final double viewportZoom;
   final Size miniMapSize;
+  final Size canvasSize;
 
   /// Padding inside the minimap so objects don't touch the edges.
   static const double _padding = 10;
@@ -63,6 +88,7 @@ class _MiniMapPainter extends CustomPainter {
     required this.viewportOffset,
     required this.viewportZoom,
     required this.miniMapSize,
+    required this.canvasSize,
   });
 
   @override
@@ -75,23 +101,19 @@ class _MiniMapPainter extends CustomPainter {
     // Compute bounding box of all objects in canvas space.
     final worldBounds = _computeWorldBounds();
 
-    // We want the minimap to show the world bounds with some margin.
-    // Also include the current viewport rect so the indicator always fits.
-    final viewportRect = Rect.fromLTWH(
-      -viewportOffset.dx / viewportZoom,
-      -viewportOffset.dy / viewportZoom,
-      // Approximate: use the minimap size scaled up as a stand-in for
-      // the real editor size. The caller can refine this, but using
-      // a reasonable default keeps the widget self-contained.
-      800 / viewportZoom,
-      600 / viewportZoom,
+    // Scale is based only on object bounds so panning doesn't change the
+    // minimap zoom level. The viewport indicator may be clipped at the edges.
+    final paddedBounds = worldBounds.inflate(
+      max(worldBounds.width, worldBounds.height) * 0.1,
     );
 
-    final combinedBounds = worldBounds.expandToInclude(viewportRect);
-
-    // Add padding
-    final paddedBounds = combinedBounds.inflate(
-      max(combinedBounds.width, combinedBounds.height) * 0.1,
+    // Match the viewport→world transform used in screenToWorld/worldToScreen:
+    // viewport.left = -canvasWidth/2/zoom - offset.dx
+    final viewportRect = Rect.fromLTWH(
+      -canvasSize.width / 2 / viewportZoom - viewportOffset.dx,
+      -canvasSize.height / 2 / viewportZoom - viewportOffset.dy,
+      canvasSize.width / viewportZoom,
+      canvasSize.height / viewportZoom,
     );
 
     // Compute scale to fit paddedBounds into the minimap area (with padding).
@@ -133,13 +155,42 @@ class _MiniMapPainter extends CustomPainter {
         _drawTextIndicator(canvas, rectToMiniMap(obj.rect));
       } else if (obj is ArrowObject) {
         final arrow = obj;
-        final startPt = toMiniMap(arrow.start);
-        final endPt = toMiniMap(arrow.end);
-        _drawConnection(canvas, startPt, endPt, arrow.waypoints, toMiniMap);
+        final resolvedStart = _resolveAttachment(arrow.startAttachment, arrow.start);
+        final resolvedEnd = _resolveAttachment(arrow.endAttachment, arrow.end);
+        // Recompute orthogonal waypoints for accurate minimap rendering
+        List<Offset>? waypoints;
+        if (arrow.pathType == LinkPathType.orthogonal) {
+          final obstacles = <Rect>[];
+          for (final o in drawingObjects.values) {
+            if (o.id == obj.id) continue;
+            if (o is ArrowObject || o is LineObject || o is PencilStrokeObject) continue;
+            obstacles.add(o.rect);
+          }
+          final startObjRect = arrow.startAttachment != null
+              ? drawingObjects[arrow.startAttachment!.objectId]?.rect
+              : null;
+          final endObjRect = arrow.endAttachment != null
+              ? drawingObjects[arrow.endAttachment!.objectId]?.rect
+              : null;
+          waypoints = OrthogonalRouter.route(
+            start: resolvedStart,
+            end: resolvedEnd,
+            obstacles: obstacles,
+            startObjectRect: startObjRect,
+            endObjectRect: endObjRect,
+            devicePixelRatio: 1.0,
+            zoom: 1.0,
+          );
+        }
+        final startPt = toMiniMap(resolvedStart);
+        final endPt = toMiniMap(resolvedEnd);
+        _drawConnection(canvas, startPt, endPt, waypoints, toMiniMap);
       } else if (obj is LineObject) {
         final line = obj;
-        final startPt = toMiniMap(line.start);
-        final endPt = toMiniMap(line.end);
+        final resolvedStart = _resolveAttachment(line.startAttachment, line.start);
+        final resolvedEnd = _resolveAttachment(line.endAttachment, line.end);
+        final startPt = toMiniMap(resolvedStart);
+        final endPt = toMiniMap(resolvedEnd);
         _drawLine(canvas, startPt, endPt);
       } else if (obj is PencilStrokeObject) {
         _drawPencilStroke(canvas, obj, toMiniMap);
@@ -212,7 +263,7 @@ class _MiniMapPainter extends CustomPainter {
     // Ensure a minimum visible size
     final visibleRect = _ensureMinSize(miniRect, 3);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(visibleRect, const Radius.circular(1)),
+      RRect.fromRectAndRadius(visibleRect, const Radius.circular(3)),
       paint,
     );
 
@@ -221,7 +272,7 @@ class _MiniMapPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.5;
     canvas.drawRRect(
-      RRect.fromRectAndRadius(visibleRect, const Radius.circular(1)),
+      RRect.fromRectAndRadius(visibleRect, const Radius.circular(3)),
       borderPaint,
     );
   }
@@ -305,6 +356,17 @@ class _MiniMapPainter extends CustomPainter {
     canvas.drawPath(path, paint);
   }
 
+  /// Resolves an attachment to its actual world position on the target object.
+  /// Falls back to [fallback] if no attachment or target not found.
+  Offset _resolveAttachment(ObjectAttachment? attachment, Offset fallback) {
+    if (attachment == null) return fallback;
+    final target = drawingObjects[attachment.objectId];
+    if (target == null) return fallback;
+    final r = target.rect;
+    final rp = attachment.relativePosition;
+    return r.topLeft + Offset(r.width * rp.dx, r.height * rp.dy);
+  }
+
   /// Ensures a rect has at least [minDim] pixels so tiny objects remain visible.
   Rect _ensureMinSize(Rect rect, double minDim) {
     double w = rect.width;
@@ -327,6 +389,7 @@ class _MiniMapPainter extends CustomPainter {
   bool shouldRepaint(covariant _MiniMapPainter oldDelegate) {
     return oldDelegate.drawingObjects != drawingObjects ||
         oldDelegate.viewportOffset != viewportOffset ||
-        oldDelegate.viewportZoom != viewportZoom;
+        oldDelegate.viewportZoom != viewportZoom ||
+        oldDelegate.canvasSize != canvasSize;
   }
 }

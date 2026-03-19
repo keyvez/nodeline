@@ -10,3 +10,4 @@ bfba632	80	keep	12 features: shapes, UI, export, smart tools (max achievable)
 223a6ac	100	keep	integrate snap guides, floating toolbar, minimap, PNG export into app
 0e5510b	100	keep	parallelogram/forkJoin toolbar, enhanced PNG exporter, Mermaid support
 75d60e8	100	keep	fix color duplication, parallelogram text editing, ObjectColorsChanged event
+4a01f34	100	keep	expand tests to 52, parallelogram/forkJoin colors, SVG color export

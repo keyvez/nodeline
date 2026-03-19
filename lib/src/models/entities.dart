@@ -59,7 +59,7 @@ final class NodeInstance extends Equatable {
 
   late NodeState state;
   Offset offset;
-  final GlobalKey key = GlobalKey();
+  final GlobalKey key;
 
   NodeInstance({
     String? id,
@@ -72,7 +72,8 @@ final class NodeInstance extends Equatable {
     this.valueBuilder,
     this.forceRecompute = true,
     this.offset = Offset.zero,
-  }) {
+    GlobalKey? key,
+  }) : key = key ?? GlobalKey() {
     this.id = id ?? const Uuid().v4();
     this.state = state ?? NodeState();
   }
@@ -100,6 +101,7 @@ final class NodeInstance extends Equatable {
       editorBuilder: editorBuilder ?? this.editorBuilder,
       styleBuilder: styleBuilder ?? this.styleBuilder,
       headerStyleBuilder: headerStyleBuilder ?? this.headerStyleBuilder,
+      key: key, // preserve the same GlobalKey across copies
     );
   }
 
