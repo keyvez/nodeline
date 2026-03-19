@@ -884,6 +884,7 @@ class _MermaidPopoverContentState extends State<_MermaidPopoverContent> {
         ),
         const Gap(8),
         TextField(
+          key: const ValueKey('mermaid_import_field'),
           controller: _importController,
           placeholder: Text('graph TD\n  A[Start] --> B[End]'),
           maxLines: 8,

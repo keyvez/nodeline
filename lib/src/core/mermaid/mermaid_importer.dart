@@ -447,8 +447,8 @@ class MermaidImporter {
     }
 
     // Count usage per (nodeId, side).
-    // If a side overflows capacity, reassign excess edges to alternate sides
-    // (clockwise rotation: right→bottom→left→top→right).
+    // If a side overflows capacity, reassign excess edges to the side with the
+    // most remaining capacity (avoids blindly piling onto the adjacent side).
     void assignWithCapacity(
       List<int> sideList, // per-edge side assignment (mutated in place)
       List<String> nodeIds, // nodeId per edge slot
@@ -463,17 +463,23 @@ class MermaidImporter {
       for (int i = 0; i < sideList.length; i++) {
         final nodeId = nodeIds[i];
         int side = sideList[i];
-        // Try rotating to a side with room, up to 4 attempts
-        for (int attempt = 0; attempt < 4; attempt++) {
-          final k = '$nodeId:$side';
-          if ((counts[k] ?? 0) <= capacity(nodeId, side)) break;
-          // Overflow — move this edge to the next side (clockwise)
-          counts[k] = (counts[k]! - 1);
-          side = (side + 1) % 4;
-          final k2 = '$nodeId:$side';
-          counts[k2] = (counts[k2] ?? 0) + 1;
+        final k = '$nodeId:$side';
+        if ((counts[k] ?? 0) <= capacity(nodeId, side)) continue;
+        // Overflow — pick the side with the most remaining capacity
+        counts[k] = (counts[k]! - 1);
+        int bestSide = side;
+        int bestRoom = -1;
+        for (int s = 0; s < 4; s++) {
+          if (s == side) continue;
+          final room = capacity(nodeId, s) - (counts['$nodeId:$s'] ?? 0);
+          if (room > bestRoom) {
+            bestRoom = room;
+            bestSide = s;
+          }
         }
-        sideList[i] = side;
+        final k2 = '$nodeId:$bestSide';
+        counts[k2] = (counts[k2] ?? 0) + 1;
+        sideList[i] = bestSide;
       }
     }
 
