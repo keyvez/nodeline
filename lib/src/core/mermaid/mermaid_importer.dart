@@ -424,7 +424,7 @@ class MermaidImporter {
     // ── Port assignment ─────────────────────────────────────────────────────
     // Strategy: assign 1 port per side first (spread across sides), then add
     // more only if the side has enough room. Minimum pixel gap between ports.
-    const double minPortGap = 28.0;
+    const double minPortGap = 50.0;
 
     // How many ports fit on a side of a node (at least 1).
     int capacity(String nodeId, int side) {
