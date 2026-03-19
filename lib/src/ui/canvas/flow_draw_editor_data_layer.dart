@@ -126,7 +126,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
   void _globalPointerRoute(PointerEvent event) {
     if (!mounted) return;
-    debugPrint('globalRoute: ${event.runtimeType} kind=${event.kind}');
     if (event is PointerPanZoomStartEvent) {
       _onPointerPanZoomStart(event);
     } else if (event is PointerPanZoomUpdateEvent) {
@@ -327,12 +326,10 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   }
 
   void _onPointerPanZoomStart(PointerPanZoomStartEvent event) {
-    debugPrint('panZoomStart: pos=${event.position}');
     _scaleStartZoom = _canvasBloc.state.viewportZoom;
   }
 
   void _onPointerPanZoomUpdate(PointerPanZoomUpdateEvent event) {
-    debugPrint('panZoomUpdate: scale=${event.scale} pan=${event.panDelta}');
     // Pure pan (no pinch) is already handled by PointerScrollEvent in
     // _onPointerSignal. Only handle scale changes here to avoid double-applying
     // pan and incorrectly snapping zoom when scale == 1.0.
@@ -352,7 +349,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   void _onPointerPanZoomEnd(PointerPanZoomEndEvent event) {}
 
   void _onPointerSignal(PointerSignalEvent event) {
-    debugPrint('pointerSignal: ${event.runtimeType} scrollDelta=${event is PointerScrollEvent ? event.scrollDelta : "n/a"} kind=${event.kind}');
     if (_isPanning) return;
     if (event is PointerScrollEvent) {
       final state = _canvasBloc.state;

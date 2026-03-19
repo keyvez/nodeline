@@ -6,13 +6,13 @@ import 'package:uuid/uuid.dart';
 
 /// Parses a Mermaid flowchart string into flow_draw project JSON.
 class MermaidImporter {
-  // Layout constants (matching FlowDrawParser)
-  static const double _hSpacing = 80.0;
-  static const double _vSpacing = 100.0;
+  // Layout constants
+  static const double _hSpacing = 120.0;
+  static const double _vSpacing = 140.0;
   static const double _nodePaddingH = 24.0;
   static const double _nodePaddingV = 16.0;
-  static const double _minNodeWidth = 180.0;
-  static const double _minNodeHeight = 80.0;
+  static const double _minNodeWidth = 160.0;
+  static const double _minNodeHeight = 60.0;
 
   /// Parses a Mermaid flowchart string and returns project JSON
   /// consumable by `controller.loadProject()`.
@@ -379,23 +379,31 @@ class MermaidImporter {
     }
   }
 
-  /// Calculates attachment point (relative position 0.0-1.0) on source edge
-  /// facing toward the target.
-  static Offset _getAttachmentPoint(Rect sourceRect, Rect targetRect) {
+  /// Determines which side of [sourceRect] faces [targetRect].
+  /// Returns 0=left, 1=right, 2=top, 3=bottom.
+  static int _exitSide(Rect sourceRect, Rect targetRect) {
     final dx = targetRect.center.dx - sourceRect.center.dx;
     final dy = targetRect.center.dy - sourceRect.center.dy;
-
     final angle = atan2(dy, dx);
     const piOver4 = pi / 4;
+    if (angle > -piOver4 && angle <= piOver4) return 1; // right
+    if (angle > piOver4 && angle <= 3 * piOver4) return 3; // bottom
+    if (angle > 3 * piOver4 || angle <= -3 * piOver4) return 0; // left
+    return 2; // top
+  }
 
-    if (angle > -piOver4 && angle <= piOver4) {
-      return const Offset(1.0, 0.5); // Right
-    } else if (angle > piOver4 && angle <= 3 * piOver4) {
-      return const Offset(0.5, 1.0); // Bottom
-    } else if (angle > 3 * piOver4 || angle <= -3 * piOver4) {
-      return const Offset(0.0, 0.5); // Left
-    } else {
-      return const Offset(0.5, 0.0); // Top
+  /// Converts a side index + fractional position along that side to a
+  /// normalised [Offset] in [0,1]×[0,1] rect space.
+  /// [t] is 0.0–1.0 from the "start" of that edge (left→right / top→bottom).
+  static Offset _sideToRelative(int side, double t) {
+    // Keep ports away from corners: clamp t to [0.15, 0.85].
+    final s = 0.15 + t * 0.70;
+    switch (side) {
+      case 0: return Offset(0.0, s);  // left edge, varying y
+      case 1: return Offset(1.0, s);  // right edge, varying y
+      case 2: return Offset(s, 0.0);  // top edge, varying x
+      case 3: return Offset(s, 1.0);  // bottom edge, varying x
+      default: return Offset(0.5, 0.5);
     }
   }
 
@@ -413,89 +421,111 @@ class MermaidImporter {
       uuidMap[id] = uuid.v4();
     }
 
+    // ── Port assignment ─────────────────────────────────────────────────────
+    // For each (nodeId, side) pair, collect all edges using that port slot.
+    // Key: 'nodeId:side', value: list of edge indices.
+    final portSlots = <String, List<int>>{};
+
+    for (int i = 0; i < edges.length; i++) {
+      final edge = edges[i];
+      final fromNode = nodes[edge.from]!;
+      final toNode = nodes[edge.to]!;
+
+      final outSide = _exitSide(fromNode.rect, toNode.rect);
+      final inSide  = _exitSide(toNode.rect, fromNode.rect);
+
+      final outKey = '${edge.from}:$outSide';
+      final inKey  = '${edge.to}:$inSide';
+
+      portSlots.putIfAbsent(outKey, () => []).add(i);
+      portSlots.putIfAbsent(inKey,  () => []).add(-i - 1); // negative = incoming
+    }
+
+    // Build per-edge start/end relative positions
+    final startRel = List<Offset?>.filled(edges.length, null);
+    final endRel   = List<Offset?>.filled(edges.length, null);
+
+    portSlots.forEach((key, edgeIndices) {
+      final parts = key.split(':');
+      final side = int.parse(parts[1]);
+      final n = edgeIndices.length;
+
+      for (int j = 0; j < n; j++) {
+        final t = n == 1 ? 0.5 : j / (n - 1).toDouble();
+        final rel = _sideToRelative(side, t);
+        final rawIdx = edgeIndices[j];
+        if (rawIdx >= 0) {
+          startRel[rawIdx] = rel;
+        } else {
+          endRel[-rawIdx - 1] = rel;
+        }
+      }
+    });
+
     // Create shape objects
     for (final node in nodes.values) {
       final objectId = uuidMap[node.id]!;
       final rect = node.rect;
 
       if (node.type == 'circle') {
-        final circle = CircleObject(
-          id: objectId,
-          rect: rect,
-          text: node.label,
-        );
-        drawingObjects.add(circle.toJson());
+        drawingObjects.add(CircleObject(id: objectId, rect: rect, text: node.label).toJson());
       } else if (node.type == 'diamond') {
-        final diamond = DiamondObject(
-          id: objectId,
-          rect: rect,
-          text: node.label,
-        );
-        drawingObjects.add(diamond.toJson());
+        drawingObjects.add(DiamondObject(id: objectId, rect: rect, text: node.label).toJson());
       } else if (node.type == 'parallelogram') {
-        final parallelogram = ParallelogramObject(
-          id: objectId,
-          rect: rect,
-          text: node.label,
-        );
-        drawingObjects.add(parallelogram.toJson());
+        drawingObjects.add(ParallelogramObject(id: objectId, rect: rect, text: node.label).toJson());
       } else {
-        final rectangle = RectangleObject(
-          id: objectId,
-          rect: rect,
-          text: node.label,
-        );
-        drawingObjects.add(rectangle.toJson());
+        drawingObjects.add(RectangleObject(id: objectId, rect: rect, text: node.label).toJson());
       }
     }
 
-    // Create edges (arrows/lines) with attachments
-    for (final edge in edges) {
+    // Create edges with distributed port positions
+    for (int i = 0; i < edges.length; i++) {
+      final edge = edges[i];
       final fromUuid = uuidMap[edge.from]!;
-      final toUuid = uuidMap[edge.to]!;
+      final toUuid   = uuidMap[edge.to]!;
       final fromNode = nodes[edge.from]!;
-      final toNode = nodes[edge.to]!;
+      final toNode   = nodes[edge.to]!;
+
+      final sRel = startRel[i] ?? const Offset(0.5, 1.0);
+      final eRel = endRel[i]   ?? const Offset(0.5, 0.0);
+
+      // Convert relative position to world position for start/end coords
+      final start = fromNode.rect.topLeft + Offset(
+        fromNode.rect.width  * sRel.dx,
+        fromNode.rect.height * sRel.dy,
+      );
+      final end = toNode.rect.topLeft + Offset(
+        toNode.rect.width  * eRel.dx,
+        toNode.rect.height * eRel.dy,
+      );
+
+      final startAttachment = ObjectAttachment(objectId: fromUuid, relativePosition: sRel);
+      final endAttachment   = ObjectAttachment(objectId: toUuid,   relativePosition: eRel);
+
       final edgeId = uuid.v4();
-
-      final startAttachment = ObjectAttachment(
-        objectId: fromUuid,
-        relativePosition: _getAttachmentPoint(fromNode.rect, toNode.rect),
-      );
-      final endAttachment = ObjectAttachment(
-        objectId: toUuid,
-        relativePosition: _getAttachmentPoint(toNode.rect, fromNode.rect),
-      );
-
-      final start = fromNode.rect.center;
-      final end = toNode.rect.center;
-
       if (edge.type == 'arrow') {
-        final arrow = ArrowObject(
+        drawingObjects.add(ArrowObject(
           id: edgeId,
           start: start,
           end: end,
           startAttachment: startAttachment,
           endAttachment: endAttachment,
           arrowLabel: edge.label,
-        );
-        drawingObjects.add(arrow.toJson());
+          pathType: LinkPathType.orthogonal,
+        ).toJson());
       } else {
-        final line = LineObject(
+        drawingObjects.add(LineObject(
           id: edgeId,
           start: start,
           end: end,
           startAttachment: startAttachment,
           endAttachment: endAttachment,
-        );
-        drawingObjects.add(line.toJson());
+        ).toJson());
       }
     }
 
     return {
-      'viewport': {
-        'offset': [0.0, 0.0],
-        'zoom': 1.0,
-      },
+      'viewport': {'offset': [0.0, 0.0], 'zoom': 1.0},
       'nodes': <Map<String, dynamic>>[],
       'drawingObjects': drawingObjects,
     };
