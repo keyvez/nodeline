@@ -496,7 +496,7 @@ class MermaidImporter {
 
     void distributeGroup(Map<String, List<int>> groups, List<Offset?> relList) {
       groups.forEach((key, indices) {
-        final side = int.parse(key.split(':')[1]);
+        final side = int.parse(key.split(':').last);
         final n = indices.length;
         for (int j = 0; j < n; j++) {
           final t = n == 1 ? 0.5 : j / (n - 1).toDouble();

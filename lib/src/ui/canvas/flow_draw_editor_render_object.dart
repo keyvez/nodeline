@@ -426,6 +426,9 @@ class FlowDrawEditorRenderBox extends RenderBox
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0 * iz;
 
+    // Accumulate routed segments so later arrows avoid overlapping earlier ones.
+    final List<(Offset, Offset)> routedSegments = [];
+
     for (final obj in drawingObjects.values) {
       final isSelected = selectionState.selectedDrawingObjectIds.contains(
         obj.id,
@@ -734,7 +737,14 @@ class FlowDrawEditorRenderBox extends RenderBox
             endObjectRect: routerEndRect,
             devicePixelRatio: dpr,
             zoom: canvasState.viewportZoom,
+            existingSegments: routedSegments,
           );
+
+          // Record this path's segments so subsequent arrows route around it.
+          final pts = [start, ...waypoints ?? [], end];
+          for (int i = 0; i < pts.length - 1; i++) {
+            routedSegments.add((pts[i], pts[i + 1]));
+          }
         }
 
         var controlPoint = obj.midPoint ?? (start + end) / 2;
