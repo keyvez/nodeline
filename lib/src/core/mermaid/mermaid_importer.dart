@@ -422,45 +422,91 @@ class MermaidImporter {
     }
 
     // ── Port assignment ─────────────────────────────────────────────────────
-    // For each (nodeId, side) pair, collect all edges using that port slot.
-    // Key: 'nodeId:side', value: list of edge indices.
-    final portSlots = <String, List<int>>{};
+    // Strategy: assign 1 port per side first (spread across sides), then add
+    // more only if the side has enough room. Minimum pixel gap between ports.
+    const double minPortGap = 28.0;
 
-    for (int i = 0; i < edges.length; i++) {
-      final edge = edges[i];
-      final fromNode = nodes[edge.from]!;
-      final toNode = nodes[edge.to]!;
-
-      final outSide = _exitSide(fromNode.rect, toNode.rect);
-      final inSide  = _exitSide(toNode.rect, fromNode.rect);
-
-      final outKey = '${edge.from}:$outSide';
-      final inKey  = '${edge.to}:$inSide';
-
-      portSlots.putIfAbsent(outKey, () => []).add(i);
-      portSlots.putIfAbsent(inKey,  () => []).add(-i - 1); // negative = incoming
+    // How many ports fit on a side of a node (at least 1).
+    int capacity(String nodeId, int side) {
+      final node = nodes[nodeId]!;
+      final edgeLen = (side == 0 || side == 1) ? node.rect.height : node.rect.width;
+      // usable 70% of edge (matching [0.15, 0.85] range)
+      return max(1, (edgeLen * 0.70 / minPortGap).floor());
     }
 
-    // Build per-edge start/end relative positions
+    // Desired side per edge endpoint: key='nodeId:edgeIdx', value=preferred side
+    // We first assign each endpoint to its natural side, then overflow.
+    final startSide = List<int>.filled(edges.length, 0);
+    final endSide   = List<int>.filled(edges.length, 0);
+
+    for (int i = 0; i < edges.length; i++) {
+      final fromNode = nodes[edges[i].from]!;
+      final toNode   = nodes[edges[i].to]!;
+      startSide[i] = _exitSide(fromNode.rect, toNode.rect);
+      endSide[i]   = _exitSide(toNode.rect, fromNode.rect);
+    }
+
+    // Count usage per (nodeId, side).
+    // If a side overflows capacity, reassign excess edges to alternate sides
+    // (clockwise rotation: right→bottom→left→top→right).
+    void assignWithCapacity(
+      List<int> sideList, // per-edge side assignment (mutated in place)
+      List<String> nodeIds, // nodeId per edge slot
+    ) {
+      // Build current counts
+      final counts = <String, int>{}; // 'nodeId:side' -> count
+      for (int i = 0; i < sideList.length; i++) {
+        final k = '${nodeIds[i]}:${sideList[i]}';
+        counts[k] = (counts[k] ?? 0) + 1;
+      }
+      // Detect overflows and reassign
+      for (int i = 0; i < sideList.length; i++) {
+        final nodeId = nodeIds[i];
+        int side = sideList[i];
+        // Try rotating to a side with room, up to 4 attempts
+        for (int attempt = 0; attempt < 4; attempt++) {
+          final k = '$nodeId:$side';
+          if ((counts[k] ?? 0) <= capacity(nodeId, side)) break;
+          // Overflow — move this edge to the next side (clockwise)
+          counts[k] = (counts[k]! - 1);
+          side = (side + 1) % 4;
+          final k2 = '$nodeId:$side';
+          counts[k2] = (counts[k2] ?? 0) + 1;
+        }
+        sideList[i] = side;
+      }
+    }
+
+    final startNodeIds = edges.map((e) => e.from).toList();
+    final endNodeIds   = edges.map((e) => e.to).toList();
+    assignWithCapacity(startSide, startNodeIds);
+    assignWithCapacity(endSide,   endNodeIds);
+
+    // Group by (nodeId, side) and assign evenly-spaced t values
     final startRel = List<Offset?>.filled(edges.length, null);
     final endRel   = List<Offset?>.filled(edges.length, null);
 
-    portSlots.forEach((key, edgeIndices) {
-      final parts = key.split(':');
-      final side = int.parse(parts[1]);
-      final n = edgeIndices.length;
+    // Build slot groups
+    final startGroups = <String, List<int>>{}; // 'nodeId:side' -> [edgeIdx]
+    final endGroups   = <String, List<int>>{};
+    for (int i = 0; i < edges.length; i++) {
+      startGroups.putIfAbsent('${edges[i].from}:${startSide[i]}', () => []).add(i);
+      endGroups.putIfAbsent('${edges[i].to}:${endSide[i]}', () => []).add(i);
+    }
 
-      for (int j = 0; j < n; j++) {
-        final t = n == 1 ? 0.5 : j / (n - 1).toDouble();
-        final rel = _sideToRelative(side, t);
-        final rawIdx = edgeIndices[j];
-        if (rawIdx >= 0) {
-          startRel[rawIdx] = rel;
-        } else {
-          endRel[-rawIdx - 1] = rel;
+    void distributeGroup(Map<String, List<int>> groups, List<Offset?> relList) {
+      groups.forEach((key, indices) {
+        final side = int.parse(key.split(':')[1]);
+        final n = indices.length;
+        for (int j = 0; j < n; j++) {
+          final t = n == 1 ? 0.5 : j / (n - 1).toDouble();
+          relList[indices[j]] = _sideToRelative(side, t);
         }
-      }
-    });
+      });
+    }
+
+    distributeGroup(startGroups, startRel);
+    distributeGroup(endGroups,   endRel);
 
     // Create shape objects
     for (final node in nodes.values) {
