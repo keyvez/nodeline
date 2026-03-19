@@ -426,6 +426,67 @@ class FlowDrawEditorRenderBox extends RenderBox
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0 * iz;
 
+    // ── Pre-pass: redistribute attachment points that share the same object+side ──
+    // Groups all arrow endpoints by (objectId, side) and spreads them evenly,
+    // so crowded ports are fixed dynamically regardless of stored relativePosition.
+    final relOverrides = <String, Offset>{}; // key = 'arrowId:start|end'
+
+    Rect? _attachedRect(ObjectAttachment att) {
+      final node = canvasState.nodes[att.objectId];
+      return node != null
+          ? getNodeBoundsInWorld(node)
+          : canvasState.drawingObjects[att.objectId]?.rect;
+    }
+
+    int _sideOf(Offset relPos) {
+      final dx = relPos.dx, dy = relPos.dy;
+      final dists = [dx, 1 - dx, dy, 1 - dy]; // left, right, top, bottom
+      var minI = 0;
+      for (int i = 1; i < 4; i++) if (dists[i] < dists[minI]) minI = i;
+      return minI; // 0=left,1=right,2=top,3=bottom
+    }
+
+    Offset _sideRelative(int side, double t) {
+      final s = 0.15 + t * 0.70;
+      switch (side) {
+        case 0: return Offset(0.0, s);
+        case 1: return Offset(1.0, s);
+        case 2: return Offset(s, 0.0);
+        case 3: return Offset(s, 1.0);
+        default: return Offset(0.5, 0.5);
+      }
+    }
+
+    // Collect endpoints: key='objectId:side' -> list of (arrowId, 'start'|'end')
+    final sideGroups = <String, List<(String, String)>>{};
+    for (final obj in drawingObjects.values) {
+      if (obj is! ArrowObject) continue;
+      final sa = obj.startAttachment;
+      final ea = obj.endAttachment;
+      if (sa != null && _attachedRect(sa) != null) {
+        final side = _sideOf(sa.relativePosition);
+        sideGroups.putIfAbsent('${sa.objectId}:$side', () => []).add((obj.id, 'start'));
+      }
+      if (ea != null && _attachedRect(ea) != null) {
+        final side = _sideOf(ea.relativePosition);
+        sideGroups.putIfAbsent('${ea.objectId}:$side', () => []).add((obj.id, 'end'));
+      }
+    }
+
+    // For groups with 2+ arrows on same side, spread them evenly.
+    for (final entry in sideGroups.entries) {
+      final parts = entry.key.split(':');
+      final side = int.parse(parts.last);
+      final members = entry.value;
+      if (members.length < 2) continue;
+      final n = members.length;
+      for (int j = 0; j < n; j++) {
+        final t = n == 1 ? 0.5 : j / (n - 1).toDouble();
+        final rel = _sideRelative(side, t);
+        relOverrides['${members[j].$1}:${members[j].$2}'] = rel;
+      }
+    }
+
     // Accumulate routed segments so later arrows avoid overlapping earlier ones.
     final List<(Offset, Offset)> routedSegments = [];
 
@@ -658,7 +719,7 @@ class FlowDrawEditorRenderBox extends RenderBox
 
         // Resolve endpoints from relativePosition (always respect stored attachments)
         if (startObjRect != null && startAttachment != null) {
-          final relPos = startAttachment.relativePosition;
+          final relPos = relOverrides['${obj.id}:start'] ?? startAttachment.relativePosition;
           start = startObjRect.topLeft +
               Offset(startObjRect.width * relPos.dx, startObjRect.height * relPos.dy);
           // Snap to rotated edge if the attached object is meaningfully rotated
@@ -670,7 +731,7 @@ class FlowDrawEditorRenderBox extends RenderBox
           }
         }
         if (endObjRect != null && endAttachment != null) {
-          final relPos = endAttachment.relativePosition;
+          final relPos = relOverrides['${obj.id}:end'] ?? endAttachment.relativePosition;
           end = endObjRect.topLeft +
               Offset(endObjRect.width * relPos.dx, endObjRect.height * relPos.dy);
           // Snap to rotated edge if the attached object is meaningfully rotated
