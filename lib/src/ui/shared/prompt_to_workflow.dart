@@ -1,50 +1,38 @@
+import 'dart:convert';
+
 import 'package:flow_draw/src/blocs/canvas/canvas_bloc.dart';
 import 'package:flow_draw/src/core/mermaid/mermaid_importer.dart';
 import 'package:flow_draw/src/core/utils/snackbar.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:http/http.dart' as http;
 import 'package:shadcn_flutter/shadcn_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+// ---------------------------------------------------------------------------
+// Mermaid conversion helpers (kept for direct mermaid/simple-flow input mode)
+// ---------------------------------------------------------------------------
 
 /// Converts simple flow text notation (e.g. "A -> B -> C") into valid
 /// Mermaid flowchart syntax that can be parsed by [MermaidImporter].
-///
-/// Supports:
-/// - Chain syntax: `A -> B -> C`
-/// - Labelled arrows with `|label|`: `A ->|yes| B`
-/// - Mixed chains and standalone edges per line
-/// - Lines starting with `flowchart` are passed through as-is
-///
-/// Returns a Mermaid flowchart string with `flowchart TD` header.
 String convertSimpleFlowToMermaid(String input) {
   final lines = input.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
   final mermaidLines = <String>['flowchart TD'];
 
   for (final line in lines) {
-    // Skip comment lines
-    if (line.startsWith('//') || line.startsWith('#') || line.startsWith('%%')) {
-      continue;
-    }
-    // If it already looks like a mermaid header, skip it
-    if (RegExp(r'^flowchart\s*(TD|TB|LR|BT|RL)?\s*$').hasMatch(line)) {
-      continue;
-    }
+    if (line.startsWith('//') || line.startsWith('#') || line.startsWith('%%')) continue;
+    if (RegExp(r'^flowchart\s*(TD|TB|LR|BT|RL)?\s*$').hasMatch(line)) continue;
 
-    // Split on -> to handle chains like A -> B -> C
-    // Also handle ->|label| syntax
     final chainPattern = RegExp(r'\s*->\s*(?:\|([^|]*)\|\s*)?');
     final parts = line.split(chainPattern);
     final labels = chainPattern.allMatches(line).map((m) => m.group(1)).toList();
-
-    // Clean up parts: trim and remove empty
     final cleanParts = parts.map((p) => p.trim()).where((p) => p.isNotEmpty).toList();
 
     if (cleanParts.length >= 2) {
-      // It's a chain: generate pairwise edges
       for (int i = 0; i < cleanParts.length - 1; i++) {
         final label = (i < labels.length) ? labels[i] : null;
-
         final fromDecl = _nodeDeclaration(cleanParts[i]);
         final toDecl = _nodeDeclaration(cleanParts[i + 1]);
-
         if (label != null && label.isNotEmpty) {
           mermaidLines.add('$fromDecl -->|$label| $toDecl');
         } else {
@@ -52,26 +40,18 @@ String convertSimpleFlowToMermaid(String input) {
         }
       }
     } else if (cleanParts.length == 1) {
-      // Standalone node declaration
-      final decl = _nodeDeclaration(cleanParts[0]);
-      mermaidLines.add(decl);
+      mermaidLines.add(_nodeDeclaration(cleanParts[0]));
     }
   }
 
   return mermaidLines.join('\n');
 }
 
-/// Creates a sanitized node ID from a label string.
-/// Replaces spaces and special chars with underscores.
-String _sanitizeNodeId(String label) {
-  return label.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_').replaceAll(RegExp(r'_+'), '_');
-}
+String _sanitizeNodeId(String label) =>
+    label.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_').replaceAll(RegExp(r'_+'), '_');
 
-/// Returns a Mermaid node declaration like `NodeId["Label Text"]`.
-/// If the label is already a simple identifier, returns it as-is.
 String _nodeDeclaration(String rawLabel) {
   final trimmed = rawLabel.trim();
-  // If already looks like a Mermaid node (has brackets etc.), pass through
   if (RegExp(r'^\w+\[').hasMatch(trimmed) ||
       RegExp(r'^\w+\(\(').hasMatch(trimmed) ||
       RegExp(r'^\w+\{').hasMatch(trimmed) ||
@@ -79,40 +59,58 @@ String _nodeDeclaration(String rawLabel) {
     return trimmed;
   }
   final id = _sanitizeNodeId(trimmed);
-  // If the label is a simple word (same as its ID), no brackets needed
-  if (id == trimmed && RegExp(r'^\w+$').hasMatch(trimmed)) {
-    return trimmed;
-  }
+  if (id == trimmed && RegExp(r'^\w+$').hasMatch(trimmed)) return trimmed;
   return '$id["$trimmed"]';
 }
 
-/// Detects whether the input text is already Mermaid syntax, simple flow text,
-/// or ambiguous.
-enum _InputFormat { mermaid, simpleFlow }
+// ---------------------------------------------------------------------------
+// LLM provider model
+// ---------------------------------------------------------------------------
 
-_InputFormat _detectFormat(String input) {
-  final trimmed = input.trim();
-  // If it starts with "flowchart" or contains Mermaid-specific syntax, treat as Mermaid
-  if (trimmed.startsWith('flowchart') ||
-      RegExp(r'^\s*graph\s+(TD|TB|LR|BT|RL)', multiLine: true).hasMatch(trimmed)) {
-    return _InputFormat.mermaid;
-  }
-  // If it contains Mermaid node syntax like A["text"] or A(("text")), treat as Mermaid
-  if (RegExp(r'\w+\["[^"]*"\]').hasMatch(trimmed) ||
-      RegExp(r'\w+\(\("[^"]*"\)\)').hasMatch(trimmed)) {
-    return _InputFormat.mermaid;
-  }
-  // Otherwise treat as simple flow text
-  return _InputFormat.simpleFlow;
+enum LlmProvider { none, claude, openai }
+
+extension LlmProviderLabel on LlmProvider {
+  String get label => switch (this) {
+        LlmProvider.none => 'No AI (Mermaid only)',
+        LlmProvider.claude => 'Claude (Anthropic)',
+        LlmProvider.openai => 'OpenAI',
+      };
 }
 
-/// A toolbar button that opens a text-to-diagram prompt dialog.
-///
-/// Users can type either:
-/// 1. Direct Mermaid syntax (auto-detected if it starts with `flowchart`)
-/// 2. Simple flow text like `A -> B -> C` which gets converted to Mermaid
-///
-/// The parsed result is loaded into the canvas via [CanvasBloc].
+const _claudeApiKeyUrl = 'https://console.anthropic.com/settings/keys';
+const _openaiApiKeyUrl = 'https://platform.openai.com/api-keys';
+
+const _prefKeyProvider = 'llm_provider';
+const _prefKeyClaudeKey = 'llm_claude_api_key';
+const _prefKeyOpenaiKey = 'llm_openai_api_key';
+
+const _systemPrompt = '''You are a diagram assistant. Convert the user's natural language description into valid Mermaid flowchart syntax.
+
+Rules:
+- Return ONLY the Mermaid code block, no explanation, no markdown fences.
+- Start with "flowchart TD" (or LR/BT/RL if the description suggests it).
+- Use descriptive node labels in quotes, e.g. A["Step name"].
+- Use --> for arrows, and -->|label| for labelled arrows.
+- Use diamond shapes {Decision?} for decisions/conditions.
+- Use (( )) for start/end ovals if appropriate.
+
+Example output:
+flowchart TD
+  A(("Start")) --> B["Receive Order"]
+  B --> C{"In Stock?"}
+  C -->|Yes| D["Ship Item"]
+  C -->|No| E["Notify Customer"]
+  D --> F(("End"))
+  E --> F''';
+
+// Pre-compiled regex used in _handleApply to detect Mermaid graph headers.
+final _graphHeaderRe = RegExp(r'^\s*graph\s+(TD|TB|LR|BT|RL)', multiLine: true);
+
+// ---------------------------------------------------------------------------
+// Toolbar button
+// ---------------------------------------------------------------------------
+
+/// A toolbar button that opens the text-to-diagram prompt dialog.
 class PromptToWorkflowButton extends StatelessWidget {
   const PromptToWorkflowButton({super.key});
 
@@ -137,8 +135,6 @@ class PromptToWorkflowButton extends StatelessWidget {
 }
 
 /// Shows the prompt-to-workflow dialog.
-///
-/// This can be called from the toolbar button or via a keyboard shortcut.
 void showPromptToWorkflowDialog(BuildContext context, CanvasBloc canvasBloc) {
   showPopover(
     context: context,
@@ -146,7 +142,7 @@ void showPromptToWorkflowDialog(BuildContext context, CanvasBloc canvasBloc) {
     builder: (popoverContext) {
       return ModalContainer(
         child: SizedBox(
-          width: 420,
+          width: 480,
           child: _PromptToWorkflowContent(
             popoverContext: popoverContext,
             canvasBloc: canvasBloc,
@@ -156,6 +152,10 @@ void showPromptToWorkflowDialog(BuildContext context, CanvasBloc canvasBloc) {
     },
   );
 }
+
+// ---------------------------------------------------------------------------
+// Dialog content
+// ---------------------------------------------------------------------------
 
 class _PromptToWorkflowContent extends StatefulWidget {
   final BuildContext popoverContext;
@@ -171,60 +171,185 @@ class _PromptToWorkflowContent extends StatefulWidget {
 }
 
 class _PromptToWorkflowContentState extends State<_PromptToWorkflowContent> {
-  final _textController = TextEditingController();
+  final _promptController = TextEditingController();
+  final _mermaidController = TextEditingController(
+    text:
+        'flowchart TD\n  A(("Start")) --> B["Process"]\n  B --> C{"Decision?"}\n  C -->|Yes| D["Action"]\n  C -->|No| E["Alternative"]\n  D --> F(("End"))\n  E --> F',
+  );
+  final _apiKeyController = TextEditingController();
+
+  LlmProvider _provider = LlmProvider.none;
   String? _errorMessage;
-  bool _isProcessing = false;
-  _InputFormat? _detectedFormat;
+  bool _isGenerating = false;
+  bool _showApiKey = false;
 
   @override
-  void dispose() {
-    _textController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _loadPrefs();
   }
 
-  void _onTextChanged(String text) {
+  String _keyForProvider(SharedPreferences prefs, LlmProvider p) => switch (p) {
+        LlmProvider.claude => prefs.getString(_prefKeyClaudeKey) ?? '',
+        LlmProvider.openai => prefs.getString(_prefKeyOpenaiKey) ?? '',
+        LlmProvider.none => '',
+      };
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
-      _errorMessage = null;
-      if (text.trim().isNotEmpty) {
-        _detectedFormat = _detectFormat(text);
-      } else {
-        _detectedFormat = null;
-      }
+      final saved = prefs.getString(_prefKeyProvider);
+      _provider = LlmProvider.values.firstWhere(
+        (p) => p.name == saved,
+        orElse: () => LlmProvider.none,
+      );
+      _apiKeyController.text = _keyForProvider(prefs, _provider);
     });
   }
 
-  void _handleGenerate() {
-    final text = _textController.text.trim();
-    if (text.isEmpty) {
-      setState(() => _errorMessage = 'Please enter some text to generate a diagram.');
+  Future<void> _savePrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final trimmedKey = _apiKeyController.text.trim();
+    await prefs.setString(_prefKeyProvider, _provider.name);
+    switch (_provider) {
+      case LlmProvider.claude:
+        await prefs.setString(_prefKeyClaudeKey, trimmedKey);
+      case LlmProvider.openai:
+        await prefs.setString(_prefKeyOpenaiKey, trimmedKey);
+      case LlmProvider.none:
+        break;
+    }
+  }
+
+  Future<void> _onProviderChanged(LlmProvider? p) async {
+    if (p == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _provider = p;
+      _apiKeyController.text = _keyForProvider(prefs, p);
+      _showApiKey = false;
+    });
+  }
+
+  Future<void> _handleGenerateWithAi() async {
+    final prompt = _promptController.text.trim();
+    if (prompt.isEmpty) {
+      setState(() => _errorMessage = 'Enter a description to generate a diagram.');
+      return;
+    }
+    final apiKey = _apiKeyController.text.trim();
+    if (apiKey.isEmpty) {
+      setState(() => _errorMessage = 'Enter an API key for ${_provider.label}.');
       return;
     }
 
+    await _savePrefs();
     setState(() {
-      _isProcessing = true;
+      _isGenerating = true;
       _errorMessage = null;
     });
 
     try {
-      final format = _detectFormat(text);
-      String mermaidText;
+      final mermaid = switch (_provider) {
+        LlmProvider.claude => await _callClaude(prompt, apiKey),
+        LlmProvider.openai => await _callOpenAi(prompt, apiKey),
+        LlmProvider.none => throw StateError('No provider selected'),
+      };
+      if (mounted) setState(() => _mermaidController.text = mermaid);
+    } catch (e) {
+      if (mounted) setState(() => _errorMessage = 'AI error: $e');
+    } finally {
+      if (mounted) setState(() => _isGenerating = false);
+    }
+  }
 
-      if (format == _InputFormat.mermaid) {
-        mermaidText = text;
-      } else {
-        mermaidText = convertSimpleFlowToMermaid(text);
-      }
+  void _throwIfErrorResponse(http.Response response) {
+    if (response.statusCode != 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final msg = body['error']?['message'] as String? ?? 'HTTP ${response.statusCode}';
+      throw Exception(msg);
+    }
+  }
 
+  Future<String> _callClaude(String prompt, String apiKey) async {
+    final response = await http
+        .post(
+          Uri.parse('https://api.anthropic.com/v1/messages'),
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: jsonEncode({
+            'model': 'claude-sonnet-4-6',
+            'max_tokens': 1024,
+            'system': _systemPrompt,
+            'messages': [
+              {'role': 'user', 'content': prompt},
+            ],
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+    _throwIfErrorResponse(response);
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return (body['content'] as List).first['text'] as String;
+  }
+
+  Future<String> _callOpenAi(String prompt, String apiKey) async {
+    final response = await http
+        .post(
+          Uri.parse('https://api.openai.com/v1/chat/completions'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $apiKey',
+          },
+          body: jsonEncode({
+            'model': 'gpt-4o',
+            'max_tokens': 1024,
+            'messages': [
+              {'role': 'system', 'content': _systemPrompt},
+              {'role': 'user', 'content': prompt},
+            ],
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+    _throwIfErrorResponse(response);
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return body['choices'][0]['message']['content'] as String;
+  }
+
+  void _handleApply() {
+    final text = _mermaidController.text.trim();
+    if (text.isEmpty) {
+      setState(() => _errorMessage = 'Mermaid text is empty.');
+      return;
+    }
+
+    String mermaidText;
+    if (text.startsWith('flowchart') || _graphHeaderRe.hasMatch(text)) {
+      mermaidText = text;
+    } else {
+      mermaidText = convertSimpleFlowToMermaid(text);
+    }
+
+    try {
       final projectData = MermaidImporter.import(mermaidText);
       widget.canvasBloc.add(ProjectLoaded(projectData));
       closeOverlay(widget.popoverContext);
       showNodeEditorSnackbar('Diagram generated successfully', SnackbarType.success);
     } catch (e) {
-      setState(() {
-        _isProcessing = false;
-        _errorMessage = 'Failed to generate diagram: $e';
-      });
+      setState(() => _errorMessage = 'Failed to parse Mermaid: $e');
     }
+  }
+
+  @override
+  void dispose() {
+    _promptController.dispose();
+    _mermaidController.dispose();
+    _apiKeyController.dispose();
+    super.dispose();
   }
 
   @override
@@ -233,44 +358,161 @@ class _PromptToWorkflowContentState extends State<_PromptToWorkflowContent> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Header
         Row(
           children: [
             Icon(Icons.auto_awesome, size: 16),
             const Gap(8),
             Text(
               'Text to Diagram',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
           ],
         ),
-        const Gap(8),
-        Text(
-          'Enter Mermaid syntax or simple flow text (e.g. "Start -> Process -> End")',
-          style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.5)),
+        const Gap(12),
+
+        // LLM Provider selector row
+        Row(
+          children: [
+            Text('AI Model', style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.6))),
+            const Gap(8),
+            Expanded(
+              child: Select<LlmProvider>(
+                value: _provider,
+                onChanged: _onProviderChanged,
+                itemBuilder: (context, value) => Text(value.label, style: TextStyle(fontSize: 12)),
+                popup: SelectPopup(
+                  items: SelectItemList(
+                    children: LlmProvider.values
+                        .map(
+                          (p) => SelectItemButton(
+                            value: p,
+                            child: Text(p.label, style: TextStyle(fontSize: 12)),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
-        const Gap(8),
-        TextField(
-          controller: _textController,
-          placeholder: Text(
-            'flowchart TD\n  A["Start"] --> B["Process"]\n  B --> C["End"]\n\nor simply:\n  Start -> Process -> End',
+
+        // API key row (shown when a provider is selected)
+        if (_provider != LlmProvider.none) ...[
+          const Gap(8),
+          Row(
+            children: [
+              Text(
+                _provider == LlmProvider.claude ? 'Anthropic Key' : 'OpenAI Key',
+                style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.6)),
+              ),
+              const Gap(8),
+              Expanded(
+                child: TextField(
+                  controller: _apiKeyController,
+                  obscureText: !_showApiKey,
+                  placeholder: Text(
+                    _provider == LlmProvider.claude ? 'sk-ant-...' : 'sk-...',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                  style: TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                  onSubmitted: (_) => _handleGenerateWithAi(),
+                ),
+              ),
+              const Gap(4),
+              GhostButton(
+                density: ButtonDensity.compact,
+                onPressed: () => setState(() => _showApiKey = !_showApiKey),
+                child: Icon(
+                  _showApiKey ? Icons.visibility_off : Icons.visibility,
+                  size: 14,
+                ),
+              ),
+              const Gap(2),
+              Tooltip(
+                tooltip: (_) => TooltipContainer(
+                  child: Text(
+                    _provider == LlmProvider.claude
+                        ? 'Get API key from Anthropic Console'
+                        : 'Get API key from OpenAI Platform',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                ),
+                child: GhostButton(
+                  density: ButtonDensity.compact,
+                  onPressed: () {
+                    final url = _provider == LlmProvider.claude
+                        ? _claudeApiKeyUrl
+                        : _openaiApiKeyUrl;
+                    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                  },
+                  child: Icon(Icons.open_in_new, size: 14),
+                ),
+              ),
+            ],
           ),
-          maxLines: 10,
-          autofocus: true,
-          style: TextStyle(fontSize: 12, fontFamily: 'monospace'),
-          onChanged: _onTextChanged,
-        ),
-        if (_detectedFormat != null) ...[
-          const Gap(4),
+
+          const Gap(12),
+          // Natural language input
           Text(
-            _detectedFormat == _InputFormat.mermaid
-                ? 'Detected: Mermaid syntax'
-                : 'Detected: Simple flow text (will convert to Mermaid)',
-            style: TextStyle(
-              fontSize: 10,
-              color: Colors.white.withValues(alpha: 0.4),
+            'Describe your diagram',
+            style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.6)),
+          ),
+          const Gap(4),
+          TextField(
+            controller: _promptController,
+            placeholder: Text(
+              'e.g. "An e-commerce checkout flow with payment and shipping steps"',
+              style: TextStyle(fontSize: 11),
+            ),
+            maxLines: 3,
+            autofocus: true,
+            style: TextStyle(fontSize: 12),
+            onSubmitted: (_) => _handleGenerateWithAi(),
+          ),
+          const Gap(8),
+          PrimaryButton(
+            density: ButtonDensity.compact,
+            onPressed: _isGenerating ? null : _handleGenerateWithAi,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_isGenerating) ...[
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 1.5),
+                  ),
+                  const Gap(6),
+                  Text('Generating...'),
+                ] else ...[
+                  Icon(Icons.auto_awesome, size: 14),
+                  const Gap(6),
+                  Text('Generate with AI'),
+                ],
+              ],
             ),
           ),
+          const Gap(12),
+          Divider(),
+          const Gap(8),
         ],
+
+        // Mermaid text field
+        Text(
+          'Mermaid syntax',
+          style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.6)),
+        ),
+        const Gap(4),
+        TextField(
+          controller: _mermaidController,
+          maxLines: 10,
+          autofocus: _provider == LlmProvider.none,
+          style: TextStyle(fontSize: 12, fontFamily: 'monospace'),
+        ),
+
         if (_errorMessage != null) ...[
           const Gap(8),
           Container(
@@ -286,6 +528,7 @@ class _PromptToWorkflowContentState extends State<_PromptToWorkflowContent> {
             ),
           ),
         ],
+
         const Gap(12),
         Row(
           children: [
@@ -300,8 +543,8 @@ class _PromptToWorkflowContentState extends State<_PromptToWorkflowContent> {
             Expanded(
               child: PrimaryButton(
                 density: ButtonDensity.compact,
-                onPressed: _isProcessing ? null : _handleGenerate,
-                child: Text(_isProcessing ? 'Generating...' : 'Generate'),
+                onPressed: _handleApply,
+                child: Text('Apply Diagram'),
               ),
             ),
           ],
