@@ -1961,17 +1961,16 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     } else {
       final zoom = _canvasBloc.state.viewportZoom;
       const initialText = 'Text';
-      final initialStyle = TextStyle(fontSize: 16.0 / zoom, color: Colors.white);
+      // Font size in world units so text always appears 16px tall on screen.
+      final worldFontSize = 16.0 / zoom;
+      final initialStyle = TextStyle(fontSize: worldFontSize, color: Colors.white);
 
-      final textPainter = TextPainter(
-        text: TextSpan(text: initialText, style: initialStyle),
-        textDirection: TextDirection.ltr,
-      )..layout();
-
-      final initialSize = textPainter.size;
-
-      final w = initialSize.width + 4;
-      final h = initialSize.height + 4;
+      // Derive world-space rect directly from desired screen dimensions.
+      // Approx 60×24 screen pixels for "Text" at 16px — divide by zoom for world units.
+      const screenW = 60.0;
+      const screenH = 24.0;
+      final w = screenW / zoom;
+      final h = screenH / zoom;
       object = TextObject(
         id: const Uuid().v4(),
         rect: Rect.fromLTWH(at!.dx - w / 2, at.dy - h / 2, w, h),
