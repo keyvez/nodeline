@@ -6,6 +6,15 @@ import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+String _formatZoom(double zoom) {
+  if (zoom >= 100) return '${zoom.round()}x';
+  if (zoom >= 10) return '${zoom.toStringAsFixed(1)}x';
+  if (zoom >= 1) return '${zoom.toStringAsFixed(2)}x';
+  if (zoom >= 0.1) return '${zoom.toStringAsFixed(3)}x';
+  if (zoom >= 0.01) return '${zoom.toStringAsFixed(4)}x';
+  return '${zoom.toStringAsExponential(2)}x';
+}
+
 /// A small overlay widget that renders a bird's-eye view of the entire canvas.
 ///
 /// Place this in a [Stack] on top of the [FlowDrawCanvas]. It reads from
@@ -67,7 +76,23 @@ class MiniMap extends StatelessWidget {
                   ),
           ),
         );
-        return miniMapWidget;
+        return Stack(
+          children: [
+            miniMapWidget,
+            Positioned(
+              top: 6,
+              right: 8,
+              child: Text(
+                _formatZoom(state.viewportZoom),
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.white.withValues(alpha: 0.7),
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ],
+        );
       },
     );
   }

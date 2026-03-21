@@ -21,6 +21,13 @@ class FloatingToolbar extends StatelessWidget {
   /// is allowed (true) or only waypoint re-routing (false).
   final ValueChanged<bool>? onMinimizeCrossings;
 
+  /// The zoom level at which the single selected object was created.
+  /// When non-null and != 1.0, a zoom badge is shown in the toolbar.
+  final double? creationZoom;
+
+  /// Called when the user taps the creation-zoom badge to jump to that zoom.
+  final VoidCallback? onGoToCreationZoom;
+
   const FloatingToolbar({
     super.key,
     required this.selectedIds,
@@ -33,6 +40,8 @@ class FloatingToolbar extends StatelessWidget {
     this.onLineStyleChanged,
     this.currentLineStyle = LineStyle.solid,
     this.onMinimizeCrossings,
+    this.creationZoom,
+    this.onGoToCreationZoom,
   });
 
   @override
@@ -90,6 +99,13 @@ class FloatingToolbar extends StatelessWidget {
                 const _ToolbarDivider(),
                 _MinimizeCrossingsButton(
                   onMinimize: onMinimizeCrossings!,
+                ),
+              ],
+              if (creationZoom != null && selectedIds.length == 1) ...[
+                const _ToolbarDivider(),
+                _ZoomInfoButton(
+                  zoom: creationZoom!,
+                  onGoTo: onGoToCreationZoom,
                 ),
               ],
             ],
@@ -242,6 +258,43 @@ class _LineStylePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_LineStylePainter old) => old.style != style;
+}
+
+/// A small badge showing the zoom level at which an object was created,
+/// with a tap action to return to that zoom level.
+class _ZoomInfoButton extends StatelessWidget {
+  final double zoom;
+  final VoidCallback? onGoTo;
+
+  const _ZoomInfoButton({required this.zoom, this.onGoTo});
+
+  String get _label {
+    if (zoom >= 100) return '@${zoom.round()}x';
+    if (zoom >= 10) return '@${zoom.toStringAsFixed(1)}x';
+    return '@${zoom.toStringAsFixed(2)}x';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Created at $_label — tap to go there',
+      child: InkWell(
+        onTap: onGoTo,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          child: Text(
+            _label,
+            style: TextStyle(
+              fontSize: 10,
+              color: Colors.white.withValues(alpha: 0.6),
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// A popup button that offers two crossing-minimization strategies.

@@ -68,6 +68,16 @@ class FlowDrawCanvas extends StatelessWidget {
                   );
                   if (pos == null) return const SizedBox.shrink();
 
+                  // Compute creationZoom for single selected object
+                  double? objCreationZoom;
+                  if (allSelected.length == 1) {
+                    final objId = allSelected.first;
+                    final obj = canvasState.drawingObjects[objId];
+                    if (obj != null && obj.creationZoom != 1.0) {
+                      objCreationZoom = obj.creationZoom;
+                    }
+                  }
+
                   return FloatingToolbar(
                     selectedIds: allSelected,
                     drawingObjects: canvasState.drawingObjects,
@@ -105,6 +115,12 @@ class FlowDrawCanvas extends StatelessWidget {
                             ),
                           );
                     },
+                    creationZoom: objCreationZoom,
+                    onGoToCreationZoom: objCreationZoom != null
+                        ? () => context
+                            .read<CanvasBloc>()
+                            .add(CanvasZoomed(objCreationZoom!))
+                        : null,
                   );
                 },
               );

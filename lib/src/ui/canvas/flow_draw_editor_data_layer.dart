@@ -115,6 +115,26 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
   double get zoom => _canvasBloc.state.viewportZoom;
 
+  /// Computes the minimum allowed zoom so the entire diagram never shrinks
+  /// below 32 screen pixels in its largest dimension. Returns a very small
+  /// value when the canvas is empty (allowing infinite zoom out).
+  double _computeMinZoom() {
+    final objects = _canvasBloc.state.drawingObjects;
+    if (objects.isEmpty) return 1e-7;
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    for (final obj in objects.values) {
+      final r = obj.rect;
+      if (r.left < minX) minX = r.left;
+      if (r.top < minY) minY = r.top;
+      if (r.right > maxX) maxX = r.right;
+      if (r.bottom > maxY) maxY = r.bottom;
+    }
+    final worldDim = max(maxX - minX, maxY - minY);
+    if (worldDim <= 0) return 1e-7;
+    return 32.0 / worldDim;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -304,7 +324,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     if (details.pointerCount < 2) return;
 
     final state = _canvasBloc.state;
-    final newZoom = (_scaleStartZoom * details.scale).clamp(0.1, 10.0);
+    final newZoom = (_scaleStartZoom * details.scale).clamp(_computeMinZoom(), 10000.0);
 
     final editorBounds = getEditorBoundsInScreen(kNodeEditorWidgetKey);
     if (editorBounds == null) return;
@@ -335,7 +355,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     // pan and incorrectly snapping zoom when scale == 1.0.
     if (event.scale == 1.0) return;
     final state = _canvasBloc.state;
-    final newZoom = (_scaleStartZoom * event.scale).clamp(0.1, 10.0);
+    final newZoom = (_scaleStartZoom * event.scale).clamp(_computeMinZoom(), 10000.0);
     final editorBounds = getEditorBoundsInScreen(kNodeEditorWidgetKey);
     if (editorBounds == null) return;
     final focalPointRelativeToCenter = event.position - editorBounds.center;
@@ -357,7 +377,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       if (isZoomModifier) {
         final zoomDelta = -event.scrollDelta.dy * 0.001;
         final newZoom = state.viewportZoom * (1 + zoomDelta);
-        _canvasBloc.add(CanvasZoomed(newZoom.clamp(0.1, 10.0)));
+        _canvasBloc.add(CanvasZoomed(newZoom.clamp(_computeMinZoom(), 10000.0)));
       } else {
         final panDelta = Offset(event.scrollDelta.dx, event.scrollDelta.dy) / state.viewportZoom;
         _canvasBloc.add(CanvasPanned(-panDelta));
@@ -1360,11 +1380,12 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           endAttachment: endAttachment,
           waypoints: _tempDrawingObject!.waypoints,
           lineStyle: lineStyle,
+          creationZoom: _canvasBloc.state.viewportZoom,
         );
       }
     } else if (tool == EditorTool.pencil) {
       if (_currentPencilPoints.length > 1) {
-        newObject = PencilStrokeObject(id: id, points: _currentPencilPoints);
+        newObject = PencilStrokeObject(id: id, points: _currentPencilPoints, creationZoom: _canvasBloc.state.viewportZoom);
       }
     } else {
       final snappedStart = snapOffset(_drawingStart);
@@ -1375,27 +1396,29 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       ).normalize;
       final isTap = rect.width <= 2 && rect.height <= 2;
       isTapCreated = isTap;
+      final iz = 1.0 / _canvasBloc.state.viewportZoom;
       final shapeRect = isTap
-          ? snapRect(Rect.fromCenter(center: snappedStart, width: 160, height: 100))
+          ? snapRect(Rect.fromCenter(center: snappedStart, width: 160 * iz, height: 100 * iz))
           : snapRect(rect);
+      final cz = _canvasBloc.state.viewportZoom;
       switch (tool) {
         case EditorTool.circle:
-          newObject = CircleObject(id: id, rect: shapeRect, lineStyle: lineStyle);
+          newObject = CircleObject(id: id, rect: shapeRect, lineStyle: lineStyle, creationZoom: cz);
           break;
         case EditorTool.square:
-          newObject = RectangleObject(id: id, rect: shapeRect, lineStyle: lineStyle);
+          newObject = RectangleObject(id: id, rect: shapeRect, lineStyle: lineStyle, creationZoom: cz);
           break;
         case EditorTool.diamond:
-          newObject = DiamondObject(id: id, rect: shapeRect, lineStyle: lineStyle);
+          newObject = DiamondObject(id: id, rect: shapeRect, lineStyle: lineStyle, creationZoom: cz);
           break;
         case EditorTool.parallelogram:
-          newObject = ParallelogramObject(id: id, rect: shapeRect, lineStyle: lineStyle);
+          newObject = ParallelogramObject(id: id, rect: shapeRect, lineStyle: lineStyle, creationZoom: cz);
           break;
         case EditorTool.forkJoin:
           final forkRect = isTap
-              ? snapRect(Rect.fromCenter(center: snappedStart, width: 160, height: 10))
+              ? snapRect(Rect.fromCenter(center: snappedStart, width: 160 * iz, height: 10 * iz))
               : snapRect(Rect.fromLTWH(rect.left, rect.top, rect.width, 10));
-          newObject = ForkJoinObject(id: id, rect: forkRect, lineStyle: lineStyle);
+          newObject = ForkJoinObject(id: id, rect: forkRect, lineStyle: lineStyle, creationZoom: cz);
           break;
         case EditorTool.arrowTopRight:
           if (!isTap) {
@@ -1405,6 +1428,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
               end: snappedEnd,
               pathType: _tempDrawingObject!.pathType,
               lineStyle: lineStyle,
+              creationZoom: cz,
             );
           }
           break;
@@ -1418,14 +1442,15 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
               startAttachment: startAttachment,
               endAttachment: endAttachment,
               lineStyle: lineStyle,
+              creationZoom: cz,
             );
           }
           break;
         case EditorTool.figure:
-          newObject = FigureObject(id: id, rect: shapeRect);
+          newObject = FigureObject(id: id, rect: shapeRect, creationZoom: cz);
           break;
         case EditorTool.text:
-          newObject = TextObject(id: id, rect: shapeRect);
+          newObject = TextObject(id: id, rect: shapeRect, creationZoom: cz);
           break;
         default:
           break;
@@ -1934,11 +1959,12 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       object = existingObject;
       _selectionBloc.add(SelectionReplaced(drawingObjectIds: {object.id}));
     } else {
+      final zoom = _canvasBloc.state.viewportZoom;
       const initialText = 'Text';
-      const initialStyle = TextStyle(fontSize: 16, color: Colors.white);
+      final initialStyle = TextStyle(fontSize: 16.0 / zoom, color: Colors.white);
 
       final textPainter = TextPainter(
-        text: const TextSpan(text: initialText, style: initialStyle),
+        text: TextSpan(text: initialText, style: initialStyle),
         textDirection: TextDirection.ltr,
       )..layout();
 
@@ -1951,6 +1977,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         rect: Rect.fromLTWH(at!.dx - w / 2, at.dy - h / 2, w, h),
         text: initialText,
         style: initialStyle,
+        creationZoom: zoom,
       );
       _canvasBloc.add(DrawingObjectAdded(object));
       _selectionBloc.add(SelectionReplaced(drawingObjectIds: {object.id}));

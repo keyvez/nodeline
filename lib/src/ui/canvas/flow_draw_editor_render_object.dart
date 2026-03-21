@@ -335,10 +335,10 @@ class FlowDrawEditorRenderBox extends RenderBox
 
   get zoom => canvasState.viewportZoom;
 
-  /// Inverse zoom factor clamped so strokes stay within a comfortable
-  /// screen-pixel range instead of growing/shrinking without bound.
-  /// At zoom 1.0 → 1.0, zoomed out → capped at 2.0, zoomed in → floored at 0.5.
-  double get clampedInverseZoom => (1.0 / zoom).clamp(0.5, 2.0);
+  /// Inverse zoom factor. Since zoom can be arbitrarily large or small,
+  /// using 1/zoom directly ensures strokes always render at a constant
+  /// screen-pixel size (e.g. strokeWidth * iz * zoom = strokeWidth screen px).
+  double get clampedInverseZoom => 1.0 / zoom;
 
   get drawingObjects => canvasState.drawingObjects;
 

@@ -112,8 +112,9 @@ abstract class DrawingObject {
   final String id;
   bool isSelected;
   final double angle;
+  final double creationZoom;
 
-  DrawingObject({required this.id, this.isSelected = false, this.angle = 0.0});
+  DrawingObject({required this.id, this.isSelected = false, this.angle = 0.0, this.creationZoom = 1.0});
 
   Rect get rect;
 
@@ -145,7 +146,7 @@ class RectangleObject extends DrawingObject {
   /// Custom stroke/border color. When null, the default stroke is used.
   final Color? strokeColor;
 
-  RectangleObject({required super.id, required Rect rect, super.isSelected, super.angle, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid, this.borderRadius = 0.0, this.fillColor, this.strokeColor})
+  RectangleObject({required super.id, required Rect rect, super.isSelected, super.angle, super.creationZoom, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid, this.borderRadius = 0.0, this.fillColor, this.strokeColor})
     : _rect = rect;
 
   @override
@@ -160,6 +161,7 @@ class RectangleObject extends DrawingObject {
     'rect': _rect.toJson(),
     'isSelected': isSelected,
     'angle': angle,
+    'creationZoom': creationZoom,
     if (text != null) 'text': text,
     if (textStyle != null) 'textStyle': {
       'fontSize': textStyle!.fontSize,
@@ -185,6 +187,7 @@ class RectangleObject extends DrawingObject {
       rect: JSONRect.fromJson(json['rect']),
       isSelected: json['isSelected'] ?? false,
       angle: json['angle'] ?? 0.0,
+      creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       textStyle: style,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
@@ -195,12 +198,13 @@ class RectangleObject extends DrawingObject {
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle, bool? isEditing, double? borderRadius, Color? fillColor, Color? strokeColor}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, double? borderRadius, Color? fillColor, Color? strokeColor}) {
     return RectangleObject(
       id: id,
       rect: rect ?? _rect,
       isSelected: isSelected ?? this.isSelected,
       angle: angle ?? this.angle,
+      creationZoom: creationZoom ?? this.creationZoom,
       text: text,
       textStyle: textStyle,
       lineStyle: lineStyle ?? this.lineStyle,
@@ -221,7 +225,7 @@ class CircleObject extends DrawingObject {
   final Color? fillColor;
   final Color? strokeColor;
 
-  CircleObject({required super.id, required Rect rect, super.isSelected, super.angle, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid, this.fillColor, this.strokeColor})
+  CircleObject({required super.id, required Rect rect, super.isSelected, super.angle, super.creationZoom, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid, this.fillColor, this.strokeColor})
     : _rect = rect;
 
   @override
@@ -236,6 +240,7 @@ class CircleObject extends DrawingObject {
     'rect': _rect.toJson(),
     'isSelected': isSelected,
     'angle': angle,
+    'creationZoom': creationZoom,
     if (text != null) 'text': text,
     if (textStyle != null) 'textStyle': {
       'fontSize': textStyle!.fontSize,
@@ -260,6 +265,7 @@ class CircleObject extends DrawingObject {
       rect: JSONRect.fromJson(json['rect']),
       isSelected: json['isSelected'] ?? false,
       angle: json['angle'] ?? 0.0,
+      creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       textStyle: style,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
@@ -269,12 +275,13 @@ class CircleObject extends DrawingObject {
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, LineStyle? lineStyle, bool? isEditing, Color? fillColor, Color? strokeColor}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, Color? fillColor, Color? strokeColor}) {
     return CircleObject(
       id: id,
       rect: rect ?? _rect,
       isSelected: isSelected ?? this.isSelected,
       angle: angle ?? this.angle,
+      creationZoom: creationZoom ?? this.creationZoom,
       text: text,
       textStyle: textStyle,
       lineStyle: lineStyle ?? this.lineStyle,
@@ -299,6 +306,7 @@ class DiamondObject extends DrawingObject {
     required Rect rect,
     super.isSelected,
     super.angle,
+    super.creationZoom,
     this.text,
     this.textStyle,
     this.isEditing = false,
@@ -319,6 +327,7 @@ class DiamondObject extends DrawingObject {
     'rect': _rect.toJson(),
     'isSelected': isSelected,
     'angle': angle,
+    'creationZoom': creationZoom,
     if (text != null) 'text': text,
     if (textStyle != null) 'textStyle': {
       'fontSize': textStyle!.fontSize,
@@ -343,6 +352,7 @@ class DiamondObject extends DrawingObject {
       rect: JSONRect.fromJson(json['rect']),
       isSelected: json['isSelected'] ?? false,
       angle: json['angle'] ?? 0.0,
+      creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       textStyle: style,
       lineStyle: json['lineStyle'] != null
@@ -370,6 +380,7 @@ class DiamondObject extends DrawingObject {
     Rect? rect,
     bool? isSelected,
     double? angle,
+    double? creationZoom,
     LineStyle? lineStyle,
     bool? isEditing,
     Color? fillColor,
@@ -380,6 +391,7 @@ class DiamondObject extends DrawingObject {
       rect: rect ?? _rect,
       isSelected: isSelected ?? this.isSelected,
       angle: angle ?? this.angle,
+      creationZoom: creationZoom ?? this.creationZoom,
       text: text,
       textStyle: textStyle,
       lineStyle: lineStyle ?? this.lineStyle,
@@ -406,6 +418,7 @@ class ParallelogramObject extends DrawingObject {
     required Rect rect,
     super.isSelected,
     super.angle,
+    super.creationZoom,
     this.text,
     this.textStyle,
     this.isEditing = false,
@@ -427,6 +440,7 @@ class ParallelogramObject extends DrawingObject {
     'rect': _rect.toJson(),
     'isSelected': isSelected,
     'angle': angle,
+    'creationZoom': creationZoom,
     if (text != null) 'text': text,
     if (textStyle != null) 'textStyle': {
       'fontSize': textStyle!.fontSize,
@@ -452,6 +466,7 @@ class ParallelogramObject extends DrawingObject {
       rect: JSONRect.fromJson(json['rect']),
       isSelected: json['isSelected'] ?? false,
       angle: json['angle'] ?? 0.0,
+      creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       textStyle: style,
       lineStyle: json['lineStyle'] != null
@@ -478,6 +493,7 @@ class ParallelogramObject extends DrawingObject {
     Rect? rect,
     bool? isSelected,
     double? angle,
+    double? creationZoom,
     LineStyle? lineStyle,
     bool? isEditing,
     Color? fillColor,
@@ -488,6 +504,7 @@ class ParallelogramObject extends DrawingObject {
       rect: rect ?? _rect,
       isSelected: isSelected ?? this.isSelected,
       angle: angle ?? this.angle,
+      creationZoom: creationZoom ?? this.creationZoom,
       text: text,
       textStyle: textStyle,
       lineStyle: lineStyle ?? this.lineStyle,
@@ -511,6 +528,7 @@ class ForkJoinObject extends DrawingObject {
     required Rect rect,
     super.isSelected,
     super.angle,
+    super.creationZoom,
     this.lineStyle = LineStyle.solid,
     this.fillColor,
     this.strokeColor,
@@ -528,6 +546,7 @@ class ForkJoinObject extends DrawingObject {
     'rect': _rect.toJson(),
     'isSelected': isSelected,
     'angle': angle,
+    'creationZoom': creationZoom,
     'lineStyle': lineStyle.name,
     if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
     if (strokeColor != null) 'strokeColor': strokeColor!.toARGB32(),
@@ -539,6 +558,7 @@ class ForkJoinObject extends DrawingObject {
       rect: JSONRect.fromJson(json['rect']),
       isSelected: json['isSelected'] ?? false,
       angle: json['angle'] ?? 0.0,
+      creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       lineStyle: json['lineStyle'] != null
           ? LineStyle.values.byName(json['lineStyle'])
           : LineStyle.solid,
@@ -552,6 +572,7 @@ class ForkJoinObject extends DrawingObject {
     Rect? rect,
     bool? isSelected,
     double? angle,
+    double? creationZoom,
     LineStyle? lineStyle,
     Color? fillColor,
     Color? strokeColor,
@@ -561,6 +582,7 @@ class ForkJoinObject extends DrawingObject {
       rect: rect ?? _rect,
       isSelected: isSelected ?? this.isSelected,
       angle: angle ?? this.angle,
+      creationZoom: creationZoom ?? this.creationZoom,
       lineStyle: lineStyle ?? this.lineStyle,
       fillColor: fillColor ?? this.fillColor,
       strokeColor: strokeColor ?? this.strokeColor,
@@ -586,6 +608,7 @@ class ArrowObject extends DrawingObject {
     required this.end,
     super.isSelected,
     super.angle,
+    super.creationZoom,
     this.midPoint,
     this.pathType = LinkPathType.straight,
     this.startAttachment,
@@ -670,6 +693,7 @@ class ArrowObject extends DrawingObject {
     'endAttachment': endAttachment?.toJson(),
     'midPoint': midPoint?.toJson(),
     'angle': angle,
+    'creationZoom': creationZoom,
     'lineStyle': lineStyle.name,
     if (arrowLabel != null) 'arrowLabel': arrowLabel,
   };
@@ -684,6 +708,7 @@ class ArrowObject extends DrawingObject {
       startAttachment: json['startAttachment'] != null ? ObjectAttachment.fromJson(json['startAttachment']) : null,
       endAttachment: json['endAttachment'] != null ? ObjectAttachment.fromJson(json['endAttachment']) : null,
       angle: json['angle'] ?? 0.0,
+      creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       midPoint: json['midPoint'] != null ? JSONOffset.fromJson((json['midPoint'] as List).cast<double>()) : null,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
       arrowLabel: json['arrowLabel'] as String?,
@@ -700,6 +725,7 @@ class ArrowObject extends DrawingObject {
     ObjectAttachment? startAttachment,
     ObjectAttachment? endAttachment,
     double? angle,
+    double? creationZoom,
     List<Offset>? waypoints,
     LineStyle? lineStyle,
     String? arrowLabel,
@@ -714,6 +740,7 @@ class ArrowObject extends DrawingObject {
       startAttachment: startAttachment ?? this.startAttachment,
       endAttachment: endAttachment ?? this.endAttachment,
       angle: angle ?? this.angle,
+      creationZoom: creationZoom ?? this.creationZoom,
       waypoints: waypoints ?? this.waypoints,
       lineStyle: lineStyle ?? this.lineStyle,
       arrowLabel: arrowLabel ?? this.arrowLabel,
@@ -738,6 +765,7 @@ class LineObject extends DrawingObject {
     this.startAttachment,
     this.endAttachment,
     super.angle,
+    super.creationZoom,
     this.lineStyle = LineStyle.solid,
   });
 
@@ -794,6 +822,7 @@ class LineObject extends DrawingObject {
     'startAttachment': startAttachment?.toJson(),
     'endAttachment': endAttachment?.toJson(),
     'angle': angle,
+    'creationZoom': creationZoom,
     'midPoint': midPoint?.toJson(),
     'lineStyle': lineStyle.name,
   };
@@ -811,6 +840,7 @@ class LineObject extends DrawingObject {
           ? ObjectAttachment.fromJson(json['endAttachment'])
           : null,
       angle: json['angle'] ?? 0.0,
+      creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       midPoint: json['midPoint'] != null ? JSONOffset.fromJson((json['midPoint'] as List).cast<double>()) : null,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
     );
@@ -825,6 +855,7 @@ class LineObject extends DrawingObject {
     ObjectAttachment? startAttachment,
     ObjectAttachment? endAttachment,
     double? angle,
+    double? creationZoom,
     LineStyle? lineStyle,
   }) {
     return LineObject(
@@ -836,6 +867,7 @@ class LineObject extends DrawingObject {
       startAttachment: startAttachment ?? this.startAttachment,
       endAttachment: endAttachment ?? this.endAttachment,
       angle: angle ?? this.angle,
+      creationZoom: creationZoom ?? this.creationZoom,
       lineStyle: lineStyle ?? this.lineStyle,
     );
   }
@@ -850,6 +882,7 @@ class PencilStrokeObject extends DrawingObject {
     required this.points,
     super.isSelected,
     super.angle,
+    super.creationZoom,
   });
 
   @override
@@ -889,7 +922,8 @@ class PencilStrokeObject extends DrawingObject {
     'type': 'pencil_stroke',
     'points': points.map((p) => [p.x, p.y, p.pressure]).toList(),
     'isSelected': isSelected,
-    'angle': angle
+    'angle': angle,
+    'creationZoom': creationZoom,
   };
 
   factory PencilStrokeObject.fromJson(Map<String, dynamic> json) {
@@ -902,16 +936,18 @@ class PencilStrokeObject extends DrawingObject {
           .toList(),
       isSelected: json['isSelected'] ?? false,
       angle: json['angle'] ?? 0.0,
+      creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
     );
   }
 
   @override
-  DrawingObject copyWith({List<PointVector>? points, bool? isSelected, double? angle}) {
+  DrawingObject copyWith({List<PointVector>? points, bool? isSelected, double? angle, double? creationZoom}) {
     return PencilStrokeObject(
       id: id,
       points: points ?? this.points,
       isSelected: isSelected ?? this.isSelected,
       angle: angle ?? this.angle,
+      creationZoom: creationZoom ?? this.creationZoom,
     );
   }
 }
@@ -928,6 +964,7 @@ class FigureObject extends DrawingObject {
     this.childrenIds = const {},
     super.isSelected,
     super.angle,
+    super.creationZoom,
   }) : _rect = rect;
 
   @override
@@ -943,7 +980,8 @@ class FigureObject extends DrawingObject {
     'label': label,
     'childrenIds': childrenIds.toList(),
     'isSelected': isSelected,
-    'angle': angle
+    'angle': angle,
+    'creationZoom': creationZoom,
   };
 
   factory FigureObject.fromJson(Map<String, dynamic> json) {
@@ -956,6 +994,7 @@ class FigureObject extends DrawingObject {
           .toSet(),
       isSelected: json['isSelected'] ?? false,
       angle: json['angle'] ?? 0.0,
+      creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
     );
   }
 
@@ -966,6 +1005,7 @@ class FigureObject extends DrawingObject {
     Set<String>? childrenIds,
     bool? isSelected,
     double? angle,
+    double? creationZoom,
   }) {
     return FigureObject(
       id: id,
@@ -974,6 +1014,7 @@ class FigureObject extends DrawingObject {
       childrenIds: childrenIds ?? this.childrenIds,
       isSelected: isSelected ?? this.isSelected,
       angle: angle ?? this.angle,
+      creationZoom: creationZoom ?? this.creationZoom,
     );
   }
 
@@ -1011,6 +1052,7 @@ class TextObject extends DrawingObject {
     this.isEditing = false,
     super.isSelected,
     super.angle,
+    super.creationZoom,
   }) : _rect = rect;
 
   @override
@@ -1026,7 +1068,8 @@ class TextObject extends DrawingObject {
     'text': text,
     'style': {'fontSize': style.fontSize, 'color': style.color?.value},
     'isSelected': isSelected,
-    'angle': angle
+    'angle': angle,
+    'creationZoom': creationZoom,
   };
 
   factory TextObject.fromJson(Map<String, dynamic> json) {
@@ -1043,6 +1086,7 @@ class TextObject extends DrawingObject {
       ),
       isSelected: json['isSelected'] ?? false,
       angle: json['angle'] ?? 0.0,
+      creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
     );
   }
 
@@ -1054,6 +1098,7 @@ class TextObject extends DrawingObject {
     bool? isSelected,
     bool? isEditing,
     double? angle,
+    double? creationZoom,
   }) {
     return TextObject(
       id: id,
@@ -1063,6 +1108,7 @@ class TextObject extends DrawingObject {
       isSelected: isSelected ?? this.isSelected,
       isEditing: isEditing ?? this.isEditing,
       angle: angle ?? this.angle,
+      creationZoom: creationZoom ?? this.creationZoom,
     );
   }
 }
@@ -1079,6 +1125,7 @@ class SvgObject extends DrawingObject {
     required this.pictureInfo,
     super.isSelected,
     super.angle,
+    super.creationZoom,
   }) : _rect = rect;
 
   @override
@@ -1094,11 +1141,12 @@ class SvgObject extends DrawingObject {
     'rect': _rect.toJson(),
     'assetPath': assetPath,
     'isSelected': isSelected,
-    'angle': angle
+    'angle': angle,
+    'creationZoom': creationZoom,
   };
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom}) {
     return SvgObject(
       id: id,
       rect: rect ?? _rect,
@@ -1106,6 +1154,7 @@ class SvgObject extends DrawingObject {
       pictureInfo: pictureInfo,
       isSelected: isSelected ?? this.isSelected,
       angle: angle ?? this.angle,
+      creationZoom: creationZoom ?? this.creationZoom,
     );
   }
 }
