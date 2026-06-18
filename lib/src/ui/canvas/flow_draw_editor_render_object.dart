@@ -323,11 +323,14 @@ class FlowDrawEditorRenderBox extends RenderBox
   // those inputs into a signature; when it is unchanged we reuse the cached
   // routed polylines and skip every route() call.
   //
-  // The cache is invalidated as a whole set, not per arrow, because routing is
-  // order-coupled: each arrow routes around the segments of all earlier arrows
-  // (existingSegments), so one arrow moving can legitimately re-route others.
-  String? _routeCacheSignature;
+  // Routing is order-coupled (each arrow routes around earlier arrows'
+  // segments), so a re-routed arrow still feeds its result into routedSegments
+  // for later arrows; arrows reused from cache also contribute their cached
+  // segments. We track each arrow's input signature and re-route only the ones
+  // whose signature changed — so dragging a node re-routes just the arrows
+  // attached to it, while all others reuse their cached routes.
   final Map<String, _RoutedArrow> _routeCache = {};
+  final Map<String, String> _arrowSignatures = {};
 
   // Profiling accumulators, reset each paint and read back at the end.
   final Stopwatch _profStopwatch = Stopwatch();
@@ -471,68 +474,81 @@ class FlowDrawEditorRenderBox extends RenderBox
 
   double get dpr => WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
 
-  /// Hashes every input that affects routed arrow geometry into a compact
-  /// string. Endpoints, attachment rects/angles, port-spread overrides, and
-  /// the rects of all routing obstacles (non-arrow objects + nodes) are
-  /// included. Pan/zoom are deliberately excluded — routing is world-space and
-  /// zoom-independent — so panning or zooming keeps the signature stable and
-  /// reuses the cache.
-  String _buildRouteSignature(
-    Map<String, DrawingObject> drawingObjects,
-    Map<String, Offset> relOverrides,
-  ) {
-    final sb = StringBuffer();
-    // Round to 0.1px so sub-pixel float jitter from transforms does not bust
-    // the cache, while real moves still register.
-    String q(double v) => (v * 10).roundToDouble().toString();
-    void rect(Rect? r) {
-      if (r == null) {
-        sb.write('-;');
-      } else {
-        sb..write(q(r.left))..write(',')..write(q(r.top))..write(',')
-          ..write(q(r.width))..write(',')..write(q(r.height))..write(';');
-      }
-    }
+  static String _q(double v) => (v * 10).roundToDouble().toString();
 
-    // Obstacle geometry: every non-arrow drawing object and every node, since
-    // any of their rects feeds the obstacle list and the attachment rects.
+  /// Identity hash of the obstacle SET — every non-arrow object/node id (sorted
+  /// implicitly by iteration is fine since maps preserve insertion order here we
+  /// just need set membership to change the string). Changing which obstacles
+  /// exist (add/remove) busts every arrow's signature; moving an obstacle does
+  /// NOT (positions live per-arrow only for attached objects). This is what
+  /// makes a drag re-route only the arrows touching the moved object, while a
+  /// distant obstacle move is deferred to the drag-release settle.
+  String _buildObstacleSetKey(Map<String, DrawingObject> drawingObjects) {
+    final ids = <String>[];
     for (final o in drawingObjects.values) {
       if (o is ArrowObject || o is LineObject || o is PencilStrokeObject) {
         continue;
       }
-      sb..write(o.id)..write(':');
-      rect(o.rect);
-      sb..write(q(o.angle))..write('|');
+      ids.add(o.id);
     }
     for (final node in canvasState.nodes.values) {
-      sb..write(node.id)..write(':');
-      rect(getNodeBoundsInWorld(node));
-      sb.write('|');
+      ids.add(node.id);
     }
-    sb.write('#');
+    ids.sort();
+    return ids.join(',');
+  }
 
-    // Arrow inputs: raw endpoints, attachments, and port overrides.
-    for (final o in drawingObjects.values) {
-      if (o is! ArrowObject) continue;
-      sb..write(o.id)..write('=');
-      sb..write(q(o.start.dx))..write(',')..write(q(o.start.dy))..write(',')
-        ..write(q(o.end.dx))..write(',')..write(q(o.end.dy))..write(',')
-        ..write(o.pathType.index)..write(':');
-      final sa = o.startAttachment;
-      final ea = o.endAttachment;
-      sb.write(sa == null
-          ? '-'
-          : '${sa.objectId},${q(sa.relativePosition.dx)},${q(sa.relativePosition.dy)}');
-      sb.write('/');
-      sb.write(ea == null
-          ? '-'
-          : '${ea.objectId},${q(ea.relativePosition.dx)},${q(ea.relativePosition.dy)}');
-      final so = relOverrides['${o.id}:start'];
-      final eo = relOverrides['${o.id}:end'];
-      if (so != null) sb.write('<s${q(so.dx)},${q(so.dy)}');
-      if (eo != null) sb.write('<e${q(eo.dx)},${q(eo.dy)}');
-      sb.write('|');
+  /// Per-arrow routing signature: the arrow's own endpoints/attachments/port
+  /// overrides PLUS the rects+angles of the objects it attaches to, PLUS the
+  /// obstacle-set identity key. Pan/zoom are excluded (routing is world-space
+  /// and zoom-independent). An arrow re-routes only when one of these changes —
+  /// so dragging a node re-routes just the arrows attached to it, not all 45.
+  String _arrowSignature(
+    ArrowObject o,
+    Map<String, Offset> relOverrides,
+    String obstacleSetKey,
+    Map<String, DrawingObject> drawingObjects,
+  ) {
+    final sb = StringBuffer();
+    String q(double v) => _q(v);
+    void attachedRect(String? id) {
+      if (id == null) {
+        sb.write('-;');
+        return;
+      }
+      final node = canvasState.nodes[id];
+      final r = node != null
+          ? getNodeBoundsInWorld(node)
+          : drawingObjects[id]?.rect;
+      if (r == null) {
+        sb.write('-;');
+      } else {
+        sb..write(q(r.left))..write(',')..write(q(r.top))..write(',')
+          ..write(q(r.width))..write(',')..write(q(r.height));
+        sb..write(',')..write(q(drawingObjects[id]?.angle ?? 0.0))..write(';');
+      }
     }
+
+    sb..write(q(o.start.dx))..write(',')..write(q(o.start.dy))..write(',')
+      ..write(q(o.end.dx))..write(',')..write(q(o.end.dy))..write(',')
+      ..write(o.pathType.index)..write(':');
+    final sa = o.startAttachment;
+    final ea = o.endAttachment;
+    sb.write(sa == null
+        ? '-'
+        : '${sa.objectId},${q(sa.relativePosition.dx)},${q(sa.relativePosition.dy)}');
+    sb.write('/');
+    sb.write(ea == null
+        ? '-'
+        : '${ea.objectId},${q(ea.relativePosition.dx)},${q(ea.relativePosition.dy)}');
+    sb.write(':');
+    attachedRect(sa?.objectId);
+    attachedRect(ea?.objectId);
+    final so = relOverrides['${o.id}:start'];
+    final eo = relOverrides['${o.id}:end'];
+    if (so != null) sb.write('<s${q(so.dx)},${q(so.dy)}');
+    if (eo != null) sb.write('<e${q(eo.dx)},${q(eo.dy)}');
+    sb..write('#')..write(obstacleSetKey);
     return sb.toString();
   }
 
@@ -626,18 +642,23 @@ class FlowDrawEditorRenderBox extends RenderBox
     // Accumulate routed segments so later arrows avoid overlapping earlier ones.
     final List<(Offset, Offset)> routedSegments = [];
 
-    // ── Routing cache validity ──
-    // Build a signature of every input that affects routed geometry. If it is
-    // unchanged since the last paint, the cached routes are reused and no
-    // route() call runs (pan and zoom never change this signature, so those
-    // frames pay nothing for routing).
-    final String routeSignature =
-        _buildRouteSignature(drawingObjects, relOverrides);
-    final bool routeCacheValid = routeSignature == _routeCacheSignature;
-    if (!routeCacheValid) {
-      _routeCache.clear();
-      _routeCacheSignature = routeSignature;
+    // ── Routing cache (per-arrow) ──
+    // Compute each arrow's input signature up front. An arrow is re-routed only
+    // when its own signature changed (endpoints/attachments/port overrides, the
+    // rects of objects it attaches to, or the obstacle SET). Pan/zoom and
+    // moving an unrelated object leave every arrow's signature intact, so those
+    // frames reuse the cache and run zero route() calls. Dragging a node moves
+    // only the arrows attached to it.
+    final String obstacleSetKey = _buildObstacleSetKey(drawingObjects);
+    final Map<String, String> newArrowSignatures = {};
+    for (final o in drawingObjects.values) {
+      if (o is! ArrowObject) continue;
+      newArrowSignatures[o.id] =
+          _arrowSignature(o, relOverrides, obstacleSetKey, drawingObjects);
     }
+    // Drop cache entries for arrows that no longer exist.
+    _routeCache.removeWhere((id, _) => !newArrowSignatures.containsKey(id));
+    _arrowSignatures.removeWhere((id, _) => !newArrowSignatures.containsKey(id));
 
     for (final obj in drawingObjects.values) {
       final isSelected = selectionState.selectedDrawingObjectIds.contains(
@@ -904,10 +925,12 @@ class FlowDrawEditorRenderBox extends RenderBox
         final endIsRotated = endObjAngle.abs() > rotationThreshold;
 
         if (pathType == LinkPathType.orthogonal) {
-          // Fast path: reuse the previously routed geometry when nothing that
-          // affects routing changed (e.g. pure pan/zoom, or selecting an
-          // object). Skips edge-snapping, obstacle collection, and route().
-          final cached = routeCacheValid ? _routeCache[obj.id] : null;
+          // Fast path: reuse the previously routed geometry when THIS arrow's
+          // signature is unchanged (pure pan/zoom, selection, or an unrelated
+          // object moving). Skips edge-snapping, obstacle collection, route().
+          final bool sigUnchanged =
+              _arrowSignatures[obj.id] == newArrowSignatures[obj.id];
+          final cached = sigUnchanged ? _routeCache[obj.id] : null;
           if (cached != null) {
             start = cached.start;
             end = cached.end;
@@ -988,8 +1011,10 @@ class FlowDrawEditorRenderBox extends RenderBox
           // naive re-route, which previously caused taps to select the wrong
           // edge).
           obj.renderedPath = pts;
-          // Store the routed geometry so subsequent pan/zoom frames reuse it.
+          // Store the routed geometry + signature so subsequent frames that
+          // don't change THIS arrow's inputs reuse it.
           _routeCache[obj.id] = _RoutedArrow(start, end, waypoints);
+          _arrowSignatures[obj.id] = newArrowSignatures[obj.id]!;
           } // end route-cache miss branch
         } else {
           obj.renderedPath = null;
