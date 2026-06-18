@@ -8,6 +8,10 @@ import 'package:flutter/material.dart';
 /// All constants are in world-space — no zoom or DPR scaling. Paths are
 /// stable regardless of zoom level.
 class OrthogonalRouter {
+  /// Debug: total number of route() calls since process start. Lets the
+  /// profiler overlay show how often routing actually runs during gestures.
+  static int routeCallCountTotal = 0;
+
   // ── Constants (world-space, no scaling) ──────────────────────────────────
   static const double _padding = 40.0;
   static const double _stubDistance = 45.0;
@@ -35,6 +39,7 @@ class OrthogonalRouter {
     double devicePixelRatio = 1.0,
     double zoom = 1.0,
   }) {
+    routeCallCountTotal++;
     // ── Phase 1: Setup ──────────────────────────────────────────────────
     // Use all obstacles — no distance-based truncation. The search area
     // still filters to relevant ones, but we inflate generously.

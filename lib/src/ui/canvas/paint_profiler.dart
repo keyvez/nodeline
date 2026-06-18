@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
@@ -276,6 +277,7 @@ class _FpsOverlayState extends State<FpsOverlay> {
                     Text('  draw  ${p.lastDrawMs.toStringAsFixed(2)} ms'),
                     Text('  route ${p.lastRouteMs.toStringAsFixed(2)} ms '
                         '(${p.routeCalls}×)'),
+                    Text('route TOTAL ${OrthogonalRouter.routeCallCountTotal}'),
                   ],
                 ),
               ),

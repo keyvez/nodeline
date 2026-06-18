@@ -1,7 +1,6 @@
 import 'dart:math';
 
 import 'package:flow_draw/flow_draw.dart';
-import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -182,30 +181,21 @@ class _MiniMapPainter extends CustomPainter {
         final arrow = obj;
         final resolvedStart = _resolveAttachment(arrow.startAttachment, arrow.start);
         final resolvedEnd = _resolveAttachment(arrow.endAttachment, arrow.end);
-        // Recompute orthogonal waypoints for accurate minimap rendering
+        // Reuse the polyline the main canvas already routed/drew this frame
+        // (renderedPath), falling back to the arrow's persisted waypoints.
+        // NEVER re-route here: the minimap repaints on every pan/zoom, and
+        // routing all arrows per viewport change was the dominant UI-thread
+        // cost (thousands of A* runs/sec during gestures).
         List<Offset>? waypoints;
         if (arrow.pathType == LinkPathType.orthogonal) {
-          final obstacles = <Rect>[];
-          for (final o in drawingObjects.values) {
-            if (o.id == obj.id) continue;
-            if (o is ArrowObject || o is LineObject || o is PencilStrokeObject) continue;
-            obstacles.add(o.rect);
+          final rendered = arrow.renderedPath;
+          if (rendered != null && rendered.length >= 2) {
+            // renderedPath includes start+end; _drawConnection adds those back,
+            // so pass only the interior waypoints.
+            waypoints = rendered.sublist(1, rendered.length - 1);
+          } else {
+            waypoints = arrow.waypoints;
           }
-          final startObjRect = arrow.startAttachment != null
-              ? drawingObjects[arrow.startAttachment!.objectId]?.rect
-              : null;
-          final endObjRect = arrow.endAttachment != null
-              ? drawingObjects[arrow.endAttachment!.objectId]?.rect
-              : null;
-          waypoints = OrthogonalRouter.route(
-            start: resolvedStart,
-            end: resolvedEnd,
-            obstacles: obstacles,
-            startObjectRect: startObjRect,
-            endObjectRect: endObjRect,
-            devicePixelRatio: 1.0,
-            zoom: 1.0,
-          );
         }
         final startPt = toMiniMap(resolvedStart);
         final endPt = toMiniMap(resolvedEnd);
