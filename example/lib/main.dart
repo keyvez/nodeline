@@ -168,6 +168,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _loadDefaultProject() {
+    // Seed new builds with the dense consciousness diagram — it doubles as the
+    // heavy routing benchmark (see TestDiagrams.consciousness).
+    try {
+      final projectData = MermaidImporter.import(TestDiagrams.consciousness);
+      controller.loadProject(projectData);
+      return;
+    } catch (_) {
+      // Fall through to the legacy flow-draw sample on any parse failure.
+    }
+
     final flowDrawCode = """
    // Vertical workflow with grouped steps
 

@@ -40,6 +40,7 @@ export 'package:flow_draw/src/models/entities.dart'
 export 'package:flow_draw/src/core/controller/flow_draw_controller.dart';
 export 'package:flow_draw/src/core/mermaid/mermaid_exporter.dart';
 export 'package:flow_draw/src/core/mermaid/mermaid_importer.dart';
+export 'package:flow_draw/src/core/mermaid/test_diagrams.dart';
 export 'package:flow_draw/src/core/parser/flow_draw_parser.dart';
 export 'package:flow_draw/src/core/utils/workflow_templates.dart';
 export 'package:flow_draw/src/core/utils/workflow_validator.dart';
