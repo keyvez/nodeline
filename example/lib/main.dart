@@ -17,7 +17,19 @@ String _fileKey(String name) => 'flow_draw_file_$name';
 
 void main() {
   FlanBinding.ensureInitialized();
+  _warmUpTextPainter();
   runApp(const MyApp());
+}
+
+/// Forces Flutter to load the default system font before any TextPainter
+/// is called inside a RenderObject.paint(), which would otherwise block
+/// the UI thread for up to 30 seconds on first use.
+void _warmUpTextPainter() {
+  final painter = TextPainter(
+    text: const TextSpan(text: ' ', style: TextStyle(fontSize: 16)),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  painter.dispose();
 }
 
 class MyApp extends StatelessWidget {

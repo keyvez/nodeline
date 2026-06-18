@@ -45,6 +45,11 @@ class FlowDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
   final Offset? snapHandlePosition;
   final List<SnapGuide> snapGuides;
 
+  /// When true, paints the handle hit-test zones as a translucent overlay so
+  /// you can see exactly which area each handle (especially arrow/line
+  /// endpoints) catches. Used to debug selection/drag-target issues.
+  final bool debugShowHitAreas;
+
   FlowDrawEditorRenderObjectWidget({
     super.key,
     required this.canvasState,
@@ -57,6 +62,7 @@ class FlowDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
     this.nodeBuilder,
     this.snapHandlePosition,
     this.snapGuides = const [],
+    this.debugShowHitAreas = false,
   }) : super(
          children: canvasState.nodes.values.map((node) {
            node.state.isSelected = selectionState.selectedNodeIds.contains(
@@ -82,6 +88,7 @@ class FlowDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
       tempDrawingObject: tempDrawingObject,
       snapHandlePosition: snapHandlePosition,
       snapGuides: snapGuides,
+      debugShowHitAreas: debugShowHitAreas,
     );
   }
 
@@ -98,6 +105,7 @@ class FlowDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
       ..tempDrawingObject = tempDrawingObject
       ..snapHandlePosition = snapHandlePosition
       ..snapGuides = snapGuides
+      ..debugShowHitAreas = debugShowHitAreas
       ..updateNodes(_getNodeDrawData());
   }
 
@@ -128,7 +136,9 @@ class FlowDrawEditorRenderBox extends RenderBox
     required this.tempDrawingObject,
     this.snapHandlePosition,
     List<SnapGuide> snapGuides = const [],
+    bool debugShowHitAreas = false,
   }) : _style = style,
+       _debugShowHitAreas = debugShowHitAreas,
        _gridShader = gridShader,
        _canvasState = canvasState,
        _selectionState = selectionState,
@@ -162,6 +172,16 @@ class FlowDrawEditorRenderBox extends RenderBox
   }
 
   Offset? snapHandlePosition;
+
+  bool _debugShowHitAreas;
+
+  bool get debugShowHitAreas => _debugShowHitAreas;
+
+  set debugShowHitAreas(bool value) {
+    if (_debugShowHitAreas == value) return;
+    _debugShowHitAreas = value;
+    markNeedsPaint();
+  }
 
   List<SnapGuide> _snapGuides;
 
@@ -411,7 +431,7 @@ class FlowDrawEditorRenderBox extends RenderBox
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0 * iz;
     final Paint selectedArrowPaint = Paint()
-      ..color = Colors.white
+      ..color = const Color(0xFF2196F3) // Same blue as connection port indicators
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0 * iz;
 
@@ -525,13 +545,7 @@ class FlowDrawEditorRenderBox extends RenderBox
               canvas, obj.rect.topLeft - Offset(0, textPainter.height));
         } else if (obj is TextObject) {
           if (!obj.isEditing) {
-            final textPainter = TextPainter(
-                text: TextSpan(text: obj.text, style: obj.style),
-                textDirection: TextDirection.ltr)
-              ..layout(
-                  maxWidth:
-                  obj.rect.width.isFinite ? obj.rect.width : double.infinity)
-              ..paint(canvas, obj.rect.topLeft);
+            obj.layoutPainter().paint(canvas, obj.rect.topLeft);
           }
         } else if (obj is CircleObject) {
           final circleFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
@@ -640,6 +654,12 @@ class FlowDrawEditorRenderBox extends RenderBox
           final rotCorner = selectionRect.topRight + Offset(rotOffset, -rotOffset);
           canvas.drawCircle(rotCorner, handleHitAreaRadius, handleHitAreaPaint);
           _paintRotationIcon(canvas, rotCorner, handlePaint, visibleHandleRadius);
+          if (_debugShowHitAreas) {
+            for (final corner in resizeCorners) {
+              _paintHitAreaDebug(canvas, corner, isEndpoint: false);
+            }
+            _paintHitAreaDebug(canvas, rotCorner, isEndpoint: false);
+          }
 
           if (selectionState.selectedDrawingObjectIds.length == 1 && (obj is RectangleObject || obj is CircleObject)) {
             _paintQuickActionArrows(canvas, obj.rect, obj.id);
@@ -802,10 +822,17 @@ class FlowDrawEditorRenderBox extends RenderBox
           );
 
           // Record this path's segments so subsequent arrows route around it.
-          final pts = [start, ...waypoints ?? [], end];
+          final pts = <Offset>[start, ...?waypoints, end];
           for (int i = 0; i < pts.length - 1; i++) {
             routedSegments.add((pts[i], pts[i + 1]));
           }
+          // Cache the exact polyline being drawn so hit-testing measures
+          // against the visible line (the router result here differs from a
+          // naive re-route, which previously caused taps to select the wrong
+          // edge).
+          obj.renderedPath = pts;
+        } else {
+          obj.renderedPath = null;
         }
 
         var controlPoint = obj.midPoint ?? (start + end) / 2;
@@ -994,6 +1021,17 @@ class FlowDrawEditorRenderBox extends RenderBox
             );
             canvas.drawCircle(handlePos, visibleHandleRadius, handlePaint);
           }
+          if (_debugShowHitAreas) {
+            // start and end are the connection-point endpoints; any remaining
+            // handle is the midpoint/corner.
+            _paintHitAreaDebug(canvas, start, isEndpoint: true);
+            _paintHitAreaDebug(canvas, end, isEndpoint: true);
+            for (final handlePos in handles) {
+              if (handlePos != start && handlePos != end) {
+                _paintHitAreaDebug(canvas, handlePos, isEndpoint: false);
+              }
+            }
+          }
         }
         continue;
       } else if (obj is LineObject) {
@@ -1089,10 +1127,66 @@ class FlowDrawEditorRenderBox extends RenderBox
             );
             canvas.drawCircle(handlePos, visibleHandleRadius, handlePaint);
           }
+          if (_debugShowHitAreas) {
+            _paintHitAreaDebug(canvas, start, isEndpoint: true);
+            _paintHitAreaDebug(canvas, end, isEndpoint: true);
+            _paintHitAreaDebug(canvas, onCurveMidPoint, isEndpoint: false);
+          }
         }
         continue;
       }
     }
+  }
+
+  /// Debug overlay: draws a handle's hit-test zone as a translucent filled
+  /// disc plus an outline ring, mirroring the priority-weighted radii used by
+  /// `_updateHoveredHandle` in the data layer. Endpoints (connection points)
+  /// get the expanded radius and a distinct colour so it's obvious why they win
+  /// contested clicks. Only painted when [debugShowHitAreas] is on.
+  void _paintHitAreaDebug(
+    Canvas canvas,
+    Offset center, {
+    required bool isEndpoint,
+  }) {
+    // Keep these in sync with _updateHoveredHandle in the data layer.
+    const double baseHitRadius = 10.0;
+    const double endpointRadiusFactor = 1.6;
+    final double radius =
+        (isEndpoint ? baseHitRadius * endpointRadiusFactor : baseHitRadius) /
+            zoom;
+    final Color color =
+        isEndpoint ? const Color(0xFF2196F3) : const Color(0xFFFF9800);
+
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = color.withOpacity(0.15)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = color.withOpacity(0.9)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0 / zoom,
+    );
+    // Crosshair at the exact handle point for precise reference.
+    final double tick = 3.0 / zoom;
+    final Paint tickPaint = Paint()
+      ..color = color.withOpacity(0.9)
+      ..strokeWidth = 1.0 / zoom;
+    canvas.drawLine(
+      center - Offset(tick, 0),
+      center + Offset(tick, 0),
+      tickPaint,
+    );
+    canvas.drawLine(
+      center - Offset(0, tick),
+      center + Offset(0, tick),
+      tickPaint,
+    );
   }
 
   /// Paints small port indicator circles at each cardinal anchor point of a

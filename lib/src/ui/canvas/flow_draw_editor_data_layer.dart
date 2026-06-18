@@ -75,6 +75,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   bool _isDrawing = false;
   bool _isEditingText = false;
 
+  /// Debug: overlay the handle hit-test zones on the canvas. Toggle with
+  /// Cmd/Ctrl+Shift+H. Endpoints (connection points) are drawn in blue with
+  /// the expanded radius; resize/rotate/midpoint zones in orange.
+  bool _debugShowHitAreas = false;
+
   bool _isRotating = false;
   Offset _rotationStartCenter = Offset.zero;
   double _rotationStartAngle = 0.0;
@@ -324,7 +329,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     if (details.pointerCount < 2) return;
 
     final state = _canvasBloc.state;
-    final newZoom = (_scaleStartZoom * details.scale).clamp(_computeMinZoom(), 10000.0);
+    final newZoom = (_scaleStartZoom * details.scale).clamp(_computeMinZoom(), double.infinity);
 
     final editorBounds = getEditorBoundsInScreen(kNodeEditorWidgetKey);
     if (editorBounds == null) return;
@@ -355,7 +360,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     // pan and incorrectly snapping zoom when scale == 1.0.
     if (event.scale == 1.0) return;
     final state = _canvasBloc.state;
-    final newZoom = (_scaleStartZoom * event.scale).clamp(_computeMinZoom(), 10000.0);
+    final newZoom = (_scaleStartZoom * event.scale).clamp(_computeMinZoom(), double.infinity);
     final editorBounds = getEditorBoundsInScreen(kNodeEditorWidgetKey);
     if (editorBounds == null) return;
     final focalPointRelativeToCenter = event.position - editorBounds.center;
@@ -377,7 +382,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       if (isZoomModifier) {
         final zoomDelta = -event.scrollDelta.dy * 0.001;
         final newZoom = state.viewportZoom * (1 + zoomDelta);
-        _canvasBloc.add(CanvasZoomed(newZoom.clamp(_computeMinZoom(), 10000.0)));
+        _canvasBloc.add(CanvasZoomed(newZoom.clamp(_computeMinZoom(), double.infinity)));
       } else {
         final panDelta = Offset(event.scrollDelta.dx, event.scrollDelta.dy) / state.viewportZoom;
         _canvasBloc.add(CanvasPanned(-panDelta));
@@ -551,23 +556,21 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       return;
     }
 
-    if (tool == EditorTool.arrow) {
-      // Update hovered handle from tap position before checking —
-      // on touch devices there are no hover events, so the handle
-      // state can be stale from a previous interaction.
-      _updateHoveredHandle(event.position);
-      // Check resize/rotation handles before quick actions so that
-      // handle taps are not swallowed by quick connector buttons.
-      if (_hoveredHandle.handle == Handle.rotate) {
-        _beginRotation(worldPos);
-        return;
-      }
-      if (_hoveredHandle.handle != Handle.none) {
-        _isResizing = _hoveredHandle;
-        _originalResizeRect =
-            _canvasBloc.state.drawingObjects[_isResizing.objectId]?.rect;
-        return;
-      }
+    // Update hovered handle from tap position before checking —
+    // on touch devices there are no hover events, so the handle
+    // state can be stale from a previous interaction.
+    _updateHoveredHandle(event.position);
+    // Check resize/rotation handles for any tool when something is selected,
+    // so objects can always be resized/rotated regardless of active tool.
+    if (_hoveredHandle.handle == Handle.rotate) {
+      _beginRotation(worldPos);
+      return;
+    }
+    if (_hoveredHandle.handle != Handle.none) {
+      _isResizing = _hoveredHandle;
+      _originalResizeRect =
+          _canvasBloc.state.drawingObjects[_isResizing.objectId]?.rect;
+      return;
     }
 
     if (_checkAndHandleQuickAction(worldPos)) {
@@ -1120,7 +1123,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     } else if (object is RectangleObject ||
         object is CircleObject ||
         object is FigureObject ||
-        object is SvgObject) {
+        object is SvgObject ||
+        object is TextObject) {
       final bool isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
 
       final Offset anchorWorld;
@@ -1177,9 +1181,13 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       dynamic updatedObject;
       if (object is TextObject) {
         if (newRect.shortestSide < 10.0) return;
+        // Scale font proportionally with the rect height.
+        final originalHeight = _originalResizeRect!.height;
+        final scale = originalHeight > 0 ? newRect.height / originalHeight : 1.0;
+        final newFontSize = (object.style.fontSize ?? 16) * scale;
         updatedObject = object.copyWith(
           rect: newRect,
-          style: object.style.copyWith(fontSize: newRect.height * 0.8),
+          style: object.style.copyWith(fontSize: newFontSize),
         );
       } else {
         updatedObject = (object as dynamic).copyWith(rect: newRect);
@@ -1629,36 +1637,36 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     final tolerance = 12.0 / canvasState.viewportZoom;
     final hitPadding = 6.0 / canvasState.viewportZoom;
 
-    for (final obj in canvasState.drawingObjects.values.toList().reversed) {
+    // Connections (arrows/lines) are thin: when several run close together, the
+    // click can be within tolerance of more than one. Picking the FIRST in
+    // z-order (the old behaviour) meant tapping near one segment could select a
+    // parallel segment farther away. Instead, gather every connection within
+    // tolerance and keep the one whose path is genuinely CLOSEST to the click;
+    // z-order only breaks near-exact ties.
+    String? closestConnectionId;
+    double closestConnectionDist = double.infinity;
+    int closestConnectionIndex = -1;
+
+    final objects = canvasState.drawingObjects.values.toList();
+    // Walk in reverse so a higher z-order index wins exact-distance ties.
+    for (int i = objects.length - 1; i >= 0; i--) {
+      final obj = objects[i];
       if (obj is ArrowObject) {
         final (start, end) = _getDynamicEndpoints(obj);
         final controlPoint = obj.midPoint ?? (start + end) / 2;
 
         Path path;
-        if (obj.pathType == LinkPathType.orthogonal) {
-          // Recompute waypoints dynamically for hit testing
-          List<Offset>? waypoints = obj.waypoints;
-          if (obj.startAttachment != null && obj.endAttachment != null) {
-            final startObjRect = _getAttachedObjectRect(obj.startAttachment);
-            final endObjRect = _getAttachedObjectRect(obj.endAttachment);
-            if (startObjRect != null && endObjRect != null) {
-              final obstacles = _collectObstacles(excludeId: obj.id);
-              waypoints = OrthogonalRouter.route(
-                start: start,
-                end: end,
-                obstacles: obstacles,
-                startObjectRect: startObjRect,
-                endObjectRect: endObjRect,
-                devicePixelRatio: MediaQuery.of(context).devicePixelRatio,
-                zoom: _canvasBloc.state.viewportZoom,
-              );
-            }
-          }
-          final allPoints = [start, ...?waypoints, end];
+        // Prefer the exact polyline the render object drew this frame so the
+        // hit corridor matches the visible line. `renderedPath` is set for
+        // orthogonal arrows (where a naive re-route diverges from what's drawn).
+        final rendered = obj.renderedPath;
+        if (obj.pathType == LinkPathType.orthogonal &&
+            rendered != null &&
+            rendered.length >= 2) {
           path = Path();
-          path.moveTo(allPoints[0].dx, allPoints[0].dy);
-          for (int i = 1; i < allPoints.length; i++) {
-            path.lineTo(allPoints[i].dx, allPoints[i].dy);
+          path.moveTo(rendered[0].dx, rendered[0].dy);
+          for (int j = 1; j < rendered.length; j++) {
+            path.lineTo(rendered[j].dx, rendered[j].dy);
           }
         } else {
           path = Path()
@@ -1671,8 +1679,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
             );
         }
 
-        if (isPointNearPath(path, worldPos, tolerance)) {
-          return obj.id;
+        final dist = distanceToPath(path, worldPos, tolerance);
+        if (dist != null && dist < closestConnectionDist) {
+          closestConnectionDist = dist;
+          closestConnectionId = obj.id;
+          closestConnectionIndex = i;
         }
       } else if (obj is LineObject) {
         final (start, end) = _getDynamicEndpoints(obj);
@@ -1682,12 +1693,24 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           ..moveTo(start.dx, start.dy)
           ..quadraticBezierTo(controlPoint.dx, controlPoint.dy, end.dx, end.dy);
 
-        if (isPointNearPath(path, worldPos, tolerance)) {
-          return obj.id;
+        final dist = distanceToPath(path, worldPos, tolerance);
+        if (dist != null && dist < closestConnectionDist) {
+          closestConnectionDist = dist;
+          closestConnectionId = obj.id;
+          closestConnectionIndex = i;
         }
       } else if (obj.rect.inflate(hitPadding).contains(worldPos)) {
-        return obj.id;
+        // A solid shape body contains the point. Prefer it over a connection
+        // only if the shape is above the closest connection in z-order;
+        // otherwise the connection (which sits on top) keeps priority.
+        if (closestConnectionId == null || i > closestConnectionIndex) {
+          return obj.id;
+        }
       }
+    }
+
+    if (closestConnectionId != null) {
+      return closestConnectionId;
     }
 
     for (final node in canvasState.nodes.values) {
@@ -1700,22 +1723,25 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     return null;
   }
 
-  bool isPointNearPath(Path path, Offset point, double tolerance) {
+  /// Returns the minimum distance from [point] to [path], or null if no sampled
+  /// point lies within [tolerance]. Samples finely (1px in world space) so thin,
+  /// closely-spaced connections can be ranked by true proximity.
+  double? distanceToPath(Path path, Offset point, double tolerance) {
     final pathBounds = path.getBounds();
     if (!pathBounds.inflate(tolerance).contains(point)) {
-      return false;
+      return null;
     }
 
+    double minDist = double.infinity;
     for (final metric in path.computeMetrics()) {
-      for (double d = 0; d < metric.length; d += 2.0) {
+      for (double d = 0; d <= metric.length; d += 1.0) {
         final tangent = metric.getTangentForOffset(d);
-        if (tangent != null &&
-            (tangent.position - point).distance < tolerance) {
-          return true;
-        }
+        if (tangent == null) continue;
+        final dist = (tangent.position - point).distance;
+        if (dist < minDist) minDist = dist;
       }
     }
-    return false;
+    return minDist <= tolerance ? minDist : null;
   }
 
   (Set<String>, Set<String>) _findObjectsInArea(Rect area) {
@@ -1780,9 +1806,38 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     );
     if (worldPos == null) return;
 
-    final dpr = MediaQuery.of(context).devicePixelRatio;
-    final handleHitAreaRadius = 20.0 * dpr / sqrt(canvasState.viewportZoom);
-    final rotationHitAreaRadius = 22.0 * dpr / sqrt(canvasState.viewportZoom);
+    final handleHitAreaRadius = 10.0 / canvasState.viewportZoom;
+    final rotationHitAreaRadius = 10.0 / canvasState.viewportZoom;
+
+    // Instead of "first handle within a flat circular zone wins" (which made
+    // grabbing arrow/line endpoints unreliable wherever their hit zones overlap
+    // a node body, a resize corner, or another endpoint), collect *every*
+    // candidate handle across all selected objects and pick the best by a
+    // priority-weighted distance.
+    //
+    // Connection points (arrowStart/arrowEnd) get a larger effective radius and
+    // a distance discount, so their zone effectively expands while competing
+    // handles narrow against it — the pointer is pulled toward the connection
+    // point when zones compete, matching user intent.
+    const double endpointRadiusFactor = 1.6; // expand connection-point reach
+    const double endpointDistanceBias = 0.5; // and discount its distance
+    const double midPointDistanceBias = 0.85;
+
+    (({String objectId, Handle handle}) candidate, double score)? best;
+
+    void consider(
+      String objectId,
+      Handle handle,
+      double distance,
+      double radius,
+      double bias,
+    ) {
+      if (distance >= radius) return;
+      final score = distance * bias;
+      if (best == null || score < best!.$2) {
+        best = ((objectId: objectId, handle: handle), score);
+      }
+    }
 
     for (final objectId in selectionState.selectedDrawingObjectIds) {
       final obj = canvasState.drawingObjects[objectId];
@@ -1808,15 +1863,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         // topRight is the dedicated rotation handle, offset away from object
         final rotOffset = 8.0 / canvasState.viewportZoom;
         final rotationCorner = selectionRect.topRight + Offset(rotOffset, -rotOffset);
-        final rotDist = (localPos - rotationCorner).distance;
-        if (rotDist < rotationHitAreaRadius) {
-          if (_hoveredHandle.objectId != objectId ||
-              _hoveredHandle.handle != Handle.rotate) {
-            setState(() => _hoveredHandle =
-                (objectId: objectId, handle: Handle.rotate));
-          }
-          return;
-        }
+        consider(objectId, Handle.rotate,
+            (localPos - rotationCorner).distance, rotationHitAreaRadius, 1.0);
 
         // Other 3 corners are resize handles
         final resizeHandles = {
@@ -1825,15 +1873,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           Handle.bottomLeft: selectionRect.bottomLeft,
         };
         for (final entry in resizeHandles.entries) {
-          final distance = (localPos - entry.value).distance;
-          if (distance < handleHitAreaRadius) {
-            if (_hoveredHandle.objectId != objectId ||
-                _hoveredHandle.handle != entry.key) {
-              setState(() =>
-                  _hoveredHandle = (objectId: objectId, handle: entry.key));
-            }
-            return;
-          }
+          consider(objectId, entry.key, (localPos - entry.value).distance,
+              handleHitAreaRadius, 1.0);
         }
       } else if (obj is ArrowObject) {
         final (start, end) = _getDynamicEndpoints(obj);
@@ -1851,55 +1892,45 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         final onCurveMidPoint =
             (start * 0.25) + (midPoint * 0.5) + (end * 0.25);
 
-        // For orthogonal arrows with waypoints, hide midpoint handle
-        final Map<Handle, Offset> handles;
-        if (obj.pathType == LinkPathType.orthogonal && obj.waypoints != null && obj.waypoints!.isNotEmpty) {
-          handles = {
-            Handle.arrowStart: start,
-            Handle.arrowEnd: end,
-          };
-        } else {
-          handles = {
-            Handle.arrowStart: start,
-            Handle.arrowEnd: end,
-            Handle.midPoint: obj.pathType == LinkPathType.orthogonal
-                ? cornerPoint
-                : onCurveMidPoint,
-          };
-        }
-        for (final entry in handles.entries) {
-          if ((worldPos - entry.value).distance < handleHitAreaRadius) {
-            if (_hoveredHandle.objectId != objectId ||
-                _hoveredHandle.handle != entry.key) {
-              setState(
-                    () => _hoveredHandle = (objectId: objectId, handle: entry.key),
-              );
-            }
-            return;
-          }
+        consider(objectId, Handle.arrowStart, (worldPos - start).distance,
+            handleHitAreaRadius * endpointRadiusFactor, endpointDistanceBias);
+        consider(objectId, Handle.arrowEnd, (worldPos - end).distance,
+            handleHitAreaRadius * endpointRadiusFactor, endpointDistanceBias);
+
+        // For orthogonal arrows with waypoints, hide the midpoint handle.
+        final hasWaypoints = obj.pathType == LinkPathType.orthogonal &&
+            obj.waypoints != null &&
+            obj.waypoints!.isNotEmpty;
+        if (!hasWaypoints) {
+          final midHandlePos = obj.pathType == LinkPathType.orthogonal
+              ? cornerPoint
+              : onCurveMidPoint;
+          consider(objectId, Handle.midPoint,
+              (worldPos - midHandlePos).distance, handleHitAreaRadius,
+              midPointDistanceBias);
         }
       } else if (obj is LineObject) {
         final (start, end) = _getDynamicEndpoints(obj);
         final midPoint = obj.midPoint ?? (start + end) / 2.0;
         final onCurveMidPoint =
             (start * 0.25) + (midPoint * 0.5) + (end * 0.25);
-        final handles = {
-          Handle.arrowStart: start,
-          Handle.arrowEnd: end,
-          Handle.midPoint: onCurveMidPoint,
-        };
-        for (final entry in handles.entries) {
-          if ((worldPos - entry.value).distance < handleHitAreaRadius) {
-            if (_hoveredHandle.objectId != objectId ||
-                _hoveredHandle.handle != entry.key) {
-              setState(
-                    () => _hoveredHandle = (objectId: objectId, handle: entry.key),
-              );
-            }
-            return;
-          }
-        }
+        consider(objectId, Handle.arrowStart, (worldPos - start).distance,
+            handleHitAreaRadius * endpointRadiusFactor, endpointDistanceBias);
+        consider(objectId, Handle.arrowEnd, (worldPos - end).distance,
+            handleHitAreaRadius * endpointRadiusFactor, endpointDistanceBias);
+        consider(objectId, Handle.midPoint,
+            (worldPos - onCurveMidPoint).distance, handleHitAreaRadius,
+            midPointDistanceBias);
       }
+    }
+
+    if (best != null) {
+      final winner = best!.$1;
+      if (_hoveredHandle.objectId != winner.objectId ||
+          _hoveredHandle.handle != winner.handle) {
+        setState(() => _hoveredHandle = winner);
+      }
+      return;
     }
 
     if (_hoveredHandle.handle != Handle.none) {
@@ -1961,16 +1992,13 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     } else {
       final zoom = _canvasBloc.state.viewportZoom;
       const initialText = 'Text';
-      // Font size in world units so text always appears 16px tall on screen.
-      final worldFontSize = 16.0 / zoom;
-      final initialStyle = TextStyle(fontSize: worldFontSize, color: Colors.white);
+      // fontSize in world units: 16 screen-px / zoom, so text appears as
+      // 16px on screen at creation zoom and scales naturally with zoom.
+      final initialStyle = TextStyle(fontSize: 16.0 / zoom, color: Colors.white);
 
-      // Derive world-space rect directly from desired screen dimensions.
-      // Approx 60×24 screen pixels for "Text" at 16px — divide by zoom for world units.
-      const screenW = 60.0;
-      const screenH = 24.0;
-      final w = screenW / zoom;
-      final h = screenH / zoom;
+      // Rect in world units: ~60×24 screen-px / zoom.
+      final w = 60.0 / zoom;
+      final h = 24.0 / zoom;
       object = TextObject(
         id: const Uuid().v4(),
         rect: Rect.fromLTWH(at!.dx - w / 2, at.dy - h / 2, w, h),
@@ -2007,20 +2035,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           ObjectsRemoved(nodeIds: {}, drawingObjectIds: {object.id}),
         );
       } else {
-        final textPainter = TextPainter(
-          text: TextSpan(text: newText, style: object.style),
-          textDirection: TextDirection.ltr,
-        )..layout();
-
         setState(() {
           object.text = newText;
-          // Re-center the text rect around its current center
-          final center = object.rect.center;
-          object.rect = Rect.fromCenter(
-            center: center,
-            width: textPainter.width,
-            height: textPainter.height,
-          );
         });
       }
 
@@ -2254,6 +2270,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                           nodeBuilder: widget.nodeBuilder,
                           snapHandlePosition: _hoveredSnapPoint?.worldPosition,
                           snapGuides: _activeSnapGuides,
+                          debugShowHitAreas: _debugShowHitAreas,
                         ),
                   ),
                 );
@@ -2330,6 +2347,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                       _canvasBloc.add(RedoRequested()),
                     const SingleActivator(LogicalKeyboardKey.keyY, control: true): () =>
                       _canvasBloc.add(RedoRequested()),
+                    // Debug: toggle hit-area overlay
+                    const SingleActivator(LogicalKeyboardKey.keyH, meta: true, shift: true): () =>
+                      setState(() => _debugShowHitAreas = !_debugShowHitAreas),
+                    const SingleActivator(LogicalKeyboardKey.keyH, control: true, shift: true): () =>
+                      setState(() => _debugShowHitAreas = !_debugShowHitAreas),
                     // Duplicate selection
                     const SingleActivator(LogicalKeyboardKey.keyD, meta: true): () {
                       _canvasBloc.add(SelectionDuplicated(selectionState.selectedDrawingObjectIds));

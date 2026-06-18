@@ -602,6 +602,12 @@ class ArrowObject extends DrawingObject {
   /// Optional text label displayed at the midpoint of this arrow.
   final String? arrowLabel;
 
+  /// Transient cache of the polyline actually drawn on screen (edge-snapped
+  /// start/end plus routed waypoints), written by the render object each paint.
+  /// Hit-testing measures against this so taps match the visible line exactly.
+  /// Not serialized and not part of copyWith — it is recomputed every frame.
+  List<Offset>? renderedPath;
+
   ArrowObject({
     required super.id,
     required this.start,
@@ -1040,25 +1046,71 @@ class FigureObject extends DrawingObject {
 
 class TextObject extends DrawingObject {
   Rect _rect;
-  String text;
-  TextStyle style;
+  String _text;
+  TextStyle _style;
   bool isEditing;
+
+  // Cached painter — rebuilt only when text, style, or width changes.
+  TextPainter? _cachedPainter;
+  String? _cachedText;
+  TextStyle? _cachedStyle;
+  double? _cachedWidth;
 
   TextObject({
     required super.id,
     required Rect rect,
-    this.text = 'Text',
-    this.style = const TextStyle(fontSize: 16, color: Colors.white),
+    String text = 'Text',
+    TextStyle style = const TextStyle(fontSize: 16, color: Colors.white),
     this.isEditing = false,
     super.isSelected,
     super.angle,
     super.creationZoom,
-  }) : _rect = rect;
+  })  : _rect = rect,
+        _text = text,
+        _style = style;
+
+  String get text => _text;
+  set text(String value) {
+    if (_text != value) {
+      _text = value;
+      _cachedPainter = null;
+    }
+  }
+
+  TextStyle get style => _style;
+  set style(TextStyle value) {
+    if (_style != value) {
+      _style = value;
+      _cachedPainter = null;
+    }
+  }
 
   @override
   Rect get rect => _rect;
 
-  set rect(Rect newRect) => _rect = newRect;
+  set rect(Rect newRect) {
+    if (newRect.width != _rect.width) _cachedPainter = null;
+    _rect = newRect;
+  }
+
+  /// Returns a laid-out TextPainter, re-layouting only when inputs changed.
+  TextPainter layoutPainter() {
+    final maxW = _rect.width.isFinite ? _rect.width : double.infinity;
+    if (_cachedPainter != null &&
+        _cachedText == _text &&
+        _cachedStyle == _style &&
+        _cachedWidth == maxW) {
+      return _cachedPainter!;
+    }
+    _cachedPainter = TextPainter(
+      text: TextSpan(text: _text, style: _style),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxW);
+    _cachedText = _text;
+    _cachedStyle = _style;
+    _cachedWidth = maxW;
+    return _cachedPainter!;
+  }
 
   @override
   Map<String, dynamic> toJson() => {
