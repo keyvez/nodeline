@@ -8,6 +8,7 @@ import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
 import 'package:flow_draw/src/core/utils/renderbox.dart';
 import 'package:flow_draw/src/core/utils/spatial_hash_grid.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:flow_draw/src/ui/canvas/paint_profiler.dart';
 import 'package:flow_draw/src/ui/nodes/node_widget.dart';
 import 'package:flow_draw/src/ui/shared/snap_guides.dart';
 import 'package:flutter/material.dart';
@@ -31,6 +32,16 @@ class _ParentData extends ContainerBoxParentData<RenderBox> {
   Offset nodeOffset = Offset.zero;
   NodeState state = NodeState();
   Rect rect = Rect.zero;
+}
+
+/// Cached output of routing one orthogonal arrow: the edge-snapped endpoints
+/// and routed waypoints actually drawn. Reused across paints while the routing
+/// signature is unchanged.
+class _RoutedArrow {
+  final Offset start;
+  final Offset end;
+  final List<Offset>? waypoints;
+  _RoutedArrow(this.start, this.end, this.waypoints);
 }
 
 class FlowDrawEditorRenderObjectWidget extends MultiChildRenderObjectWidget {
@@ -304,7 +315,37 @@ class FlowDrawEditorRenderBox extends RenderBox
   }
 
   @override
+  // ── Routing cache ──
+  // Routing is the dominant paint cost (A* per arrow). Its inputs are all
+  // world-space and zoom/DPR-independent (see OrthogonalRouter), so the routed
+  // geometry only changes when an arrow's endpoints, attachments, obstacle
+  // rects, port overrides, or angles change — NOT on pan or zoom. We hash all
+  // those inputs into a signature; when it is unchanged we reuse the cached
+  // routed polylines and skip every route() call.
+  //
+  // The cache is invalidated as a whole set, not per arrow, because routing is
+  // order-coupled: each arrow routes around the segments of all earlier arrows
+  // (existingSegments), so one arrow moving can legitimately re-route others.
+  String? _routeCacheSignature;
+  final Map<String, _RoutedArrow> _routeCache = {};
+
+  // Profiling accumulators, reset each paint and read back at the end.
+  final Stopwatch _profStopwatch = Stopwatch();
+  int _profRoutingUs = 0;
+  int _profObstaclesUs = 0;
+  int _profArrowCount = 0;
+  int _profRouteCalls = 0;
+
   void paint(PaintingContext context, Offset offset) {
+    final Stopwatch? sw = PaintProfiler.enabled ? (Stopwatch()..start()) : null;
+    if (PaintProfiler.enabled) _profStopwatch
+      ..reset()
+      ..start();
+    _profRoutingUs = 0;
+    _profObstaclesUs = 0;
+    _profArrowCount = 0;
+    _profRouteCalls = 0;
+
     final viewport = _prepareCanvas(context.canvas, size);
     _paintGrid(context.canvas, viewport);
 
@@ -327,6 +368,16 @@ class FlowDrawEditorRenderBox extends RenderBox
     _paintSelectionArea(context.canvas, viewport);
 
     _transformMatrixDirty = false;
+
+    if (sw != null) {
+      PaintProfiler.instance.recordPaint(
+        totalUs: sw.elapsedMicroseconds,
+        routingUs: _profRoutingUs,
+        obstaclesUs: _profObstaclesUs,
+        arrowCount: _profArrowCount,
+        routeCalls: _profRouteCalls,
+      );
+    }
   }
 
   Matrix4 _getTransformMatrix() {
@@ -420,6 +471,71 @@ class FlowDrawEditorRenderBox extends RenderBox
 
   double get dpr => WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
 
+  /// Hashes every input that affects routed arrow geometry into a compact
+  /// string. Endpoints, attachment rects/angles, port-spread overrides, and
+  /// the rects of all routing obstacles (non-arrow objects + nodes) are
+  /// included. Pan/zoom are deliberately excluded — routing is world-space and
+  /// zoom-independent — so panning or zooming keeps the signature stable and
+  /// reuses the cache.
+  String _buildRouteSignature(
+    Map<String, DrawingObject> drawingObjects,
+    Map<String, Offset> relOverrides,
+  ) {
+    final sb = StringBuffer();
+    // Round to 0.1px so sub-pixel float jitter from transforms does not bust
+    // the cache, while real moves still register.
+    String q(double v) => (v * 10).roundToDouble().toString();
+    void rect(Rect? r) {
+      if (r == null) {
+        sb.write('-;');
+      } else {
+        sb..write(q(r.left))..write(',')..write(q(r.top))..write(',')
+          ..write(q(r.width))..write(',')..write(q(r.height))..write(';');
+      }
+    }
+
+    // Obstacle geometry: every non-arrow drawing object and every node, since
+    // any of their rects feeds the obstacle list and the attachment rects.
+    for (final o in drawingObjects.values) {
+      if (o is ArrowObject || o is LineObject || o is PencilStrokeObject) {
+        continue;
+      }
+      sb..write(o.id)..write(':');
+      rect(o.rect);
+      sb..write(q(o.angle))..write('|');
+    }
+    for (final node in canvasState.nodes.values) {
+      sb..write(node.id)..write(':');
+      rect(getNodeBoundsInWorld(node));
+      sb.write('|');
+    }
+    sb.write('#');
+
+    // Arrow inputs: raw endpoints, attachments, and port overrides.
+    for (final o in drawingObjects.values) {
+      if (o is! ArrowObject) continue;
+      sb..write(o.id)..write('=');
+      sb..write(q(o.start.dx))..write(',')..write(q(o.start.dy))..write(',')
+        ..write(q(o.end.dx))..write(',')..write(q(o.end.dy))..write(',')
+        ..write(o.pathType.index)..write(':');
+      final sa = o.startAttachment;
+      final ea = o.endAttachment;
+      sb.write(sa == null
+          ? '-'
+          : '${sa.objectId},${q(sa.relativePosition.dx)},${q(sa.relativePosition.dy)}');
+      sb.write('/');
+      sb.write(ea == null
+          ? '-'
+          : '${ea.objectId},${q(ea.relativePosition.dx)},${q(ea.relativePosition.dy)}');
+      final so = relOverrides['${o.id}:start'];
+      final eo = relOverrides['${o.id}:end'];
+      if (so != null) sb.write('<s${q(so.dx)},${q(so.dy)}');
+      if (eo != null) sb.write('<e${q(eo.dx)},${q(eo.dy)}');
+      sb.write('|');
+    }
+    return sb.toString();
+  }
+
   void _paintDrawingObjects(Canvas canvas) {
     final iz = clampedInverseZoom;
     final Paint objectPaint = Paint()
@@ -509,6 +625,19 @@ class FlowDrawEditorRenderBox extends RenderBox
 
     // Accumulate routed segments so later arrows avoid overlapping earlier ones.
     final List<(Offset, Offset)> routedSegments = [];
+
+    // ── Routing cache validity ──
+    // Build a signature of every input that affects routed geometry. If it is
+    // unchanged since the last paint, the cached routes are reused and no
+    // route() call runs (pan and zoom never change this signature, so those
+    // frames pay nothing for routing).
+    final String routeSignature =
+        _buildRouteSignature(drawingObjects, relOverrides);
+    final bool routeCacheValid = routeSignature == _routeCacheSignature;
+    if (!routeCacheValid) {
+      _routeCache.clear();
+      _routeCacheSignature = routeSignature;
+    }
 
     for (final obj in drawingObjects.values) {
       final isSelected = selectionState.selectedDrawingObjectIds.contains(
@@ -775,6 +904,20 @@ class FlowDrawEditorRenderBox extends RenderBox
         final endIsRotated = endObjAngle.abs() > rotationThreshold;
 
         if (pathType == LinkPathType.orthogonal) {
+          // Fast path: reuse the previously routed geometry when nothing that
+          // affects routing changed (e.g. pure pan/zoom, or selecting an
+          // object). Skips edge-snapping, obstacle collection, and route().
+          final cached = routeCacheValid ? _routeCache[obj.id] : null;
+          if (cached != null) {
+            start = cached.start;
+            end = cached.end;
+            waypoints = cached.waypoints;
+            final pts = <Offset>[start, ...?waypoints, end];
+            for (int i = 0; i < pts.length - 1; i++) {
+              routedSegments.add((pts[i], pts[i + 1]));
+            }
+            obj.renderedPath = pts;
+          } else {
           // Snap start/end to nearest object edge, but skip for rotated
           // objects — the rotated point is already on the correct visual edge.
           if (startObjRect != null && !startIsRotated) {
@@ -786,6 +929,8 @@ class FlowDrawEditorRenderBox extends RenderBox
 
           // Collect obstacles, excluding source/target objects — the router
           // handles them separately via startObjectRect/endObjectRect
+          final int _obstStart =
+              PaintProfiler.enabled ? _profStopwatch.elapsedMicroseconds : 0;
           final startAttachId = obj.startAttachment?.objectId;
           final endAttachId = obj.endAttachment?.objectId;
           final obstacles = <Rect>[];
@@ -800,6 +945,10 @@ class FlowDrawEditorRenderBox extends RenderBox
             final bounds = getNodeBoundsInWorld(node);
             if (bounds != null) obstacles.add(bounds);
           }
+          if (PaintProfiler.enabled) {
+            _profObstaclesUs +=
+                _profStopwatch.elapsedMicroseconds - _obstStart;
+          }
 
           final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
           // For rotated objects, pass the rotated bounding box so the router
@@ -810,6 +959,8 @@ class FlowDrawEditorRenderBox extends RenderBox
           final routerEndRect = endIsRotated && endObjRect != null
               ? _rotatedBoundingBox(endObjRect, endObjAngle)
               : endObjRect;
+          final int _routeStart =
+              PaintProfiler.enabled ? _profStopwatch.elapsedMicroseconds : 0;
           waypoints = OrthogonalRouter.route(
             start: start,
             end: end,
@@ -820,6 +971,12 @@ class FlowDrawEditorRenderBox extends RenderBox
             zoom: canvasState.viewportZoom,
             existingSegments: routedSegments,
           );
+          if (PaintProfiler.enabled) {
+            _profRoutingUs +=
+                _profStopwatch.elapsedMicroseconds - _routeStart;
+            _profRouteCalls++;
+            _profArrowCount++;
+          }
 
           // Record this path's segments so subsequent arrows route around it.
           final pts = <Offset>[start, ...?waypoints, end];
@@ -831,6 +988,9 @@ class FlowDrawEditorRenderBox extends RenderBox
           // naive re-route, which previously caused taps to select the wrong
           // edge).
           obj.renderedPath = pts;
+          // Store the routed geometry so subsequent pan/zoom frames reuse it.
+          _routeCache[obj.id] = _RoutedArrow(start, end, waypoints);
+          } // end route-cache miss branch
         } else {
           obj.renderedPath = null;
         }

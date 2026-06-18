@@ -7,6 +7,7 @@ export 'package:flow_draw/src/blocs/tool/tool_bloc.dart';
 export 'package:flow_draw/src/models/styles.dart';
 
 export 'package:flow_draw/src/ui/canvas/flow_draw_canvas.dart';
+export 'package:flow_draw/src/ui/canvas/paint_profiler.dart' show PaintProfiler;
 export 'package:flow_draw/src/ui/nodes/builders.dart';
 export 'package:flow_draw/src/ui/shared/toolbar.dart';
 export 'package:flow_draw/src/ui/shared/history_panel.dart';

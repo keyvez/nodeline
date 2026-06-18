@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../ui/nodes/builders.dart';
 import 'flow_draw_editor_data_layer.dart';
+import 'paint_profiler.dart';
 
 export 'flow_draw_editor_data_layer.dart' show FlOverlayData;
 
@@ -43,6 +44,7 @@ class FlowDrawCanvas extends StatelessWidget {
               nodeBuilder: nodeBuilder,
             ),
           ),
+          if (PaintProfiler.enabled) const FpsOverlay(),
           if (overlay != null)
             ...overlay!().map(
               (overlayData) => Positioned(
