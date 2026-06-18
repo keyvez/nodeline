@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/widgets.dart';
 
 /// Lightweight per-frame profiler for the canvas render object.
 ///
@@ -16,8 +16,16 @@ class PaintProfiler {
   PaintProfiler._();
   static final PaintProfiler instance = PaintProfiler._();
 
-  /// Set false to disable all instrumentation (zero overhead in paint()).
-  static bool enabled = false;
+  /// Reactive on/off switch for the perf overlay + instrumentation. Listen to
+  /// it to show/hide the overlay; read [enabled] for the cheap hot-path check.
+  static final ValueNotifier<bool> enabledListenable = ValueNotifier<bool>(false);
+
+  /// Fast, allocation-free check used in paint()/build() hot paths.
+  static bool get enabled => enabledListenable.value;
+  static set enabled(bool v) => enabledListenable.value = v;
+
+  /// Flip the overlay on/off (e.g. from an in-app toggle button).
+  static void toggle() => enabledListenable.value = !enabledListenable.value;
 
   // Rolling window of the last [_window] paints for each phase.
   static const int _window = 60;
@@ -224,7 +232,7 @@ class _FpsOverlayState extends State<FpsOverlay> {
   @override
   Widget build(BuildContext context) {
     return Positioned(
-      top: 80,
+      top: 118,
       left: 12,
       child: IgnorePointer(
         child: ValueListenableBuilder<int>(
@@ -284,6 +292,55 @@ class _FpsOverlayState extends State<FpsOverlay> {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+/// Small always-present toggle that turns the perf overlay on/off in-app.
+/// Sits in the bottom-left of the canvas. Tap to flip [PaintProfiler.enabled].
+class PaintProfilerToggle extends StatelessWidget {
+  const PaintProfilerToggle({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: 80,
+      left: 12,
+      child: ValueListenableBuilder<bool>(
+        valueListenable: PaintProfiler.enabledListenable,
+        builder: (context, on, _) {
+          return GestureDetector(
+            onTap: PaintProfiler.toggle,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              decoration: BoxDecoration(
+                color: on ? const Color(0xCC1D4ED8) : const Color(0x99000000),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                    color: on ? const Color(0xFF60A5FA) : const Color(0x33FFFFFF)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(on ? Icons.speed : Icons.speed_outlined,
+                      size: 13, color: const Color(0xFFE5E7EB)),
+                  const SizedBox(width: 5),
+                  Text(
+                    on ? 'Perf ON' : 'Perf',
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      color: Color(0xFFE5E7EB),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

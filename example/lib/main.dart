@@ -18,7 +18,7 @@ String _fileKey(String name) => 'flow_draw_file_$name';
 void main() {
   FlanBinding.ensureInitialized();
   // Flip to true for a live FPS + paint-cost overlay (routing/obstacle timing).
-  // PaintProfiler.enabled = true;
+  // Perf overlay defaults off; toggle it in-app via the "Perf" button.
   _warmUpTextPainter();
   runApp(const MyApp());
 }

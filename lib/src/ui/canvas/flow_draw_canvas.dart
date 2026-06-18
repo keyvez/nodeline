@@ -44,7 +44,12 @@ class FlowDrawCanvas extends StatelessWidget {
               nodeBuilder: nodeBuilder,
             ),
           ),
-          if (PaintProfiler.enabled) const FpsOverlay(),
+          ValueListenableBuilder<bool>(
+            valueListenable: PaintProfiler.enabledListenable,
+            builder: (context, on, _) =>
+                on ? const FpsOverlay() : const SizedBox.shrink(),
+          ),
+          const PaintProfilerToggle(),
           if (overlay != null)
             ...overlay!().map(
               (overlayData) => Positioned(
