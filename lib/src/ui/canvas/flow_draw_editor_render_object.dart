@@ -338,6 +338,9 @@ class FlowDrawEditorRenderBox extends RenderBox
   int _profObstaclesUs = 0;
   int _profArrowCount = 0;
   int _profRouteCalls = 0;
+  int _profGridUs = 0;
+  int _profChildrenUs = 0;
+  int _profDrawObjUs = 0;
 
   void paint(PaintingContext context, Offset offset) {
     final Stopwatch? sw = PaintProfiler.enabled ? (Stopwatch()..start()) : null;
@@ -351,6 +354,7 @@ class FlowDrawEditorRenderBox extends RenderBox
 
     final viewport = _prepareCanvas(context.canvas, size);
     _paintGrid(context.canvas, viewport);
+    final int _gridUs = sw?.elapsedMicroseconds ?? 0;
 
     final visibleNodes = _spatialHashGrid.queryArea(viewport.inflate(300));
 
@@ -363,8 +367,15 @@ class FlowDrawEditorRenderBox extends RenderBox
       }
       child = childParentData.nextSibling;
     }
+    final int _childrenUs = sw?.elapsedMicroseconds ?? 0;
 
     _paintDrawingObjects(context.canvas);
+    final int _drawObjUs = sw?.elapsedMicroseconds ?? 0;
+    if (sw != null) {
+      _profGridUs = _gridUs;
+      _profChildrenUs = _childrenUs - _gridUs;
+      _profDrawObjUs = _drawObjUs - _childrenUs;
+    }
     _paintSnapHandle(context.canvas);
     _paintTempDrawingObject(context.canvas);
     _paintSnapGuides(context.canvas, viewport);
@@ -379,6 +390,9 @@ class FlowDrawEditorRenderBox extends RenderBox
         obstaclesUs: _profObstaclesUs,
         arrowCount: _profArrowCount,
         routeCalls: _profRouteCalls,
+        gridUs: _profGridUs,
+        childrenUs: _profChildrenUs,
+        drawObjUs: _profDrawObjUs,
       );
     }
   }

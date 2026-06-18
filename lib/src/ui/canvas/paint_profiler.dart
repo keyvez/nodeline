@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
@@ -21,8 +23,16 @@ class PaintProfiler {
   final _total = _Ring(_window);
   final _routing = _Ring(_window);
   final _obstacles = _Ring(_window);
+  final _grid = _Ring(_window);
+  final _children = _Ring(_window);
+  final _drawObj = _Ring(_window);
   int _arrowCount = 0;
   int _routeCalls = 0;
+  // Instantaneous (last-frame) values — averages mislead after a one-shot
+  // import frame decays through the rolling window.
+  double lastTotalMs = 0;
+  double lastDrawMs = 0;
+  double lastRouteMs = 0;
 
   /// Notifies the overlay to rebuild after each recorded paint.
   final ValueNotifier<int> tick = ValueNotifier<int>(0);
@@ -34,13 +44,22 @@ class PaintProfiler {
     required int obstaclesUs,
     required int arrowCount,
     required int routeCalls,
+    int gridUs = 0,
+    int childrenUs = 0,
+    int drawObjUs = 0,
   }) {
     if (!enabled) return;
     _total.add(totalUs);
     _routing.add(routingUs);
     _obstacles.add(obstaclesUs);
+    _grid.add(gridUs);
+    _children.add(childrenUs);
+    _drawObj.add(drawObjUs);
     _arrowCount = arrowCount;
     _routeCalls = routeCalls;
+    lastTotalMs = totalUs / 1000.0;
+    lastDrawMs = drawObjUs / 1000.0;
+    lastRouteMs = routingUs / 1000.0;
     // We are inside paint(); mutating a ValueNotifier now would schedule a
     // build during the frame. Defer the overlay refresh to the next frame.
     if (!_notifyScheduled) {
@@ -57,6 +76,9 @@ class PaintProfiler {
   double get avgTotalMs => _total.avg / 1000.0;
   double get avgRoutingMs => _routing.avg / 1000.0;
   double get avgObstaclesMs => _obstacles.avg / 1000.0;
+  double get avgGridMs => _grid.avg / 1000.0;
+  double get avgChildrenMs => _children.avg / 1000.0;
+  double get avgDrawObjMs => _drawObj.avg / 1000.0;
   int get arrowCount => _arrowCount;
   int get routeCalls => _routeCalls;
 }
@@ -99,17 +121,35 @@ class FpsOverlay extends StatefulWidget {
 class _FpsOverlayState extends State<FpsOverlay> {
   final List<double> _frameMs = [];
   double _fps = 0;
+  int _lastFrameStampMs = 0; // engine clock of the most recent frame seen
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     SchedulerBinding.instance.addTimingsCallback(_onTimings);
+    // Refresh the readout on a low-frequency timer instead of every frame.
+    // A Timer does NOT schedule render frames on its own, and setState here
+    // only rebuilds this tiny overlay subtree (the canvas is a separate
+    // RenderObject), so the app still goes fully idle when nothing moves —
+    // while the number stays "live" enough to read.
+    _refreshTimer =
+        Timer.periodic(const Duration(milliseconds: 500), (_) => _refresh());
   }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     SchedulerBinding.instance.removeTimingsCallback(_onTimings);
     super.dispose();
+  }
+
+  void _refresh() {
+    if (!mounted) return;
+    // If no frame has been reported recently, the app is idle → show 0 fps.
+    final idleMs = DateTime.now().millisecondsSinceEpoch - _lastFrameStampMs;
+    final displayFps = idleMs > 700 ? 0.0 : _fps;
+    setState(() => _fps = displayFps);
   }
 
   void _onTimings(List<FrameTiming> timings) {
@@ -122,9 +162,15 @@ class _FpsOverlayState extends State<FpsOverlay> {
     while (_frameMs.length > 60) {
       _frameMs.removeAt(0);
     }
+    _lastFrameStampMs = DateTime.now().millisecondsSinceEpoch;
     if (_frameMs.isEmpty) return;
     final avgMs = _frameMs.reduce((a, b) => a + b) / _frameMs.length;
-    setState(() => _fps = avgMs > 0 ? 1000.0 / avgMs : 0);
+    // IMPORTANT: do NOT setState() here. addTimingsCallback fires after every
+    // frame; calling setState would mark this widget dirty and schedule the
+    // next frame, creating a self-perpetuating repaint loop that pegs the app
+    // at a constant framerate even when the canvas is idle. The 500ms timer
+    // above does the (frame-free) display refresh.
+    _fps = avgMs > 0 ? 1000.0 / avgMs : 0;
   }
 
   @override
@@ -169,10 +215,11 @@ class _FpsOverlayState extends State<FpsOverlay> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    Text('paint   ${p.avgTotalMs.toStringAsFixed(2)} ms'),
-                    Text('  route ${p.avgRoutingMs.toStringAsFixed(2)} ms '
+                    Text('paint   ${p.lastTotalMs.toStringAsFixed(2)} ms '
+                        '(avg ${p.avgTotalMs.toStringAsFixed(1)})'),
+                    Text('  draw  ${p.lastDrawMs.toStringAsFixed(2)} ms'),
+                    Text('  route ${p.lastRouteMs.toStringAsFixed(2)} ms '
                         '(${p.routeCalls}×)'),
-                    Text('  obst  ${p.avgObstaclesMs.toStringAsFixed(2)} ms'),
                     Text('arrows  ${p.arrowCount}'),
                   ],
                 ),
