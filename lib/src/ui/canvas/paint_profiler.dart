@@ -33,6 +33,11 @@ class PaintProfiler {
   double lastTotalMs = 0;
   double lastDrawMs = 0;
   double lastRouteMs = 0;
+  // Monotonic count of canvas paints. The overlay watches this: if it stops
+  // advancing, the canvas RenderObject is genuinely idle (not repainting),
+  // regardless of what the FPS line shows.
+  int canvasPaintCount = 0;
+  int lastCanvasPaintStampMs = 0;
 
   /// Notifies the overlay to rebuild after each recorded paint.
   final ValueNotifier<int> tick = ValueNotifier<int>(0);
@@ -60,6 +65,8 @@ class PaintProfiler {
     lastTotalMs = totalUs / 1000.0;
     lastDrawMs = drawObjUs / 1000.0;
     lastRouteMs = routingUs / 1000.0;
+    canvasPaintCount++;
+    lastCanvasPaintStampMs = DateTime.now().millisecondsSinceEpoch;
     // We are inside paint(); mutating a ValueNotifier now would schedule a
     // build during the frame. Defer the overlay refresh to the next frame.
     if (!_notifyScheduled) {
@@ -123,6 +130,13 @@ class _FpsOverlayState extends State<FpsOverlay> {
   double _fps = 0;
   int _lastFrameStampMs = 0; // engine clock of the most recent frame seen
   Timer? _refreshTimer;
+  // Canvas-paint-rate tracking: sample canvasPaintCount each refresh tick to
+  // derive paints/sec. This is the meaningful number — engine FPS is polluted
+  // by this overlay's own 500ms refresh frames.
+  int _lastSampledPaintCount = 0;
+  int _lastSampleStampMs = 0;
+  double _canvasFps = 0;
+  bool _canvasIdle = true;
 
   @override
   void initState() {
@@ -146,9 +160,24 @@ class _FpsOverlayState extends State<FpsOverlay> {
 
   void _refresh() {
     if (!mounted) return;
-    // If no frame has been reported recently, the app is idle → show 0 fps.
-    final idleMs = DateTime.now().millisecondsSinceEpoch - _lastFrameStampMs;
-    final displayFps = idleMs > 700 ? 0.0 : _fps;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final p = PaintProfiler.instance;
+
+    // Canvas paints/sec since the last sample — the honest "is it repainting"
+    // number. If the canvas hasn't painted in >600ms, it is genuinely idle.
+    final dPaints = p.canvasPaintCount - _lastSampledPaintCount;
+    final dtMs = now - _lastSampleStampMs;
+    if (dtMs > 0) {
+      _canvasFps = dPaints * 1000.0 / dtMs;
+    }
+    _lastSampledPaintCount = p.canvasPaintCount;
+    _lastSampleStampMs = now;
+    _canvasIdle = (now - p.lastCanvasPaintStampMs) > 600;
+    if (_canvasIdle) _canvasFps = 0;
+
+    // Engine FPS (overlay-polluted) only meaningful while actively painting.
+    final engineIdleMs = now - _lastFrameStampMs;
+    final displayFps = engineIdleMs > 700 ? 0.0 : _fps;
     setState(() => _fps = displayFps);
   }
 
@@ -183,11 +212,16 @@ class _FpsOverlayState extends State<FpsOverlay> {
           valueListenable: PaintProfiler.instance.tick,
           builder: (context, _, __) {
             final p = PaintProfiler.instance;
-            final fpsColor = _fps >= 55
-                ? const Color(0xFF4ADE80)
-                : _fps >= 30
-                    ? const Color(0xFFFACC15)
-                    : const Color(0xFFF87171);
+            final headline = _canvasIdle
+                ? 'IDLE (canvas not repainting)'
+                : '${_canvasFps.toStringAsFixed(0)} canvas fps';
+            final headColor = _canvasIdle
+                ? const Color(0xFF60A5FA) // blue = good (truly idle)
+                : _canvasFps >= 55
+                    ? const Color(0xFF4ADE80)
+                    : _canvasFps >= 30
+                        ? const Color(0xFFFACC15)
+                        : const Color(0xFFF87171);
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
@@ -207,20 +241,21 @@ class _FpsOverlayState extends State<FpsOverlay> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      '${_fps.toStringAsFixed(0)} fps',
+                      headline,
                       style: TextStyle(
-                        color: fpsColor,
+                        color: headColor,
                         fontFamily: 'monospace',
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    Text('paints  ${p.canvasPaintCount}'),
                     Text('paint   ${p.lastTotalMs.toStringAsFixed(2)} ms '
                         '(avg ${p.avgTotalMs.toStringAsFixed(1)})'),
                     Text('  draw  ${p.lastDrawMs.toStringAsFixed(2)} ms'),
                     Text('  route ${p.lastRouteMs.toStringAsFixed(2)} ms '
                         '(${p.routeCalls}×)'),
-                    Text('arrows  ${p.arrowCount}'),
+                    Text('engine  ${_fps.toStringAsFixed(0)} fps'),
                   ],
                 ),
               ),
