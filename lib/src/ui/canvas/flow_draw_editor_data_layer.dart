@@ -1655,31 +1655,19 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         final (start, end) = _getDynamicEndpoints(obj);
         final controlPoint = obj.midPoint ?? (start + end) / 2;
 
-        Path path;
         // Prefer the exact polyline the render object drew this frame so the
         // hit corridor matches the visible line. `renderedPath` is set for
         // orthogonal arrows (where a naive re-route diverges from what's drawn).
         final rendered = obj.renderedPath;
+        double? dist;
         if (obj.pathType == LinkPathType.orthogonal &&
             rendered != null &&
             rendered.length >= 2) {
-          path = Path();
-          path.moveTo(rendered[0].dx, rendered[0].dy);
-          for (int j = 1; j < rendered.length; j++) {
-            path.lineTo(rendered[j].dx, rendered[j].dy);
-          }
+          dist = _distanceToPolyline(rendered, worldPos, tolerance);
         } else {
-          path = Path()
-            ..moveTo(start.dx, start.dy)
-            ..quadraticBezierTo(
-              controlPoint.dx,
-              controlPoint.dy,
-              end.dx,
-              end.dy,
-            );
+          dist = _distanceToPolyline(
+              _sampleQuadratic(start, controlPoint, end), worldPos, tolerance);
         }
-
-        final dist = distanceToPath(path, worldPos, tolerance);
         if (dist != null && dist < closestConnectionDist) {
           closestConnectionDist = dist;
           closestConnectionId = obj.id;
@@ -1689,11 +1677,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         final (start, end) = _getDynamicEndpoints(obj);
         final controlPoint = obj.midPoint ?? (start + end) / 2;
 
-        final path = Path()
-          ..moveTo(start.dx, start.dy)
-          ..quadraticBezierTo(controlPoint.dx, controlPoint.dy, end.dx, end.dy);
-
-        final dist = distanceToPath(path, worldPos, tolerance);
+        final dist = _distanceToPolyline(
+            _sampleQuadratic(start, controlPoint, end), worldPos, tolerance);
         if (dist != null && dist < closestConnectionDist) {
           closestConnectionDist = dist;
           closestConnectionId = obj.id;
@@ -1742,6 +1727,65 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       }
     }
     return minDist <= tolerance ? minDist : null;
+  }
+
+  /// Exact point-to-polyline distance for orthogonal/segmented arrows.
+  /// O(segments) — avoids Path.computeMetrics() + per-pixel getTangentForOffset
+  /// sampling, which was costing ~hundreds of ms per pointer move across all
+  /// arrows during hover hit-testing.
+  double? _distanceToPolyline(
+      List<Offset> pts, Offset point, double tolerance) {
+    if (pts.length < 2) return null;
+    // Cheap bounding-box reject.
+    double minX = pts[0].dx, maxX = pts[0].dx, minY = pts[0].dy, maxY = pts[0].dy;
+    for (final p in pts) {
+      if (p.dx < minX) minX = p.dx;
+      if (p.dx > maxX) maxX = p.dx;
+      if (p.dy < minY) minY = p.dy;
+      if (p.dy > maxY) maxY = p.dy;
+    }
+    if (point.dx < minX - tolerance ||
+        point.dx > maxX + tolerance ||
+        point.dy < minY - tolerance ||
+        point.dy > maxY + tolerance) {
+      return null;
+    }
+    double minDist = double.infinity;
+    for (int i = 0; i < pts.length - 1; i++) {
+      final d = _distanceToSegment(point, pts[i], pts[i + 1]);
+      if (d < minDist) minDist = d;
+    }
+    return minDist <= tolerance ? minDist : null;
+  }
+
+  /// Samples a quadratic bezier into a short polyline for cheap hit-testing.
+  List<Offset> _sampleQuadratic(Offset p0, Offset c, Offset p1,
+      {int segments = 16}) {
+    final pts = <Offset>[];
+    for (int i = 0; i <= segments; i++) {
+      final t = i / segments;
+      final u = 1 - t;
+      // B(t) = u²·p0 + 2·u·t·c + t²·p1
+      final x = u * u * p0.dx + 2 * u * t * c.dx + t * t * p1.dx;
+      final y = u * u * p0.dy + 2 * u * t * c.dy + t * t * p1.dy;
+      pts.add(Offset(x, y));
+    }
+    return pts;
+  }
+
+  /// Shortest distance from [p] to the line segment [a]-[b].
+  double _distanceToSegment(Offset p, Offset a, Offset b) {
+    final dx = b.dx - a.dx;
+    final dy = b.dy - a.dy;
+    final lenSq = dx * dx + dy * dy;
+    if (lenSq == 0) return (p - a).distance;
+    var t = ((p.dx - a.dx) * dx + (p.dy - a.dy) * dy) / lenSq;
+    t = t.clamp(0.0, 1.0);
+    final projX = a.dx + t * dx;
+    final projY = a.dy + t * dy;
+    final ddx = p.dx - projX;
+    final ddy = p.dy - projY;
+    return sqrt(ddx * ddx + ddy * ddy);
   }
 
   (Set<String>, Set<String>) _findObjectsInArea(Rect area) {
@@ -2237,7 +2281,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
             if (mounted) _onCanvasSizeChanged(size);
           });
         }
-        return _buildContent();
+        if (!PaintProfiler.enabled) return _buildContent();
+        final sw = Stopwatch()..start();
+        final w = _buildContent();
+        PaintProfiler.instance.recordBuild(sw.elapsedMicroseconds);
+        return w;
       },
     );
   }

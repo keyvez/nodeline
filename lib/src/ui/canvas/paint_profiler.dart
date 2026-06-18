@@ -38,6 +38,19 @@ class PaintProfiler {
   // regardless of what the FPS line shows.
   int canvasPaintCount = 0;
   int lastCanvasPaintStampMs = 0;
+  // Widget-tree build tracking for the data layer (build/layout is a separate
+  // phase from paint() and is the usual hidden cost during interaction).
+  int dataLayerBuildCount = 0;
+  double lastBuildMs = 0;
+  final _build = _Ring(_window);
+  double get avgBuildMs => _build.avg / 1000.0;
+
+  void recordBuild(int micros) {
+    if (!enabled) return;
+    dataLayerBuildCount++;
+    lastBuildMs = micros / 1000.0;
+    _build.add(micros);
+  }
 
   /// Notifies the overlay to rebuild after each recorded paint.
   final ValueNotifier<int> tick = ValueNotifier<int>(0);
@@ -137,6 +150,8 @@ class _FpsOverlayState extends State<FpsOverlay> {
   int _lastSampleStampMs = 0;
   double _canvasFps = 0;
   bool _canvasIdle = true;
+  double _lastUiMs = 0;
+  double _lastRasterMs = 0;
 
   @override
   void initState() {
@@ -187,6 +202,9 @@ class _FpsOverlayState extends State<FpsOverlay> {
       // Total frame time = build/UI thread + raster thread.
       final ms = t.totalSpan.inMicroseconds / 1000.0;
       _frameMs.add(ms);
+      // Split: UI thread (build+layout+paint) vs raster thread (GPU).
+      _lastUiMs = t.buildDuration.inMicroseconds / 1000.0;
+      _lastRasterMs = t.rasterDuration.inMicroseconds / 1000.0;
     }
     while (_frameMs.length > 60) {
       _frameMs.removeAt(0);
@@ -249,13 +267,15 @@ class _FpsOverlayState extends State<FpsOverlay> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    Text('paints  ${p.canvasPaintCount}'),
+                    Text('UI thr  ${_lastUiMs.toStringAsFixed(2)} ms'),
+                    Text('raster  ${_lastRasterMs.toStringAsFixed(2)} ms'),
+                    Text('build   ${p.lastBuildMs.toStringAsFixed(2)} ms '
+                        '(#${p.dataLayerBuildCount})'),
                     Text('paint   ${p.lastTotalMs.toStringAsFixed(2)} ms '
-                        '(avg ${p.avgTotalMs.toStringAsFixed(1)})'),
+                        '(#${p.canvasPaintCount})'),
                     Text('  draw  ${p.lastDrawMs.toStringAsFixed(2)} ms'),
                     Text('  route ${p.lastRouteMs.toStringAsFixed(2)} ms '
                         '(${p.routeCalls}×)'),
-                    Text('engine  ${_fps.toStringAsFixed(0)} fps'),
                   ],
                 ),
               ),
