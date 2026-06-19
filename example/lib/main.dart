@@ -633,34 +633,64 @@ start -> outputPhase
                       ],
                     ),
                   ),
-                  // PNG export button (top-right)
+                  // Save + PNG export buttons (top-right)
                   Positioned(
                     top: 32,
                     right: 16,
-                    child: Builder(
-                      builder: (blocContext) => Material(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(8),
-                        child: InkWell(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Material(
+                          color: Colors.black54,
                           borderRadius: BorderRadius.circular(8),
-                          onTap: () => _exportPng(blocContext),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.image_outlined,
-                                    color: Colors.white70, size: 16),
-                                SizedBox(width: 6),
-                                Text('PNG',
-                                    style: TextStyle(
-                                        color: Colors.white70, fontSize: 12)),
-                              ],
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: _saveCurrentFile,
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.save_outlined,
+                                      color: Colors.white70, size: 16),
+                                  SizedBox(width: 6),
+                                  Text('Save',
+                                      style: TextStyle(
+                                          color: Colors.white70, fontSize: 12)),
+                                ],
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        Builder(
+                          builder: (blocContext) => Material(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(8),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: () => _exportPng(blocContext),
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.image_outlined,
+                                        color: Colors.white70, size: 16),
+                                    SizedBox(width: 6),
+                                    Text('PNG',
+                                        style: TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 12)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   // Minimap (bottom-left)
