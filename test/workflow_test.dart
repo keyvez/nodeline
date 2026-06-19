@@ -445,6 +445,63 @@ flowchart TD
       expect(types, contains('diamond'));
       expect(types, contains('rectangle'));
     });
+
+    test('handles graph LR, subgraphs, unquoted labels, dotted edges', () {
+      const mermaid = '''
+graph LR
+    subgraph "Emotion"
+        Bored[Bored / Restless]
+        Sad[Sadness / Pain]
+    end
+    subgraph "Food"
+        FoodBored[Crunchy snacks]
+        FoodSad[Happy foods]
+    end
+    subgraph "Solution"
+        SolBored[A fulfilling activity]
+        SolSad[Talk with a friend]
+    end
+    Bored -->|May seek| FoodBored
+    Bored -.->|Instead try| SolBored
+    Sad -->|May seek| FoodSad
+    Sad -.->|Instead try| SolSad
+''';
+      final result = MermaidImporter.import(mermaid);
+      final objects = (result['drawingObjects'] as List).cast<Map>();
+      final texts = objects.map((o) => o['text']).whereType<String>().toList();
+
+      // Unquoted labels are preserved (not collapsed to node IDs).
+      expect(texts, contains('Bored / Restless'));
+      expect(texts, contains('Crunchy snacks'));
+      expect(texts.contains('Bored'), isFalse);
+
+      // Subgraph titles become container boxes.
+      expect(texts, containsAll(<String>['Emotion', 'Food', 'Solution']));
+
+      // All four edges parse, including the two dotted ones.
+      final arrows = objects.where((o) => o['type'] == 'arrow').toList();
+      expect(arrows.length, 4);
+      expect(arrows.where((a) => a['lineStyle'] == 'dashed').length, 2);
+
+      // Subgraph container boxes do not overlap one another.
+      Rect rectOf(Map o) {
+        final r = (o['rect'] as Map);
+        return Rect.fromLTWH((r['left'] as num).toDouble(),
+            (r['top'] as num).toDouble(),
+            (r['width'] as num).toDouble(),
+            (r['height'] as num).toDouble());
+      }
+      final boxes = objects
+          .where((o) => o['type'] == 'rectangle' && o['lineStyle'] == 'dashed')
+          .map(rectOf)
+          .toList();
+      expect(boxes.length, 3);
+      for (int i = 0; i < boxes.length; i++) {
+        for (int j = i + 1; j < boxes.length; j++) {
+          expect(boxes[i].deflate(1).overlaps(boxes[j].deflate(1)), isFalse);
+        }
+      }
+    });
   });
 
   group('MermaidExporter parallelogram', () {

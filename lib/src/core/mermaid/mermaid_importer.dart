@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:flow_draw/src/models/styles.dart';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
@@ -13,174 +14,245 @@ class MermaidImporter {
   static const double _nodePaddingV = 16.0;
   static const double _minNodeWidth = 160.0;
   static const double _minNodeHeight = 60.0;
+  // Padding around a subgraph container box, and headroom for its title.
+  static const double _subgraphPad = 28.0;
+  static const double _subgraphTitleH = 28.0;
 
   /// Parses a Mermaid flowchart string and returns project JSON
   /// consumable by `controller.loadProject()`.
   static Map<String, dynamic> import(String mermaid) {
     final lines = mermaid.split('\n').map((l) => l.trim()).toList();
 
-    // Parse direction from header
-    // Unused for now but parsed for completeness
-    // String direction = 'TD';
+    // Parse direction from header. Accept both `flowchart` and `graph`,
+    // with an optional direction (TD/TB/LR/BT/RL). Default to TD.
+    String direction = 'TD';
     int startLine = 0;
     for (int i = 0; i < lines.length; i++) {
       final line = lines[i];
-      final headerMatch = RegExp(r'^flowchart\s+(TD|TB|LR|BT|RL)\s*$').firstMatch(line);
+      final headerMatch =
+          RegExp(r'^(?:flowchart|graph)\s+(TD|TB|LR|BT|RL)\s*$').firstMatch(line);
       if (headerMatch != null) {
-        // direction = headerMatch.group(1)!;
+        direction = headerMatch.group(1)!;
+        if (direction == 'TB') direction = 'TD';
         startLine = i + 1;
         break;
       }
-      // Also accept just "flowchart" without direction
-      if (RegExp(r'^flowchart\s*$').hasMatch(line)) {
+      // Also accept just "flowchart"/"graph" without direction.
+      if (RegExp(r'^(?:flowchart|graph)\s*$').hasMatch(line)) {
         startLine = i + 1;
         break;
       }
     }
 
-    // Parse nodes and edges
+    // Parse nodes, edges, and subgraphs.
     final nodes = <String, _MermaidNode>{};
     final edges = <_MermaidEdge>[];
+    final subgraphs = <_MermaidSubgraph>[];
+
+    // Stack of currently-open subgraphs (Mermaid allows nesting; we track the
+    // innermost for membership but render every level).
+    final openSubgraphs = <_MermaidSubgraph>[];
 
     for (int i = startLine; i < lines.length; i++) {
       final line = lines[i];
       if (line.isEmpty || line.startsWith('%%')) continue;
 
-      // Try to parse as edge first
-      final edge = _parseEdge(line, nodes);
+      // subgraph "Title" / subgraph Title / subgraph id["Title"]
+      final subMatch = RegExp(
+        r'^subgraph\s+(?:"([^"]*)"|(\w+)\s*\[\s*"?([^"\]]*)"?\s*\]|([^\[]+?))\s*$',
+      ).firstMatch(line);
+      if (subMatch != null) {
+        final title = (subMatch.group(1) ??
+                subMatch.group(3) ??
+                subMatch.group(4) ??
+                subMatch.group(2) ??
+                '')
+            .trim();
+        final sg = _MermaidSubgraph(title);
+        subgraphs.add(sg);
+        openSubgraphs.add(sg);
+        continue;
+      }
+
+      // end (closes the innermost subgraph)
+      if (line == 'end') {
+        if (openSubgraphs.isNotEmpty) openSubgraphs.removeLast();
+        continue;
+      }
+
+      // Styling/class/click directives we don't model — skip quietly.
+      if (RegExp(r'^(style|classDef|class|click|linkStyle|direction)\b')
+          .hasMatch(line)) {
+        continue;
+      }
+
+      // Try to parse as edge first.
+      final edge = _parseEdge(line, nodes, openSubgraphs);
       if (edge != null) {
         edges.add(edge);
         continue;
       }
 
-      // Try to parse as node declaration
-      _parseNodeDeclaration(line, nodes);
+      // Try to parse as node declaration.
+      final declared = _parseNodeDeclaration(line, nodes);
+      if (declared != null && openSubgraphs.isNotEmpty) {
+        openSubgraphs.last.memberIds.add(declared);
+      }
     }
 
-    // Auto-layout
-    _autoLayout(nodes, edges);
+    // Auto-layout (direction- and subgraph-aware).
+    _autoLayout(nodes, edges, direction, subgraphs);
 
-    // Build project JSON
-    return _buildProjectJson(nodes, edges);
+    // Build project JSON.
+    return _buildProjectJson(nodes, edges, subgraphs);
   }
 
-  /// Parses an edge line like `A --> B` or `A -->|label| B` or `A --- B`.
-  static _MermaidEdge? _parseEdge(String line, Map<String, _MermaidNode> nodes) {
-    // Match: ID --> ID, ID --- ID, ID -->|label| ID
-    // Also handle node declarations inline: A["text"] --> B(("text"))
+  /// Classifies an edge connector string into a logical edge type.
+  /// Returns one of 'arrow', 'dotted-arrow', 'thick-arrow', 'line',
+  /// 'dotted-line', 'thick-line', or null if not a connector.
+  static String? _connectorType(String c) {
+    // Order matters: check dotted/thick before plain.
+    if (RegExp(r'^-\.+->$').hasMatch(c)) return 'dotted-arrow';
+    if (RegExp(r'^-\.+-$').hasMatch(c)) return 'dotted-line';
+    if (RegExp(r'^=+>$').hasMatch(c)) return 'thick-arrow';
+    if (RegExp(r'^=+$').hasMatch(c)) return 'thick-line';
+    if (RegExp(r'^-+>$').hasMatch(c)) return 'arrow';
+    if (RegExp(r'^-+$').hasMatch(c)) return 'line';
+    return null;
+  }
+
+  /// Parses an edge line like `A --> B`, `A -->|label| B`, `A -.->|x| B`,
+  /// `A ==> B`, or `A --- B`. Also captures inline node declarations.
+  static _MermaidEdge? _parseEdge(
+    String line,
+    Map<String, _MermaidNode> nodes,
+    List<_MermaidSubgraph> openSubgraphs,
+  ) {
+    // Shape suffix that may follow a node id inline.
+    const shape = r'(?:\[/[^\]]*/\]|\[\[[^\]]*\]\]|\[[^\]]*\]|'
+        r'\(\([^)]*\)\)|\(\[[^\]]*\]\)|\([^)]*\)|\{[^}]*\}|>[^\]]*\])';
+    // Connector: dashes/dots/equals, optional arrowhead.
+    const connector = r'(-\.+->|-\.+-|=+>|=+|-+>|-+)';
+
     final edgePattern = RegExp(
-      r'^(\S+?)(?:\[/.*?/\]|\[.*?\]|\(\(.*?\)\)|\{.*?\}|\(\[.*?\]\))?\s*'
-      r'(-->|---)'
+      '^(\\w+)$shape?\\s*'
+      '$connector'
       r'(?:\|([^|]*)\|)?\s*'
-      r'(\S+?)(?:\[/.*?/\]|\[.*?\]|\(\(.*?\)\)|\{.*?\}|\(\[.*?\]\))?$',
+      '(\\w+)$shape?\\s*\$',
     );
 
     final match = edgePattern.firstMatch(line);
     if (match == null) return null;
 
     final fromId = match.group(1)!;
-    final edgeType = match.group(2)!;
+    final connStr = match.group(2)!;
     final edgeLabel = match.group(3);
     final toId = match.group(4)!;
 
-    // Parse inline node declarations from the full line
-    _parseInlineNode(line, fromId, nodes);
-    _parseInlineNode(line, toId, nodes);
+    final kind = _connectorType(connStr);
+    if (kind == null) return null;
 
-    // Ensure nodes exist
+    // Parse inline node declarations from the full line.
+    _parseInlineNode(line, fromId, nodes, openSubgraphs);
+    _parseInlineNode(line, toId, nodes, openSubgraphs);
+
+    // Ensure nodes exist.
     nodes.putIfAbsent(fromId, () => _MermaidNode(fromId, fromId, 'rect'));
     nodes.putIfAbsent(toId, () => _MermaidNode(toId, toId, 'rect'));
+    if (openSubgraphs.isNotEmpty) {
+      openSubgraphs.last.memberIds.add(fromId);
+      openSubgraphs.last.memberIds.add(toId);
+    }
 
+    final isLine = kind.endsWith('line');
     return _MermaidEdge(
       from: fromId,
       to: toId,
-      type: edgeType == '-->' ? 'arrow' : 'line',
+      type: isLine ? 'line' : 'arrow',
       label: edgeLabel,
+      dashed: kind.startsWith('dotted'),
+      thick: kind.startsWith('thick'),
     );
   }
 
   /// Tries to extract an inline node declaration from an edge line.
-  static void _parseInlineNode(String line, String nodeId, Map<String, _MermaidNode> nodes) {
+  static void _parseInlineNode(
+    String line,
+    String nodeId,
+    Map<String, _MermaidNode> nodes,
+    List<_MermaidSubgraph> openSubgraphs,
+  ) {
     if (nodes.containsKey(nodeId)) return;
 
-    // Look for nodeId followed by shape syntax
-    final patterns = [
-      // Circle: A(("text"))
-      RegExp(RegExp.escape(nodeId) + r'\(\("([^"]*)"\)\)'),
-      // Rectangle: A["text"]
-      RegExp(RegExp.escape(nodeId) + r'\["([^"]*)"\]'),
-      // Diamond: A{"text"}
-      RegExp(RegExp.escape(nodeId) + r'\{"([^"]*)"\}'),
-      // Stadium: A(["text"])
-      RegExp(RegExp.escape(nodeId) + r'\(\["([^"]*)"\]\)'),
-      // Parallelogram: A[/"text"/]
-      RegExp(RegExp.escape(nodeId) + r'\[/"([^"]*)"/\]'),
+    final esc = RegExp.escape(nodeId);
+    // (shapeRegex, type) — quotes around the label are optional.
+    final candidates = <(RegExp, String)>[
+      (RegExp('$esc\\(\\(\\s*"?([^")]*?)"?\\s*\\)\\)'), 'circle'),
+      (RegExp('$esc\\(\\[\\s*"?([^"\\]]*?)"?\\s*\\]\\)'), 'rect'), // stadium
+      (RegExp('$esc\\[/\\s*"?([^"/]*?)"?\\s*/\\]'), 'parallelogram'),
+      (RegExp('$esc\\{\\s*"?([^"}]*?)"?\\s*\\}'), 'diamond'),
+      (RegExp('$esc\\[\\s*"?([^"\\]]*?)"?\\s*\\]'), 'rect'),
+      (RegExp('$esc\\(\\s*"?([^")]*?)"?\\s*\\)'), 'rect'), // rounded
     ];
-    final types = ['circle', 'rect', 'diamond', 'rect', 'parallelogram'];
 
-    for (int i = 0; i < patterns.length; i++) {
-      final match = patterns[i].firstMatch(line);
+    for (final (re, type) in candidates) {
+      final match = re.firstMatch(line);
       if (match != null) {
-        final label = match.group(1) ?? nodeId;
-        nodes[nodeId] = _MermaidNode(nodeId, label, types[i]);
+        final label = (match.group(1) ?? '').trim();
+        nodes[nodeId] = _MermaidNode(nodeId, label.isEmpty ? nodeId : label, type);
+        if (openSubgraphs.isNotEmpty) openSubgraphs.last.memberIds.add(nodeId);
         return;
       }
     }
   }
 
-  /// Parses a standalone node declaration line.
-  static void _parseNodeDeclaration(String line, Map<String, _MermaidNode> nodes) {
-    // Circle: A(("text"))
-    final circleMatch = RegExp(r'^(\w+)\(\("([^"]*)"\)\)$').firstMatch(line);
-    if (circleMatch != null) {
-      final id = circleMatch.group(1)!;
-      final label = circleMatch.group(2)!;
-      nodes[id] = _MermaidNode(id, label, 'circle');
-      return;
+  /// Parses a standalone node declaration line. Returns the node id if one
+  /// was declared (or referenced), else null. Quotes are optional.
+  static String? _parseNodeDeclaration(
+    String line,
+    Map<String, _MermaidNode> nodes,
+  ) {
+    // (shapeRegex, type) — same shapes as inline, anchored to whole line.
+    final candidates = <(RegExp, String)>[
+      (RegExp(r'^(\w+)\(\(\s*"?([^")]*?)"?\s*\)\)$'), 'circle'),
+      (RegExp(r'^(\w+)\(\[\s*"?([^"\]]*?)"?\s*\]\)$'), 'rect'), // stadium
+      (RegExp(r'^(\w+)\[/\s*"?([^"/]*?)"?\s*/\]$'), 'parallelogram'),
+      (RegExp(r'^(\w+)\{\s*"?([^"}]*?)"?\s*\}$'), 'diamond'),
+      (RegExp(r'^(\w+)\[\s*"?([^"\]]*?)"?\s*\]$'), 'rect'),
+      (RegExp(r'^(\w+)\(\s*"?([^")]*?)"?\s*\)$'), 'rect'), // rounded
+    ];
+
+    for (final (re, type) in candidates) {
+      final match = re.firstMatch(line);
+      if (match != null) {
+        final id = match.group(1)!;
+        final label = (match.group(2) ?? '').trim();
+        nodes[id] = _MermaidNode(id, label.isEmpty ? id : label, type);
+        return id;
+      }
     }
 
-    // Rectangle: A["text"]
-    final rectMatch = RegExp(r'^(\w+)\["([^"]*)"\]$').firstMatch(line);
-    if (rectMatch != null) {
-      final id = rectMatch.group(1)!;
-      final label = rectMatch.group(2)!;
-      nodes[id] = _MermaidNode(id, label, 'rect');
-      return;
+    // Bare node id on its own line.
+    final bare = RegExp(r'^(\w+)$').firstMatch(line);
+    if (bare != null) {
+      final id = bare.group(1)!;
+      nodes.putIfAbsent(id, () => _MermaidNode(id, id, 'rect'));
+      return id;
     }
 
-    // Diamond: A{"text"}
-    final diamondMatch = RegExp(r'^(\w+)\{"([^"]*)"\}$').firstMatch(line);
-    if (diamondMatch != null) {
-      final id = diamondMatch.group(1)!;
-      final label = diamondMatch.group(2)!;
-      nodes[id] = _MermaidNode(id, label, 'diamond');
-      return;
-    }
-
-    // Stadium: A(["text"])
-    final stadiumMatch = RegExp(r'^(\w+)\(\["([^"]*)"\]\)$').firstMatch(line);
-    if (stadiumMatch != null) {
-      final id = stadiumMatch.group(1)!;
-      final label = stadiumMatch.group(2)!;
-      nodes[id] = _MermaidNode(id, label, 'rect');
-      return;
-    }
-
-    // Parallelogram: A[/"text"/]
-    final paraMatch = RegExp(r'^(\w+)\[/"([^"]*)"/\]$').firstMatch(line);
-    if (paraMatch != null) {
-      final id = paraMatch.group(1)!;
-      final label = paraMatch.group(2)!;
-      nodes[id] = _MermaidNode(id, label, 'parallelogram');
-      return;
-    }
-
-    // Plain node: A or A["text"] already handled above
+    return null;
   }
 
-  /// DAG layering auto-layout (replicates FlowDrawParser._autoLayout pattern).
-  static void _autoLayout(Map<String, _MermaidNode> nodes, List<_MermaidEdge> edges) {
-    // Calculate node sizes
+  /// DAG layering auto-layout. [direction] is one of TD/LR/BT/RL and controls
+  /// the primary flow axis. Subgraph members are kept contiguous within their
+  /// layers so the container boxes stay tight.
+  static void _autoLayout(
+    Map<String, _MermaidNode> nodes,
+    List<_MermaidEdge> edges,
+    String direction,
+    List<_MermaidSubgraph> subgraphs,
+  ) {
+    // Calculate node sizes.
     for (final node in nodes.values) {
       _calculateNodeSize(node);
     }
@@ -196,23 +268,107 @@ class MermaidImporter {
       }
     }
 
-    // Detect and remove cycles
+    // Detect and remove cycles.
     final reversedEdges = <(String, String)>[];
     _detectAndRemoveCycles(nodeIds, adj, reversedEdges);
 
-    // Assign layers
+    // Assign layers.
     final layers = _assignLayers(nodeIds, adj);
 
-    // Order layers to minimize crossings
+    // Order layers to minimize crossings.
     _orderLayers(layers, adj, parents);
 
-    // Assign coordinates
-    _assignCoordinates(layers, nodes);
+    // Keep subgraph members grouped within each layer.
+    _groupSubgraphsWithinLayers(layers, nodes, subgraphs);
 
-    // Restore reversed edges
+    // Assign coordinates directly in the requested orientation. Layers stack
+    // along the flow axis; nodes within a layer spread along the cross axis,
+    // packed by each box's true extent so nothing overlaps after re-orienting.
+    _assignCoordinates(layers, nodes, direction);
+
+    // DAG layering and subgraph grouping can disagree: two subgraphs whose
+    // members all sit in the same layer would land in the same column/row and
+    // their container boxes would overlap. Separate overlapping subgraphs along
+    // the cross axis, shifting their member nodes with them.
+    _separateOverlappingSubgraphs(nodes, subgraphs, direction);
+
+    // Restore reversed edges.
     for (final edge in reversedEdges) {
       adj[edge.$1]!.add(edge.$2);
       adj[edge.$2]!.remove(edge.$1);
+    }
+  }
+
+  /// Container bounds (with padding/title) of a subgraph's members.
+  static Rect? _subgraphBounds(
+    _MermaidSubgraph sg,
+    Map<String, _MermaidNode> nodes,
+  ) {
+    Rect? b;
+    for (final id in sg.memberIds) {
+      final n = nodes[id];
+      if (n == null) continue;
+      b = b == null ? n.rect : b.expandToInclude(n.rect);
+    }
+    if (b == null) return null;
+    return Rect.fromLTWH(
+      b.left - _subgraphPad,
+      b.top - _subgraphPad - _subgraphTitleH,
+      b.width + _subgraphPad * 2,
+      b.height + _subgraphPad * 2 + _subgraphTitleH,
+    );
+  }
+
+  /// Pushes overlapping subgraph containers apart along the cross axis (the
+  /// axis perpendicular to the flow), translating member nodes so the visual
+  /// grouping is preserved. Greedy: processes subgraphs in declaration order
+  /// and slides each one past any already-placed sibling it collides with.
+  static void _separateOverlappingSubgraphs(
+    Map<String, _MermaidNode> nodes,
+    List<_MermaidSubgraph> subgraphs,
+    String direction,
+  ) {
+    if (subgraphs.length < 2) return;
+    final horizontalFlow = direction == 'LR' || direction == 'RL';
+    const gap = 48.0;
+
+    // Only consider subgraphs that have laid-out members.
+    final placed = <_MermaidSubgraph>[];
+    for (final sg in subgraphs) {
+      var bounds = _subgraphBounds(sg, nodes);
+      if (bounds == null) continue;
+
+      // Resolve collisions against already-placed subgraphs by sliding along
+      // the cross axis (y for LR/RL, x for TD/BT).
+      bool moved = true;
+      int guard = 0;
+      while (moved && guard++ < 64) {
+        moved = false;
+        for (final other in placed) {
+          final ob = _subgraphBounds(other, nodes);
+          if (ob == null) continue;
+          if (!bounds!.overlaps(ob)) continue;
+          // Shift this subgraph just past `other` on the cross axis.
+          double delta;
+          if (horizontalFlow) {
+            delta = ob.bottom + gap - bounds.top;
+          } else {
+            delta = ob.right + gap - bounds.left;
+          }
+          if (delta <= 0) continue;
+          for (final id in sg.memberIds) {
+            final n = nodes[id];
+            if (n == null) continue;
+            final r = n.rect;
+            n.rect = horizontalFlow
+                ? r.translate(0, delta)
+                : r.translate(delta, 0);
+          }
+          bounds = _subgraphBounds(sg, nodes);
+          moved = true;
+        }
+      }
+      placed.add(sg);
     }
   }
 
@@ -341,41 +497,103 @@ class MermaidImporter {
     }
   }
 
+  /// Reorders each layer so that members of the same subgraph are contiguous,
+  /// preserving the crossing-minimised relative order as much as possible.
+  static void _groupSubgraphsWithinLayers(
+    Map<int, List<String>> layers,
+    Map<String, _MermaidNode> nodes,
+    List<_MermaidSubgraph> subgraphs,
+  ) {
+    if (subgraphs.isEmpty) return;
+
+    // Map each node to the index of its (first) owning subgraph, or -1.
+    final group = <String, int>{};
+    for (int s = 0; s < subgraphs.length; s++) {
+      for (final id in subgraphs[s].memberIds) {
+        group.putIfAbsent(id, () => s);
+      }
+    }
+
+    for (final entry in layers.entries) {
+      final layer = entry.value;
+      // Stable-sort by group index; ungrouped (-1) float to the front.
+      final order = {for (int i = 0; i < layer.length; i++) layer[i]: i};
+      layer.sort((a, b) {
+        final ga = group[a] ?? -1;
+        final gb = group[b] ?? -1;
+        if (ga != gb) return ga.compareTo(gb);
+        return order[a]!.compareTo(order[b]!);
+      });
+    }
+  }
+
+  /// Lays out [layers] in the orientation given by [direction].
+  ///
+  /// Conceptually we always stack layers along a "flow" axis and spread each
+  /// layer's nodes along the perpendicular "cross" axis. For TD/BT the flow
+  /// axis is vertical; for LR/RL it is horizontal. Cross-axis packing uses each
+  /// box's extent *on that axis* so wide multi-line labels never overlap.
   static void _assignCoordinates(
     Map<int, List<String>> layers,
     Map<String, _MermaidNode> nodes,
+    String direction,
   ) {
-    double currentY = 0;
-    final layerWidths = <int, double>{};
-    double maxGraphWidth = 0;
+    final horizontalFlow = direction == 'LR' || direction == 'RL';
 
+    // Extent of a node along the flow axis and the cross axis.
+    double flowExtent(_MermaidNode n) =>
+        horizontalFlow ? n.rect.width : n.rect.height;
+    double crossExtent(_MermaidNode n) =>
+        horizontalFlow ? n.rect.height : n.rect.width;
+
+    // Spacing between layers (flow axis) and between siblings (cross axis).
+    final flowSpacing = horizontalFlow ? _hSpacing : _vSpacing;
+    final crossSpacing = _hSpacing;
+
+    // Total cross-axis size of each layer, for centering.
+    final layerCross = <int, double>{};
     for (int i = 0; i < layers.length; i++) {
       final layer = layers[i]!;
-      double totalLayerWidth = (layer.length - 1) * _hSpacing;
+      double total = (layer.length - 1) * crossSpacing;
       for (final id in layer) {
-        totalLayerWidth += nodes[id]!.rect.width;
+        total += crossExtent(nodes[id]!);
       }
-      layerWidths[i] = totalLayerWidth;
-      maxGraphWidth = max(maxGraphWidth, totalLayerWidth);
+      layerCross[i] = total;
     }
 
+    double flowPos = 0;
     for (int i = 0; i < layers.length; i++) {
       final layer = layers[i]!;
-      double maxLayerHeight = 0;
-      double currentX = -(layerWidths[i]! / 2);
+      double maxFlow = 0;
+      double crossPos = -(layerCross[i]! / 2);
 
       for (final id in layer) {
         final node = nodes[id]!;
-        maxLayerHeight = max(maxLayerHeight, node.rect.height);
-        node.rect = Rect.fromLTWH(
-          currentX,
-          currentY,
-          node.rect.width,
-          node.rect.height,
-        );
-        currentX += node.rect.width + _hSpacing;
+        maxFlow = max(maxFlow, flowExtent(node));
+        if (horizontalFlow) {
+          node.rect = Rect.fromLTWH(
+            flowPos, crossPos, node.rect.width, node.rect.height);
+          crossPos += node.rect.height + crossSpacing;
+        } else {
+          node.rect = Rect.fromLTWH(
+            crossPos, flowPos, node.rect.width, node.rect.height);
+          crossPos += node.rect.width + crossSpacing;
+        }
       }
-      currentY += maxLayerHeight + _vSpacing;
+      flowPos += maxFlow + flowSpacing;
+    }
+
+    // Reverse the flow axis for BT/RL.
+    if (direction == 'BT' || direction == 'RL') {
+      final maxFlow = horizontalFlow
+          ? nodes.values.map((n) => n.rect.right).reduce(max)
+          : nodes.values.map((n) => n.rect.bottom).reduce(max);
+      for (final n in nodes.values) {
+        final r = n.rect;
+        n.rect = horizontalFlow
+            ? Rect.fromLTWH(maxFlow - r.right, r.top, r.width, r.height)
+            : Rect.fromLTWH(r.left, maxFlow - r.bottom, r.width, r.height);
+      }
     }
   }
 
@@ -407,15 +625,34 @@ class MermaidImporter {
     }
   }
 
-  /// Builds the final project JSON from parsed nodes and edges.
+  /// Builds the final project JSON from parsed nodes, edges, and subgraphs.
   static Map<String, dynamic> _buildProjectJson(
     Map<String, _MermaidNode> nodes,
     List<_MermaidEdge> edges,
+    List<_MermaidSubgraph> subgraphs,
   ) {
     final drawingObjects = <Map<String, dynamic>>[];
     const uuid = Uuid();
 
-    // Generate UUIDs for each mermaid node
+    // ── Subgraph container boxes ────────────────────────────────────────────
+    // Emit these FIRST so they paint behind their member nodes. Each box is a
+    // pale, rounded rectangle bounding its members, titled at the top.
+    for (final sg in subgraphs) {
+      final container = _subgraphBounds(sg, nodes);
+      if (container == null) continue;
+
+      drawingObjects.add(RectangleObject(
+        id: uuid.v4(),
+        rect: container,
+        text: sg.title,
+        borderRadius: 12.0,
+        fillColor: const Color(0x110A84FF),
+        strokeColor: const Color(0xFF8AB4F8),
+        lineStyle: LineStyle.dashed,
+      ).toJson());
+    }
+
+    // Generate UUIDs for each mermaid node.
     final uuidMap = <String, String>{};
     for (final id in nodes.keys) {
       uuidMap[id] = uuid.v4();
@@ -554,6 +791,8 @@ class MermaidImporter {
       final startAttachment = ObjectAttachment(objectId: fromUuid, relativePosition: sRel);
       final endAttachment   = ObjectAttachment(objectId: toUuid,   relativePosition: eRel);
 
+      final lineStyle = edge.dashed ? LineStyle.dashed : LineStyle.solid;
+
       final edgeId = uuid.v4();
       if (edge.type == 'arrow') {
         drawingObjects.add(ArrowObject(
@@ -564,6 +803,7 @@ class MermaidImporter {
           endAttachment: endAttachment,
           arrowLabel: edge.label,
           pathType: LinkPathType.orthogonal,
+          lineStyle: lineStyle,
         ).toJson());
       } else {
         drawingObjects.add(LineObject(
@@ -572,6 +812,7 @@ class MermaidImporter {
           end: end,
           startAttachment: startAttachment,
           endAttachment: endAttachment,
+          lineStyle: lineStyle,
         ).toJson());
       }
     }
@@ -600,6 +841,23 @@ class _MermaidEdge {
   final String to;
   final String type; // 'arrow' or 'line'
   final String? label;
+  final bool dashed; // dotted connector (-.->)
+  final bool thick; // thick connector (==>)
 
-  _MermaidEdge({required this.from, required this.to, required this.type, this.label});
+  _MermaidEdge({
+    required this.from,
+    required this.to,
+    required this.type,
+    this.label,
+    this.dashed = false,
+    this.thick = false,
+  });
+}
+
+/// Internal representation of a parsed Mermaid subgraph (cluster).
+class _MermaidSubgraph {
+  final String title;
+  final List<String> memberIds = <String>[];
+
+  _MermaidSubgraph(this.title);
 }
