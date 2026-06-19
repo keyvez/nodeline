@@ -13,6 +13,13 @@ final class CanvasState extends Equatable {
   final double viewportZoom;
   final bool showGrid;
 
+  /// The global default font family applied to shape text that has not been
+  /// individually customized. Changing it updates every non-customized shape.
+  final String defaultFontFamily;
+
+  /// The global default font size applied to non-customized shape text.
+  final double defaultFontSize;
+
   // History stacks
   final List<HistoryEntry> undoStack;
   final List<HistoryEntry> redoStack;
@@ -24,6 +31,8 @@ final class CanvasState extends Equatable {
     this.viewportOffset = Offset.zero,
     this.viewportZoom = 1.0,
     this.showGrid = true,
+    this.defaultFontFamily = kEditorDefaultFontFamily,
+    this.defaultFontSize = kEditorDefaultFontSize,
     this.undoStack = const [],
     this.redoStack = const [],
   });
@@ -36,6 +45,8 @@ final class CanvasState extends Equatable {
     required this.viewportZoom,
     this.comments = const {},
     this.showGrid = true,
+    this.defaultFontFamily = kEditorDefaultFontFamily,
+    this.defaultFontSize = kEditorDefaultFontSize,
   }) : undoStack = [],
        redoStack = [];
 
@@ -46,6 +57,8 @@ final class CanvasState extends Equatable {
     Offset? viewportOffset,
     double? viewportZoom,
     bool? showGrid,
+    String? defaultFontFamily,
+    double? defaultFontSize,
     List<HistoryEntry>? undoStack,
     List<HistoryEntry>? redoStack,
   }) {
@@ -56,6 +69,8 @@ final class CanvasState extends Equatable {
       viewportOffset: viewportOffset ?? this.viewportOffset,
       viewportZoom: viewportZoom ?? this.viewportZoom,
       showGrid: showGrid ?? this.showGrid,
+      defaultFontFamily: defaultFontFamily ?? this.defaultFontFamily,
+      defaultFontSize: defaultFontSize ?? this.defaultFontSize,
       undoStack: undoStack ?? this.undoStack,
       redoStack: redoStack ?? this.redoStack,
     );
@@ -69,6 +84,8 @@ final class CanvasState extends Equatable {
     viewportOffset,
     viewportZoom,
     showGrid,
+    defaultFontFamily,
+    defaultFontSize,
     undoStack,
     redoStack,
   ];

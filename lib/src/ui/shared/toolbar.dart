@@ -335,6 +335,8 @@ class FlowDrawToolbar extends StatelessWidget {
               },
             ),
             Gap(16),
+            const _GlobalFontButton(),
+            Gap(16),
             Builder(
               builder: (context) {
                 return const _MermaidButton();
@@ -360,6 +362,10 @@ class FlowDrawToolbar extends StatelessWidget {
                   ],
                 ),
               ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(left: 8),
+              child: _FitButton(),
             ),
             BlocBuilder<CanvasBloc, CanvasState>(
               builder: (context, canvasState) {
@@ -704,6 +710,403 @@ class _LineStylePreviewPainter extends CustomPainter {
   bool shouldRepaint(_LineStylePreviewPainter oldDelegate) => oldDelegate.style != style;
 }
 
+/// Toolbar control for the global default font (family + size).
+///
+/// Changing it re-fonts every shape whose font has not been individually
+/// customized (via the floating selection toolbar). Customized shapes keep
+/// their own font until reset.
+/// "Fit to content" button. Clicking the label fits immediately using the
+/// current margin; the caret opens a popover to adjust the margin. Fits the
+/// selected shapes if any, otherwise every text-bearing shape.
+class _FitButton extends StatefulWidget {
+  const _FitButton();
+
+  @override
+  State<_FitButton> createState() => _FitButtonState();
+}
+
+class _FitButtonState extends State<_FitButton> {
+  // Remembered between clicks so the chosen margin sticks for the session.
+  double _margin = kDefaultFitMargin;
+
+  void _fit(BuildContext context) {
+    final selected =
+        context.read<SelectionBloc>().state.selectedDrawingObjectIds;
+    context
+        .read<CanvasBloc>()
+        .add(NodesFittedToContent(selected, margin: _margin));
+  }
+
+  void _openMarginPopover(BuildContext context) {
+    showPopover(
+      context: context,
+      alignment: Alignment.topCenter,
+      builder: (popoverContext) {
+        return ModalContainer(
+          child: SizedBox(
+            width: 200,
+            child: StatefulBuilder(
+              builder: (context, setLocal) {
+                void update(double v) {
+                  setState(() => _margin = v.clamp(0, 80));
+                  setLocal(() {});
+                }
+
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Fit margin',
+                        style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.bold)),
+                    const Gap(8),
+                    Row(
+                      children: [
+                        const Text('Margin', style: TextStyle(fontSize: 12)),
+                        const Spacer(),
+                        _StepButton(
+                            icon: Icons.remove,
+                            onTap: () => update(_margin - 2)),
+                        SizedBox(
+                          width: 36,
+                          child: Text('${_margin.round()}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 13)),
+                        ),
+                        _StepButton(
+                            icon: Icons.add, onTap: () => update(_margin + 2)),
+                      ],
+                    ),
+                    const Gap(8),
+                    PrimaryButton(
+                      density: ButtonDensity.compact,
+                      onPressed: () {
+                        _fit(context);
+                        closePopover(popoverContext);
+                      },
+                      child: const Text('Fit now', style: TextStyle(fontSize: 12)),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ).withPadding(top: 8);
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GhostButton(
+      density: ButtonDensity.compact,
+      onPressed: () => _fit(context),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.fit_screen, size: 16),
+          const SizedBox(width: 6),
+          const Text('Fit', style: TextStyle(fontSize: 12)),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _openMarginPopover(context),
+            child: const Padding(
+              padding: EdgeInsets.only(left: 2),
+              child: Icon(Icons.arrow_drop_down, size: 16),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GlobalFontButton extends StatelessWidget {
+  const _GlobalFontButton();
+
+  /// Resolves the font shown for the currently-selected shapes: whether any
+  /// carry text, the effective family/size of the first such shape, and whether
+  /// the selection has been individually customized.
+  ({bool hasText, String family, double size, bool customized})
+      _selectionFont(Set<String> ids, CanvasState state) {
+    bool hasText = false;
+    bool customized = false;
+    String family = state.defaultFontFamily;
+    double size = state.defaultFontSize;
+    bool gotFirst = false;
+
+    for (final id in ids) {
+      final obj = state.drawingObjects[id];
+      TextStyle? style;
+      bool objCustomized = false;
+      if (obj is RectangleObject) {
+        style = obj.textStyle;
+        objCustomized = obj.fontCustomized;
+      } else if (obj is CircleObject) {
+        style = obj.textStyle;
+        objCustomized = obj.fontCustomized;
+      } else if (obj is DiamondObject) {
+        style = obj.textStyle;
+        objCustomized = obj.fontCustomized;
+      } else if (obj is ParallelogramObject) {
+        style = obj.textStyle;
+        objCustomized = obj.fontCustomized;
+      } else {
+        continue;
+      }
+
+      hasText = true;
+      if (objCustomized) customized = true;
+      if (!gotFirst) {
+        gotFirst = true;
+        final resolved = effectiveShapeTextStyle(
+          style: style,
+          customized: objCustomized,
+          defaultFamily: state.defaultFontFamily,
+          defaultSize: state.defaultFontSize,
+        );
+        family = resolved.fontFamily ?? state.defaultFontFamily;
+        size = resolved.fontSize ?? state.defaultFontSize;
+      }
+    }
+    return (hasText: hasText, family: family, size: size, customized: customized);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Rebuild on selection OR global-font changes so the button label and the
+    // seeded popup values always reflect what would be edited.
+    return BlocBuilder<SelectionBloc, SelectionState>(
+      builder: (context, selection) {
+        return BlocBuilder<CanvasBloc, CanvasState>(
+          buildWhen: (a, b) =>
+              a.defaultFontFamily != b.defaultFontFamily ||
+              a.defaultFontSize != b.defaultFontSize ||
+              a.drawingObjects != b.drawingObjects,
+          builder: (context, state) {
+            // Selected shapes that carry text become the edit target; if none
+            // are selected (or none have text), the control edits the global
+            // default instead.
+            final selectedTextIds = selection.selectedDrawingObjectIds;
+            final sel = _selectionFont(selectedTextIds, state);
+            final editingSelection = sel.hasText;
+
+            final family = editingSelection ? sel.family : state.defaultFontFamily;
+            final size = editingSelection ? sel.size : state.defaultFontSize;
+
+            return GhostButton(
+              density: ButtonDensity.compact,
+              onPressed: () {
+                final canvasBloc = context.read<CanvasBloc>();
+                showPopover(
+                  context: context,
+                  alignment: Alignment.topCenter,
+                  builder: (popoverContext) {
+                    return ModalContainer(
+                      child: SizedBox(
+                        width: 220,
+                        child: _FontControls(
+                          editingSelection: editingSelection,
+                          customized: sel.customized,
+                          family: family,
+                          size: size,
+                          onChanged: (f, s) {
+                            if (editingSelection) {
+                              // Edit only the selected shapes; marks them
+                              // customized so global changes no longer touch them.
+                              canvasBloc.add(ObjectFontChanged(
+                                selectedTextIds,
+                                fontFamily: f,
+                                fontSize: s,
+                              ));
+                            } else {
+                              canvasBloc.add(GlobalFontChanged(
+                                fontFamily: f,
+                                fontSize: s,
+                              ));
+                            }
+                          },
+                          onReset: editingSelection && sel.customized
+                              ? () => canvasBloc
+                                  .add(ObjectFontReset(selectedTextIds))
+                              : null,
+                        ),
+                      ),
+                    ).withPadding(top: 8);
+                  },
+                );
+              },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    editingSelection ? Icons.title : Icons.text_fields,
+                    size: 16,
+                  ),
+                  const Gap(4),
+                  Text(
+                    '$family ${size.round()}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+/// Reusable family-picker + size-stepper used by both the global font control
+/// and the per-node floating-toolbar control. [onChanged] reports the full
+/// desired (family, size) on every interaction.
+class _FontControls extends StatefulWidget {
+  final String family;
+  final double size;
+  final void Function(String family, double size) onChanged;
+
+  /// True when this control is editing the selected shapes (vs the global
+  /// default) — changes the header so the user knows the scope.
+  final bool editingSelection;
+
+  /// Whether the selection is already individually customized (enables Reset).
+  final bool customized;
+
+  /// Clears the per-shape override so the selection follows the global default.
+  final VoidCallback? onReset;
+
+  const _FontControls({
+    required this.family,
+    required this.size,
+    required this.onChanged,
+    this.editingSelection = false,
+    this.customized = false,
+    this.onReset,
+  });
+
+  @override
+  State<_FontControls> createState() => _FontControlsState();
+}
+
+class _FontControlsState extends State<_FontControls> {
+  late String _family = widget.family;
+  late double _size = widget.size;
+
+  static const double _minSize = 6;
+  static const double _maxSize = 96;
+
+  void _emit() => widget.onChanged(_family, _size);
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          widget.editingSelection ? 'Font (selected)' : 'Font (all)',
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+        ),
+        const Gap(8),
+        // Family choices.
+        for (final family in kEditorFontFamilies)
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              setState(() => _family = family);
+              _emit();
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    family == _family
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    size: 16,
+                  ),
+                  const Gap(8),
+                  Text(
+                    family,
+                    style: TextStyle(fontSize: 13, fontFamily: family),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        const Gap(8),
+        // Size stepper.
+        Row(
+          children: [
+            const Text('Size', style: TextStyle(fontSize: 12)),
+            const Spacer(),
+            _StepButton(
+              icon: Icons.remove,
+              onTap: () {
+                setState(() => _size = (_size - 1).clamp(_minSize, _maxSize));
+                _emit();
+              },
+            ),
+            SizedBox(
+              width: 36,
+              child: Text(
+                '${_size.round()}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+            _StepButton(
+              icon: Icons.add,
+              onTap: () {
+                setState(() => _size = (_size + 1).clamp(_minSize, _maxSize));
+                _emit();
+              },
+            ),
+          ],
+        ),
+        if (widget.editingSelection && widget.customized && widget.onReset != null) ...[
+          const Gap(8),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onReset,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Icon(Icons.restart_alt, size: 16),
+                  Gap(8),
+                  Text('Reset to default', style: TextStyle(fontSize: 13)),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _StepButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _StepButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Icon(icon, size: 16),
+      ),
+    );
+  }
+}
+
 class _MermaidButton extends StatelessWidget {
   const _MermaidButton();
 
@@ -758,7 +1161,11 @@ class _SvgExportButton extends StatelessWidget {
       density: ButtonDensity.compact,
       onPressed: () async {
         final canvasBloc = context.read<CanvasBloc>();
-        final svg = SvgExporter.export(canvasBloc.state.drawingObjects);
+        final svg = SvgExporter.export(
+          canvasBloc.state.drawingObjects,
+          defaultFontFamily: canvasBloc.state.defaultFontFamily,
+          defaultFontSize: canvasBloc.state.defaultFontSize,
+        );
         if (svg.isEmpty) {
           showNodeEditorSnackbar('Nothing to export', SnackbarType.error);
           return;

@@ -6,6 +6,8 @@ import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flow_draw/src/core/utils/svg_exporter.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('DiamondObject', () {
     test('creates with required fields', () {
       final diamond = DiamondObject(
@@ -687,6 +689,317 @@ flowchart TD
       expect(svg, contains('Red Box'));
       expect(svg, contains('#ff0000'));
       expect(svg, contains('#00ff00'));
+    });
+  });
+
+  group('Font customization', () {
+    test('fontCustomized defaults to false and round-trips', () {
+      final original = RectangleObject(
+        id: 'f1',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+        text: 'Hi',
+      );
+      expect(original.fontCustomized, isFalse);
+      // Not customized → flag omitted from JSON.
+      expect(original.toJson().containsKey('fontCustomized'), isFalse);
+
+      final customized = RectangleObject(
+        id: 'f2',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+        text: 'Hi',
+        textStyle: const TextStyle(fontFamily: 'serif', fontSize: 24),
+        fontCustomized: true,
+      );
+      final restored = RectangleObject.fromJson(customized.toJson());
+      expect(restored.fontCustomized, isTrue);
+      expect(restored.textStyle?.fontFamily, 'serif');
+      expect(restored.textStyle?.fontSize, 24);
+    });
+
+    test('effectiveShapeTextStyle uses global default when not customized', () {
+      final resolved = effectiveShapeTextStyle(
+        style: const TextStyle(fontFamily: 'serif', fontSize: 99),
+        customized: false,
+        defaultFamily: 'monospace',
+        defaultSize: 20,
+      );
+      // Non-customized: family/size come from the global default, ignoring the
+      // stale per-shape style.
+      expect(resolved.fontFamily, 'monospace');
+      expect(resolved.fontSize, 20);
+    });
+
+    test('effectiveShapeTextStyle uses own style when customized', () {
+      final resolved = effectiveShapeTextStyle(
+        style: const TextStyle(fontFamily: 'serif', fontSize: 30),
+        customized: true,
+        defaultFamily: 'monospace',
+        defaultSize: 20,
+      );
+      expect(resolved.fontFamily, 'serif');
+      expect(resolved.fontSize, 30);
+    });
+
+    test('GlobalFontChanged updates defaults without touching customized shapes',
+        () async {
+      final bloc = CanvasBloc();
+      final plain = RectangleObject(
+        id: 'plain',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+        text: 'A',
+      );
+      final fancy = RectangleObject(
+        id: 'fancy',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+        text: 'B',
+        textStyle: const TextStyle(fontFamily: 'serif', fontSize: 40),
+        fontCustomized: true,
+      );
+      bloc.emit(bloc.state.copyWith(
+        drawingObjects: {'plain': plain, 'fancy': fancy},
+      ));
+
+      bloc.add(const GlobalFontChanged(fontFamily: 'monospace', fontSize: 22));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(bloc.state.defaultFontFamily, 'monospace');
+      expect(bloc.state.defaultFontSize, 22);
+
+      // The customized shape is untouched.
+      final fancyAfter = bloc.state.drawingObjects['fancy'] as RectangleObject;
+      expect(fancyAfter.fontCustomized, isTrue);
+      expect(fancyAfter.textStyle?.fontFamily, 'serif');
+
+      // The plain shape resolves to the new global default.
+      final plainAfter = bloc.state.drawingObjects['plain'] as RectangleObject;
+      final plainStyle = effectiveShapeTextStyle(
+        style: plainAfter.textStyle,
+        customized: plainAfter.fontCustomized,
+        defaultFamily: bloc.state.defaultFontFamily,
+        defaultSize: bloc.state.defaultFontSize,
+      );
+      expect(plainStyle.fontFamily, 'monospace');
+      expect(plainStyle.fontSize, 22);
+      await bloc.close();
+    });
+
+    test('ObjectFontChanged marks shape customized; ObjectFontReset clears it',
+        () async {
+      final bloc = CanvasBloc();
+      final r = RectangleObject(
+        id: 'r',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+        text: 'A',
+      );
+      bloc.emit(bloc.state.copyWith(drawingObjects: {'r': r}));
+
+      bloc.add(const ObjectFontChanged({'r'}, fontFamily: 'serif', fontSize: 33));
+      await Future<void>.delayed(Duration.zero);
+
+      var after = bloc.state.drawingObjects['r'] as RectangleObject;
+      expect(after.fontCustomized, isTrue);
+      expect(after.textStyle?.fontFamily, 'serif');
+      expect(after.textStyle?.fontSize, 33);
+
+      bloc.add(const ObjectFontReset({'r'}));
+      await Future<void>.delayed(Duration.zero);
+
+      after = bloc.state.drawingObjects['r'] as RectangleObject;
+      expect(after.fontCustomized, isFalse);
+      await bloc.close();
+    });
+
+    test('ObjectFontChanged affects only the targeted shape, not others',
+        () async {
+      final bloc = CanvasBloc();
+      final a = RectangleObject(
+        id: 'a',
+        rect: const Rect.fromLTWH(0, 0, 100, 80),
+        text: 'A',
+      );
+      final b = RectangleObject(
+        id: 'b',
+        rect: const Rect.fromLTWH(0, 0, 100, 80),
+        text: 'B',
+      );
+      bloc.emit(bloc.state.copyWith(drawingObjects: {'a': a, 'b': b}));
+
+      // Change only 'a'.
+      bloc.add(const ObjectFontChanged({'a'}, fontFamily: 'serif', fontSize: 40));
+      await Future<void>.delayed(Duration.zero);
+
+      final aAfter = bloc.state.drawingObjects['a'] as RectangleObject;
+      final bAfter = bloc.state.drawingObjects['b'] as RectangleObject;
+      expect(aAfter.fontCustomized, isTrue);
+      expect(aAfter.textStyle?.fontFamily, 'serif');
+      // 'b' is untouched: not customized, no per-shape style.
+      expect(bAfter.fontCustomized, isFalse);
+      expect(bAfter.textStyle, isNull);
+      await bloc.close();
+    });
+
+    test('SVG export honors per-shape and global fonts', () {
+      final objects = <String, DrawingObject>{
+        'plain': RectangleObject(
+          id: 'plain',
+          rect: Rect.fromLTWH(0, 0, 100, 80),
+          text: 'Plain',
+        ),
+        'fancy': RectangleObject(
+          id: 'fancy',
+          rect: Rect.fromLTWH(200, 0, 100, 80),
+          text: 'Fancy',
+          textStyle: const TextStyle(fontFamily: 'serif', fontSize: 28),
+          fontCustomized: true,
+        ),
+      };
+      final svg = SvgExporter.export(
+        objects,
+        defaultFontFamily: 'monospace',
+        defaultFontSize: 18,
+      );
+      // Global default applied to the plain shape.
+      expect(svg, contains('font-size="18.0"'));
+      expect(svg, contains('font-family="monospace"'));
+      // Per-shape override applied to the fancy shape.
+      expect(svg, contains('font-size="28.0"'));
+      expect(svg, contains('font-family="serif"'));
+    });
+  });
+
+  group('Fit to content', () {
+    test('shrinks an oversized box and keeps it centered', () async {
+      final bloc = CanvasBloc();
+      final huge = RectangleObject(
+        id: 'r',
+        rect: const Rect.fromLTWH(0, 0, 600, 400),
+        text: 'Hi',
+      );
+      final center = huge.rect.center;
+      bloc.emit(bloc.state.copyWith(drawingObjects: {'r': huge}));
+
+      bloc.add(const NodesFittedToContent({}));
+      await Future<void>.delayed(Duration.zero);
+
+      final after = bloc.state.drawingObjects['r'] as RectangleObject;
+      expect(after.rect.width, lessThan(600));
+      expect(after.rect.height, lessThan(400));
+      // Center preserved.
+      expect(after.rect.center.dx, closeTo(center.dx, 0.01));
+      expect(after.rect.center.dy, closeTo(center.dy, 0.01));
+      await bloc.close();
+    });
+
+    test('grows a too-tight box to fit long text', () async {
+      final bloc = CanvasBloc();
+      final tight = RectangleObject(
+        id: 'r',
+        rect: const Rect.fromLTWH(0, 0, 20, 20),
+        text: 'A reasonably long label that does not fit',
+      );
+      bloc.emit(bloc.state.copyWith(drawingObjects: {'r': tight}));
+
+      bloc.add(const NodesFittedToContent({}));
+      await Future<void>.delayed(Duration.zero);
+
+      final after = bloc.state.drawingObjects['r'] as RectangleObject;
+      expect(after.rect.width, greaterThan(20));
+      await bloc.close();
+    });
+
+    test('empty selection fits all; non-empty fits only those', () async {
+      final bloc = CanvasBloc();
+      final a = RectangleObject(
+        id: 'a',
+        rect: const Rect.fromLTWH(0, 0, 500, 300),
+        text: 'A',
+      );
+      final b = RectangleObject(
+        id: 'b',
+        rect: const Rect.fromLTWH(0, 0, 500, 300),
+        text: 'B',
+      );
+      bloc.emit(bloc.state.copyWith(drawingObjects: {'a': a, 'b': b}));
+
+      // Fit only 'a'.
+      bloc.add(const NodesFittedToContent({'a'}));
+      await Future<void>.delayed(Duration.zero);
+      expect((bloc.state.drawingObjects['a'] as RectangleObject).rect.width,
+          lessThan(500));
+      expect((bloc.state.drawingObjects['b'] as RectangleObject).rect.width,
+          500);
+
+      // Now fit all (empty set).
+      bloc.add(const NodesFittedToContent({}));
+      await Future<void>.delayed(Duration.zero);
+      expect((bloc.state.drawingObjects['b'] as RectangleObject).rect.width,
+          lessThan(500));
+      await bloc.close();
+    });
+
+    test('is a single undoable step', () async {
+      final bloc = CanvasBloc();
+      final r = RectangleObject(
+        id: 'r',
+        rect: const Rect.fromLTWH(0, 0, 500, 300),
+        text: 'Hi',
+      );
+      bloc.emit(bloc.state.copyWith(drawingObjects: {'r': r}));
+
+      bloc.add(const NodesFittedToContent({}));
+      await Future<void>.delayed(Duration.zero);
+      final fitted = bloc.state.drawingObjects['r'] as RectangleObject;
+      expect(fitted.rect.width, lessThan(500));
+
+      bloc.add(UndoRequested());
+      await Future<void>.delayed(Duration.zero);
+      final restored = bloc.state.drawingObjects['r'] as RectangleObject;
+      expect(restored.rect.width, 500);
+      expect(restored.rect.height, 300);
+      await bloc.close();
+    });
+
+    test('shapes without text are left unchanged', () async {
+      final bloc = CanvasBloc();
+      final blank = RectangleObject(
+        id: 'r',
+        rect: const Rect.fromLTWH(0, 0, 500, 300),
+      );
+      bloc.emit(bloc.state.copyWith(drawingObjects: {'r': blank}));
+
+      bloc.add(const NodesFittedToContent({}));
+      await Future<void>.delayed(Duration.zero);
+
+      final after = bloc.state.drawingObjects['r'] as RectangleObject;
+      expect(after.rect.width, 500);
+      expect(after.rect.height, 300);
+      await bloc.close();
+    });
+
+    test('a larger margin produces a larger fitted box', () async {
+      RectangleObject make() => RectangleObject(
+            id: 'r',
+            rect: const Rect.fromLTWH(0, 0, 20, 20),
+            text: 'Label',
+          );
+
+      final small = CanvasBloc();
+      small.emit(small.state.copyWith(drawingObjects: {'r': make()}));
+      small.add(const NodesFittedToContent({}, margin: 0));
+      await Future<void>.delayed(Duration.zero);
+      final tight = (small.state.drawingObjects['r'] as RectangleObject).rect;
+
+      final big = CanvasBloc();
+      big.emit(big.state.copyWith(drawingObjects: {'r': make()}));
+      big.add(const NodesFittedToContent({}, margin: 40));
+      await Future<void>.delayed(Duration.zero);
+      final loose = (big.state.drawingObjects['r'] as RectangleObject).rect;
+
+      // margin=40 per side adds 80 to each dimension vs margin=0.
+      expect(loose.width, closeTo(tight.width + 80, 0.01));
+      expect(loose.height, closeTo(tight.height + 80, 0.01));
+      await small.close();
+      await big.close();
     });
   });
 }

@@ -28,6 +28,26 @@ class FloatingToolbar extends StatelessWidget {
   /// Called when the user taps the creation-zoom badge to jump to that zoom.
   final VoidCallback? onGoToCreationZoom;
 
+  /// Whether any selected object carries text/font (controls the font picker).
+  final bool hasFontTarget;
+
+  /// The effective font family currently shown for the selection.
+  final String currentFontFamily;
+
+  /// The effective font size currently shown for the selection.
+  final double currentFontSize;
+
+  /// Whether the selection's font has been individually customized (controls
+  /// whether the "Reset to default" action is offered).
+  final bool fontCustomized;
+
+  /// Called when the user picks a font family/size for the selection. Either
+  /// argument may be null to leave that axis unchanged.
+  final void Function(String? family, double? size)? onFontChanged;
+
+  /// Called when the user resets the selection's font to the global default.
+  final VoidCallback? onFontReset;
+
   const FloatingToolbar({
     super.key,
     required this.selectedIds,
@@ -42,6 +62,12 @@ class FloatingToolbar extends StatelessWidget {
     this.onMinimizeCrossings,
     this.creationZoom,
     this.onGoToCreationZoom,
+    this.hasFontTarget = false,
+    this.currentFontFamily = kEditorDefaultFontFamily,
+    this.currentFontSize = kEditorDefaultFontSize,
+    this.fontCustomized = false,
+    this.onFontChanged,
+    this.onFontReset,
   });
 
   @override
@@ -95,6 +121,16 @@ class FloatingToolbar extends StatelessWidget {
                 currentStyle: currentLineStyle,
                 onStyleChanged: onLineStyleChanged,
               ),
+              if (hasFontTarget && onFontChanged != null) ...[
+                const _ToolbarDivider(),
+                _FontButton(
+                  family: currentFontFamily,
+                  size: currentFontSize,
+                  customized: fontCustomized,
+                  onChanged: onFontChanged!,
+                  onReset: onFontReset,
+                ),
+              ],
               if (onMinimizeCrossings != null) ...[
                 const _ToolbarDivider(),
                 _MinimizeCrossingsButton(
@@ -258,6 +294,179 @@ class _LineStylePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_LineStylePainter old) => old.style != style;
+}
+
+/// Font picker for the selected shape(s): family choices, a size stepper, and
+/// (when the selection has been customized) a "Reset to default" action.
+class _FontButton extends StatelessWidget {
+  final String family;
+  final double size;
+  final bool customized;
+  final void Function(String? family, double? size) onChanged;
+  final VoidCallback? onReset;
+
+  const _FontButton({
+    required this.family,
+    required this.size,
+    required this.customized,
+    required this.onChanged,
+    this.onReset,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return MenuAnchor(
+      builder: (context, controller, _) {
+        return Tooltip(
+          message: 'Font',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(4),
+            onTap: () =>
+                controller.isOpen ? controller.close() : controller.open(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.text_fields, size: 18, color: Colors.white70),
+                  const SizedBox(width: 2),
+                  Text(
+                    '${size.round()}',
+                    style: const TextStyle(fontSize: 11, color: Colors.white70),
+                  ),
+                  const Icon(Icons.arrow_drop_down,
+                      size: 14, color: Colors.white54),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+      menuChildren: [
+        _FontMenuPanel(
+          family: family,
+          size: size,
+          customized: customized,
+          onChanged: onChanged,
+          onReset: onReset,
+        ),
+      ],
+    );
+  }
+}
+
+/// The stateful body of the font menu — tracks the live size so repeated
+/// stepper taps accumulate while the menu stays open.
+class _FontMenuPanel extends StatefulWidget {
+  final String family;
+  final double size;
+  final bool customized;
+  final void Function(String? family, double? size) onChanged;
+  final VoidCallback? onReset;
+
+  const _FontMenuPanel({
+    required this.family,
+    required this.size,
+    required this.customized,
+    required this.onChanged,
+    this.onReset,
+  });
+
+  @override
+  State<_FontMenuPanel> createState() => _FontMenuPanelState();
+}
+
+class _FontMenuPanelState extends State<_FontMenuPanel> {
+  late String _family = widget.family;
+  late double _size = widget.size;
+
+  static const double _minSize = 6;
+  static const double _maxSize = 96;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 200,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final f in kEditorFontFamilies)
+            InkWell(
+              onTap: () {
+                setState(() => _family = f);
+                widget.onChanged(f, null);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    Icon(
+                      f == _family
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_off,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(f, style: TextStyle(fontSize: 13, fontFamily: f)),
+                  ],
+                ),
+              ),
+            ),
+          const Divider(height: 12),
+          Row(
+            children: [
+              const Text('Size', style: TextStyle(fontSize: 12)),
+              const Spacer(),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                iconSize: 16,
+                icon: const Icon(Icons.remove),
+                onPressed: () {
+                  setState(
+                      () => _size = (_size - 1).clamp(_minSize, _maxSize));
+                  widget.onChanged(null, _size);
+                },
+              ),
+              SizedBox(
+                width: 32,
+                child: Text('${_size.round()}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 13)),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                iconSize: 16,
+                icon: const Icon(Icons.add),
+                onPressed: () {
+                  setState(
+                      () => _size = (_size + 1).clamp(_minSize, _maxSize));
+                  widget.onChanged(null, _size);
+                },
+              ),
+            ],
+          ),
+          if (widget.customized && widget.onReset != null) ...[
+            const Divider(height: 12),
+            InkWell(
+              onTap: widget.onReset,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    Icon(Icons.restart_alt, size: 16),
+                    SizedBox(width: 8),
+                    Text('Reset to default', style: TextStyle(fontSize: 13)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 /// A small badge showing the zoom level at which an object was created,

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
-import 'dart:ui';
+import 'dart:ui' hide TextStyle;
 
+import 'package:flutter/painting.dart' show TextStyle;
 import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flow_draw/src/models/styles.dart';
@@ -21,8 +22,48 @@ const _arrowHeadSize = 12.0;
 class SvgExporter {
   SvgExporter._();
 
+  /// The global default font used for non-customized shape text during the
+  /// current [export] call. Set at the top of [export] so the per-shape
+  /// renderers can resolve effective fonts without threading extra params.
+  static String _exportDefaultFontFamily = kEditorDefaultFontFamily;
+  static double _exportDefaultFontSize = kEditorDefaultFontSize;
+
+  /// Maps a Flutter generic font family name to a CSS-friendly equivalent.
+  /// 'Courier' renders as a monospace; the generic names pass through.
+  static String _cssFontFamily(String family) {
+    switch (family) {
+      case 'Courier':
+        return "'Courier New', Courier, monospace";
+      default:
+        return family;
+    }
+  }
+
+  /// Emits the `font-size`/`font-family` SVG attributes for a shape's text,
+  /// honoring its per-shape override or the global default.
+  static String _shapeFontAttrs(TextStyle? style, bool fontCustomized) {
+    final resolved = effectiveShapeTextStyle(
+      style: style,
+      customized: fontCustomized,
+      defaultFamily: _exportDefaultFontFamily,
+      defaultSize: _exportDefaultFontSize,
+    );
+    final family = _cssFontFamily(resolved.fontFamily ?? _exportDefaultFontFamily);
+    final size = (resolved.fontSize ?? _exportDefaultFontSize).toStringAsFixed(1);
+    return 'font-size="$size" font-family="$family"';
+  }
+
   /// Exports a map of drawing objects to an SVG string.
-  static String export(Map<String, DrawingObject> objects) {
+  ///
+  /// [defaultFontFamily]/[defaultFontSize] supply the global default font for
+  /// shapes whose font has not been individually customized.
+  static String export(
+    Map<String, DrawingObject> objects, {
+    String defaultFontFamily = kEditorDefaultFontFamily,
+    double defaultFontSize = kEditorDefaultFontSize,
+  }) {
+    _exportDefaultFontFamily = defaultFontFamily;
+    _exportDefaultFontSize = defaultFontSize;
     // Build solid-object rects for arrow attachment resolution.
     final solidRects = <String, Rect>{};
     for (final entry in objects.entries) {
@@ -127,7 +168,7 @@ class SvgExporter {
 
     if (obj.text != null && obj.text!.isNotEmpty) {
       svg.add('  <text x="${rect.center.dx}" y="${rect.center.dy}" '
-          'fill="$_textColor" font-size="14" font-family="sans-serif" '
+          'fill="$_textColor" ${_shapeFontAttrs(obj.textStyle, obj.fontCustomized)} '
           'text-anchor="middle" dominant-baseline="central">'
           '${_escapeXml(obj.text!)}</text>');
     }
@@ -162,7 +203,7 @@ class SvgExporter {
 
     if (obj.text != null && obj.text!.isNotEmpty) {
       svg.add('  <text x="$cx" y="$cy" '
-          'fill="$_textColor" font-size="14" font-family="sans-serif" '
+          'fill="$_textColor" ${_shapeFontAttrs(obj.textStyle, obj.fontCustomized)} '
           'text-anchor="middle" dominant-baseline="central">'
           '${_escapeXml(obj.text!)}</text>');
     }
@@ -198,7 +239,7 @@ class SvgExporter {
 
     if (obj.text != null && obj.text!.isNotEmpty) {
       svg.add('  <text x="$cx" y="$cy" '
-          'fill="$_textColor" font-size="14" font-family="sans-serif" '
+          'fill="$_textColor" ${_shapeFontAttrs(obj.textStyle, obj.fontCustomized)} '
           'text-anchor="middle" dominant-baseline="central">'
           '${_escapeXml(obj.text!)}</text>');
     }
@@ -227,7 +268,7 @@ class SvgExporter {
         '/>');
     if (obj.text != null && obj.text!.isNotEmpty) {
       svg.add('  <text x="${r.center.dx}" y="${r.center.dy}" '
-          'fill="$_textColor" font-size="14" font-family="sans-serif" '
+          'fill="$_textColor" ${_shapeFontAttrs(obj.textStyle, obj.fontCustomized)} '
           'text-anchor="middle" dominant-baseline="central">'
           '${_escapeXml(obj.text!)}</text>');
     }
@@ -432,8 +473,10 @@ class SvgExporter {
     if (rotOpen.isNotEmpty) svg.add(rotOpen);
 
     if (obj.text.isNotEmpty) {
+      final family = _cssFontFamily(obj.style.fontFamily ?? _exportDefaultFontFamily);
+      final size = (obj.style.fontSize ?? _exportDefaultFontSize).toStringAsFixed(1);
       svg.add('  <text x="${rect.center.dx}" y="${rect.center.dy}" '
-          'fill="$_textColor" font-size="14" font-family="sans-serif" '
+          'fill="$_textColor" font-size="$size" font-family="$family" '
           'text-anchor="middle" dominant-baseline="central">'
           '${_escapeXml(obj.text)}</text>');
     }

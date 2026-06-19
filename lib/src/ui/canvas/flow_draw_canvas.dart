@@ -87,6 +87,12 @@ class FlowDrawCanvas extends StatelessWidget {
                     }
                   }
 
+                  // Resolve the font picture for the selection: whether any
+                  // selected object carries text, the font it currently shows,
+                  // and whether it has been individually customized.
+                  final fontInfo =
+                      _selectionFontInfo(allSelected, canvasState);
+
                   return FloatingToolbar(
                     selectedIds: allSelected,
                     drawingObjects: canvasState.drawingObjects,
@@ -129,6 +135,24 @@ class FlowDrawCanvas extends StatelessWidget {
                         ? () => context
                             .read<CanvasBloc>()
                             .add(CanvasZoomed(objCreationZoom!))
+                        : null,
+                    hasFontTarget: fontInfo.hasFontTarget,
+                    currentFontFamily: fontInfo.family,
+                    currentFontSize: fontInfo.size,
+                    fontCustomized: fontInfo.customized,
+                    onFontChanged: fontInfo.hasFontTarget
+                        ? (family, size) {
+                            context.read<CanvasBloc>().add(ObjectFontChanged(
+                                  allSelected,
+                                  fontFamily: family,
+                                  fontSize: size,
+                                ));
+                          }
+                        : null,
+                    onFontReset: fontInfo.customized
+                        ? () => context
+                            .read<CanvasBloc>()
+                            .add(ObjectFontReset(allSelected))
                         : null,
                   );
                 },
@@ -201,5 +225,63 @@ class FlowDrawCanvas extends StatelessWidget {
     final screenY = (minY - vp.dy) * zoom - 10;
 
     return Offset(screenX - 100, screenY); // offset left to roughly center
+  }
+
+  /// Summarizes the font state of the selection for the floating toolbar.
+  ///
+  /// [hasFontTarget] is true when at least one selected object carries text.
+  /// [family]/[size] are the effective font shown for the first such object
+  /// (resolving the global default for non-customized shapes). [customized] is
+  /// true when any selected object has been individually customized.
+  static ({bool hasFontTarget, String family, double size, bool customized})
+      _selectionFontInfo(Set<String> selectedIds, CanvasState canvasState) {
+    bool hasFontTarget = false;
+    bool customized = false;
+    String family = canvasState.defaultFontFamily;
+    double size = canvasState.defaultFontSize;
+    bool gotFirst = false;
+
+    for (final id in selectedIds) {
+      final obj = canvasState.drawingObjects[id];
+      TextStyle? style;
+      bool objCustomized = false;
+      if (obj is RectangleObject) {
+        style = obj.textStyle;
+        objCustomized = obj.fontCustomized;
+      } else if (obj is CircleObject) {
+        style = obj.textStyle;
+        objCustomized = obj.fontCustomized;
+      } else if (obj is DiamondObject) {
+        style = obj.textStyle;
+        objCustomized = obj.fontCustomized;
+      } else if (obj is ParallelogramObject) {
+        style = obj.textStyle;
+        objCustomized = obj.fontCustomized;
+      } else {
+        continue;
+      }
+
+      hasFontTarget = true;
+      if (objCustomized) customized = true;
+
+      if (!gotFirst) {
+        gotFirst = true;
+        final resolved = effectiveShapeTextStyle(
+          style: style,
+          customized: objCustomized,
+          defaultFamily: canvasState.defaultFontFamily,
+          defaultSize: canvasState.defaultFontSize,
+        );
+        family = resolved.fontFamily ?? canvasState.defaultFontFamily;
+        size = resolved.fontSize ?? canvasState.defaultFontSize;
+      }
+    }
+
+    return (
+      hasFontTarget: hasFontTarget,
+      family: family,
+      size: size,
+      customized: customized,
+    );
   }
 }

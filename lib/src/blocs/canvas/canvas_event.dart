@@ -357,6 +357,95 @@ final class ObjectColorsChanged extends CanvasEvent {
   List<Object> get props => [selectedIds, clearFill, clearStroke];
 }
 
+/// Changes the global default font for shape text.
+///
+/// Updates [CanvasState.defaultFontFamily]/[defaultFontSize] and, by extension,
+/// repaints every shape whose font has *not* been individually customized.
+/// Customized shapes ([fontCustomized] true) are left untouched.
+final class GlobalFontChanged extends CanvasEvent {
+  /// New default font family, or null to leave it unchanged.
+  final String? fontFamily;
+
+  /// New default font size, or null to leave it unchanged.
+  final double? fontSize;
+
+  const GlobalFontChanged({this.fontFamily, this.fontSize})
+      : super(isUndoable: true);
+
+  @override
+  String get description => 'Changed default font';
+
+  @override
+  List<Object> get props => [fontFamily ?? '', fontSize ?? 0];
+}
+
+/// Sets a per-shape font override on the selected shapes, marking each as
+/// individually customized so global font changes no longer affect them.
+final class ObjectFontChanged extends CanvasEvent {
+  final Set<String> selectedIds;
+
+  /// New font family for the selection, or null to keep each shape's current
+  /// family (falling back to the global default when none).
+  final String? fontFamily;
+
+  /// New font size for the selection, or null to keep each shape's current size.
+  final double? fontSize;
+
+  const ObjectFontChanged(
+    this.selectedIds, {
+    this.fontFamily,
+    this.fontSize,
+  }) : super(isUndoable: true);
+
+  @override
+  String get description => 'Changed object font';
+
+  @override
+  List<Object> get props => [selectedIds, fontFamily ?? '', fontSize ?? 0];
+}
+
+/// Clears the per-shape font override on the selected shapes, so they follow
+/// the global default font again.
+final class ObjectFontReset extends CanvasEvent {
+  final Set<String> selectedIds;
+
+  const ObjectFontReset(this.selectedIds) : super(isUndoable: true);
+
+  @override
+  String get description => 'Reset object font to default';
+
+  @override
+  List<Object> get props => [selectedIds];
+}
+
+/// Resizes shapes so each box fits its text label exactly (grows tight boxes,
+/// shrinks oversized ones), keeping each shape centered on its current center.
+///
+/// When [selectedIds] is non-empty only those shapes are fitted; otherwise
+/// every text-bearing shape on the canvas is fitted. Undoable as one step.
+///
+/// [margin] is extra breathing room (in world px) added on every side around
+/// the text, on top of the per-shape base padding. Defaults to
+/// [kDefaultFitMargin].
+final class NodesFittedToContent extends CanvasEvent {
+  /// Shapes to fit. Empty means "fit all text-bearing shapes".
+  final Set<String> selectedIds;
+
+  /// Extra padding around the text on each side, in world pixels.
+  final double margin;
+
+  const NodesFittedToContent(
+    this.selectedIds, {
+    this.margin = kDefaultFitMargin,
+  }) : super(isUndoable: true);
+
+  @override
+  String get description => 'Fit nodes to content';
+
+  @override
+  List<Object> get props => [selectedIds, margin];
+}
+
 final class ObjectDuplicatedWithConnection extends CanvasEvent {
   final String sourceObjectId;
   final QuickActionDirection direction;

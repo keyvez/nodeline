@@ -32,7 +32,13 @@ export 'package:flow_draw/src/models/drawing_entities.dart'
         ForkJoinObject,
         ConnectionPort,
         PortDirection,
-        workflowTools;
+        workflowTools,
+        effectiveShapeTextStyle,
+        kEditorFontFamilies,
+        kEditorDefaultFontFamily,
+        kEditorDefaultFontSize,
+        kDefaultTextColor,
+        kDefaultFitMargin;
 
 export 'package:flow_draw/src/models/entities.dart'
     show NodeState, NodeInstance, NodeInfo;

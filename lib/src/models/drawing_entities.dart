@@ -8,6 +8,70 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
 
+/// Font families offered by the editor. Limited to families that are
+/// guaranteed to render (the platform's built-in generic families plus the
+/// historical default), so a picked font never silently falls back.
+const List<String> kEditorFontFamilies = <String>[
+  'Courier',
+  'sans-serif',
+  'serif',
+  'monospace',
+];
+
+/// The font family applied to shape text when nothing else has been chosen.
+const String kEditorDefaultFontFamily = 'Courier';
+
+/// The font size applied to shape text when nothing else has been chosen.
+const double kEditorDefaultFontSize = 16.0;
+
+/// The color used for shape text. Font customization controls family/size only;
+/// color continues to come from the existing color pickers.
+const Color kDefaultTextColor = Colors.white;
+
+/// Default extra breathing room (world px, per side) the "Fit to content"
+/// action leaves around a shape's text, on top of the per-shape base padding.
+const double kDefaultFitMargin = 20.0;
+
+/// Resolves the [TextStyle] a shape should paint with.
+///
+/// When the shape has been individually customized ([customized] true and a
+/// [style] present), that style wins. Otherwise the global default
+/// ([defaultFamily]/[defaultSize]) is used, so changing the global font
+/// updates every shape that has not been touched.
+TextStyle effectiveShapeTextStyle({
+  required TextStyle? style,
+  required bool customized,
+  required String defaultFamily,
+  required double defaultSize,
+}) {
+  if (customized && style != null) {
+    return TextStyle(
+      fontFamily: style.fontFamily ?? defaultFamily,
+      fontSize: style.fontSize ?? defaultSize,
+      color: style.color ?? kDefaultTextColor,
+    );
+  }
+  return TextStyle(
+    fontFamily: defaultFamily,
+    fontSize: defaultSize,
+    // Preserve any explicitly-set text color even on non-customized shapes.
+    color: style?.color ?? kDefaultTextColor,
+  );
+}
+
+/// Rebuilds a shape's [TextStyle] from its serialized `textStyle` map.
+/// Returns null when no style was stored. Tolerates older payloads that omit
+/// `fontFamily`.
+TextStyle? _textStyleFromJson(Object? raw) {
+  if (raw == null) return null;
+  final ts = raw as Map<String, dynamic>;
+  return TextStyle(
+    fontFamily: ts['fontFamily'] as String?,
+    fontSize: (ts['fontSize'] as num?)?.toDouble(),
+    color: ts['color'] != null ? Color(ts['color'] as int) : null,
+  );
+}
+
 /// Direction of a connection port on a shape's boundary.
 enum PortDirection { top, right, bottom, left }
 
@@ -133,6 +197,11 @@ class RectangleObject extends DrawingObject {
   Rect _rect;
   String? text;
   TextStyle? textStyle;
+
+  /// Whether this shape's font (family/size) has been individually customized.
+  /// When false, the shape follows the global default font and is updated by
+  /// global font changes; when true, it keeps its own [textStyle].
+  bool fontCustomized;
   bool isEditing;
   final LineStyle lineStyle;
 
@@ -146,7 +215,7 @@ class RectangleObject extends DrawingObject {
   /// Custom stroke/border color. When null, the default stroke is used.
   final Color? strokeColor;
 
-  RectangleObject({required super.id, required Rect rect, super.isSelected, super.angle, super.creationZoom, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid, this.borderRadius = 0.0, this.fillColor, this.strokeColor})
+  RectangleObject({required super.id, required Rect rect, super.isSelected, super.angle, super.creationZoom, this.text, this.textStyle, this.fontCustomized = false, this.isEditing = false, this.lineStyle = LineStyle.solid, this.borderRadius = 0.0, this.fillColor, this.strokeColor})
     : _rect = rect;
 
   @override
@@ -164,9 +233,11 @@ class RectangleObject extends DrawingObject {
     'creationZoom': creationZoom,
     if (text != null) 'text': text,
     if (textStyle != null) 'textStyle': {
+      'fontFamily': textStyle!.fontFamily,
       'fontSize': textStyle!.fontSize,
       'color': textStyle!.color?.value,
     },
+    if (fontCustomized) 'fontCustomized': true,
     'lineStyle': lineStyle.name,
     if (borderRadius > 0) 'borderRadius': borderRadius,
     if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
@@ -174,14 +245,7 @@ class RectangleObject extends DrawingObject {
   };
 
   factory RectangleObject.fromJson(Map<String, dynamic> json) {
-    TextStyle? style;
-    if (json['textStyle'] != null) {
-      final ts = json['textStyle'] as Map<String, dynamic>;
-      style = TextStyle(
-        fontSize: (ts['fontSize'] as num?)?.toDouble(),
-        color: ts['color'] != null ? Color(ts['color'] as int) : null,
-      );
-    }
+    final style = _textStyleFromJson(json['textStyle']);
     return RectangleObject(
       id: json['id'],
       rect: JSONRect.fromJson(json['rect']),
@@ -190,6 +254,7 @@ class RectangleObject extends DrawingObject {
       creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       textStyle: style,
+      fontCustomized: json['fontCustomized'] as bool? ?? false,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
       borderRadius: (json['borderRadius'] as num?)?.toDouble() ?? 0.0,
       fillColor: json['fillColor'] != null ? Color(json['fillColor'] as int) : null,
@@ -198,7 +263,7 @@ class RectangleObject extends DrawingObject {
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, double? borderRadius, Color? fillColor, Color? strokeColor}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, double? borderRadius, Color? fillColor, Color? strokeColor, TextStyle? textStyle, bool? fontCustomized}) {
     return RectangleObject(
       id: id,
       rect: rect ?? _rect,
@@ -206,7 +271,8 @@ class RectangleObject extends DrawingObject {
       angle: angle ?? this.angle,
       creationZoom: creationZoom ?? this.creationZoom,
       text: text,
-      textStyle: textStyle,
+      textStyle: textStyle ?? this.textStyle,
+      fontCustomized: fontCustomized ?? this.fontCustomized,
       lineStyle: lineStyle ?? this.lineStyle,
       borderRadius: borderRadius ?? this.borderRadius,
       isEditing: isEditing ?? this.isEditing,
@@ -220,12 +286,13 @@ class CircleObject extends DrawingObject {
   Rect _rect;
   String? text;
   TextStyle? textStyle;
+  bool fontCustomized;
   bool isEditing;
   final LineStyle lineStyle;
   final Color? fillColor;
   final Color? strokeColor;
 
-  CircleObject({required super.id, required Rect rect, super.isSelected, super.angle, super.creationZoom, this.text, this.textStyle, this.isEditing = false, this.lineStyle = LineStyle.solid, this.fillColor, this.strokeColor})
+  CircleObject({required super.id, required Rect rect, super.isSelected, super.angle, super.creationZoom, this.text, this.textStyle, this.fontCustomized = false, this.isEditing = false, this.lineStyle = LineStyle.solid, this.fillColor, this.strokeColor})
     : _rect = rect;
 
   @override
@@ -243,23 +310,18 @@ class CircleObject extends DrawingObject {
     'creationZoom': creationZoom,
     if (text != null) 'text': text,
     if (textStyle != null) 'textStyle': {
+      'fontFamily': textStyle!.fontFamily,
       'fontSize': textStyle!.fontSize,
       'color': textStyle!.color?.value,
     },
+    if (fontCustomized) 'fontCustomized': true,
     'lineStyle': lineStyle.name,
     if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
     if (strokeColor != null) 'strokeColor': strokeColor!.toARGB32(),
   };
 
   factory CircleObject.fromJson(Map<String, dynamic> json) {
-    TextStyle? style;
-    if (json['textStyle'] != null) {
-      final ts = json['textStyle'] as Map<String, dynamic>;
-      style = TextStyle(
-        fontSize: (ts['fontSize'] as num?)?.toDouble(),
-        color: ts['color'] != null ? Color(ts['color'] as int) : null,
-      );
-    }
+    final style = _textStyleFromJson(json['textStyle']);
     return CircleObject(
       id: json['id'],
       rect: JSONRect.fromJson(json['rect']),
@@ -268,6 +330,7 @@ class CircleObject extends DrawingObject {
       creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       textStyle: style,
+      fontCustomized: json['fontCustomized'] as bool? ?? false,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
       fillColor: json['fillColor'] != null ? Color(json['fillColor'] as int) : null,
       strokeColor: json['strokeColor'] != null ? Color(json['strokeColor'] as int) : null,
@@ -275,7 +338,7 @@ class CircleObject extends DrawingObject {
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, Color? fillColor, Color? strokeColor}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, Color? fillColor, Color? strokeColor, TextStyle? textStyle, bool? fontCustomized}) {
     return CircleObject(
       id: id,
       rect: rect ?? _rect,
@@ -283,7 +346,8 @@ class CircleObject extends DrawingObject {
       angle: angle ?? this.angle,
       creationZoom: creationZoom ?? this.creationZoom,
       text: text,
-      textStyle: textStyle,
+      textStyle: textStyle ?? this.textStyle,
+      fontCustomized: fontCustomized ?? this.fontCustomized,
       lineStyle: lineStyle ?? this.lineStyle,
       isEditing: isEditing ?? this.isEditing,
       fillColor: fillColor ?? this.fillColor,
@@ -296,6 +360,7 @@ class DiamondObject extends DrawingObject {
   Rect _rect;
   String? text;
   TextStyle? textStyle;
+  bool fontCustomized;
   bool isEditing;
   final LineStyle lineStyle;
   final Color? fillColor;
@@ -309,6 +374,7 @@ class DiamondObject extends DrawingObject {
     super.creationZoom,
     this.text,
     this.textStyle,
+    this.fontCustomized = false,
     this.isEditing = false,
     this.lineStyle = LineStyle.solid,
     this.fillColor,
@@ -330,23 +396,18 @@ class DiamondObject extends DrawingObject {
     'creationZoom': creationZoom,
     if (text != null) 'text': text,
     if (textStyle != null) 'textStyle': {
+      'fontFamily': textStyle!.fontFamily,
       'fontSize': textStyle!.fontSize,
       'color': textStyle!.color?.value,
     },
+    if (fontCustomized) 'fontCustomized': true,
     'lineStyle': lineStyle.name,
     if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
     if (strokeColor != null) 'strokeColor': strokeColor!.toARGB32(),
   };
 
   static DiamondObject fromJson(Map<String, dynamic> json) {
-    TextStyle? style;
-    if (json['textStyle'] != null) {
-      final ts = json['textStyle'] as Map<String, dynamic>;
-      style = TextStyle(
-        fontSize: (ts['fontSize'] as num?)?.toDouble(),
-        color: ts['color'] != null ? Color(ts['color'] as int) : null,
-      );
-    }
+    final style = _textStyleFromJson(json['textStyle']);
     return DiamondObject(
       id: json['id'],
       rect: JSONRect.fromJson(json['rect']),
@@ -355,6 +416,7 @@ class DiamondObject extends DrawingObject {
       creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       textStyle: style,
+      fontCustomized: json['fontCustomized'] as bool? ?? false,
       lineStyle: json['lineStyle'] != null
           ? LineStyle.values.byName(json['lineStyle'])
           : LineStyle.solid,
@@ -385,6 +447,8 @@ class DiamondObject extends DrawingObject {
     bool? isEditing,
     Color? fillColor,
     Color? strokeColor,
+    TextStyle? textStyle,
+    bool? fontCustomized,
   }) {
     return DiamondObject(
       id: id,
@@ -393,7 +457,8 @@ class DiamondObject extends DrawingObject {
       angle: angle ?? this.angle,
       creationZoom: creationZoom ?? this.creationZoom,
       text: text,
-      textStyle: textStyle,
+      textStyle: textStyle ?? this.textStyle,
+      fontCustomized: fontCustomized ?? this.fontCustomized,
       lineStyle: lineStyle ?? this.lineStyle,
       isEditing: isEditing ?? this.isEditing,
       fillColor: fillColor ?? this.fillColor,
@@ -407,6 +472,7 @@ class ParallelogramObject extends DrawingObject {
   Rect _rect;
   String? text;
   TextStyle? textStyle;
+  bool fontCustomized;
   bool isEditing;
   final LineStyle lineStyle;
   final double skewOffset;
@@ -421,6 +487,7 @@ class ParallelogramObject extends DrawingObject {
     super.creationZoom,
     this.text,
     this.textStyle,
+    this.fontCustomized = false,
     this.isEditing = false,
     this.lineStyle = LineStyle.solid,
     this.skewOffset = 20.0,
@@ -443,9 +510,11 @@ class ParallelogramObject extends DrawingObject {
     'creationZoom': creationZoom,
     if (text != null) 'text': text,
     if (textStyle != null) 'textStyle': {
+      'fontFamily': textStyle!.fontFamily,
       'fontSize': textStyle!.fontSize,
       'color': textStyle!.color?.value,
     },
+    if (fontCustomized) 'fontCustomized': true,
     'lineStyle': lineStyle.name,
     'skewOffset': skewOffset,
     if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
@@ -453,14 +522,7 @@ class ParallelogramObject extends DrawingObject {
   };
 
   static ParallelogramObject fromJson(Map<String, dynamic> json) {
-    TextStyle? style;
-    if (json['textStyle'] != null) {
-      final ts = json['textStyle'] as Map<String, dynamic>;
-      style = TextStyle(
-        fontSize: (ts['fontSize'] as num?)?.toDouble(),
-        color: ts['color'] != null ? Color(ts['color'] as int) : null,
-      );
-    }
+    final style = _textStyleFromJson(json['textStyle']);
     return ParallelogramObject(
       id: json['id'],
       rect: JSONRect.fromJson(json['rect']),
@@ -469,6 +531,7 @@ class ParallelogramObject extends DrawingObject {
       creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       textStyle: style,
+      fontCustomized: json['fontCustomized'] as bool? ?? false,
       lineStyle: json['lineStyle'] != null
           ? LineStyle.values.byName(json['lineStyle'])
           : LineStyle.solid,
@@ -498,6 +561,8 @@ class ParallelogramObject extends DrawingObject {
     bool? isEditing,
     Color? fillColor,
     Color? strokeColor,
+    TextStyle? textStyle,
+    bool? fontCustomized,
   }) {
     return ParallelogramObject(
       id: id,
@@ -506,7 +571,8 @@ class ParallelogramObject extends DrawingObject {
       angle: angle ?? this.angle,
       creationZoom: creationZoom ?? this.creationZoom,
       text: text,
-      textStyle: textStyle,
+      textStyle: textStyle ?? this.textStyle,
+      fontCustomized: fontCustomized ?? this.fontCustomized,
       lineStyle: lineStyle ?? this.lineStyle,
       isEditing: isEditing ?? this.isEditing,
       skewOffset: skewOffset,

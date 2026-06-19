@@ -65,6 +65,10 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         ObjectsAligned e => _onObjectsAligned(e, emit),
         ObjectsDistributed e => _onObjectsDistributed(e, emit),
         ObjectColorsChanged e => _onObjectColorsChanged(e, emit),
+        GlobalFontChanged e => _onGlobalFontChanged(e, emit),
+        ObjectFontChanged e => _onObjectFontChanged(e, emit),
+        ObjectFontReset e => _onObjectFontReset(e, emit),
+        NodesFittedToContent e => _onNodesFittedToContent(e, emit),
         ObjectDuplicatedWithConnection e => _onObjectDuplicatedWithConnection(e, emit),
         GridToggled e => _onGridToggled(e, emit),
         CrossingsMinimized e => _onCrossingsMinimized(e, emit),
@@ -699,6 +703,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           rect: obj.rect.shift(offset),
           text: obj.text,
           textStyle: obj.textStyle,
+          fontCustomized: obj.fontCustomized,
           lineStyle: obj.lineStyle,
           angle: obj.angle,
         );
@@ -708,6 +713,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           rect: obj.rect.shift(offset),
           text: obj.text,
           textStyle: obj.textStyle,
+          fontCustomized: obj.fontCustomized,
           lineStyle: obj.lineStyle,
           angle: obj.angle,
         );
@@ -717,6 +723,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           rect: obj.rect.shift(offset),
           text: obj.text,
           textStyle: obj.textStyle,
+          fontCustomized: obj.fontCustomized,
           lineStyle: obj.lineStyle,
           angle: obj.angle,
         );
@@ -726,6 +733,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           rect: obj.rect.shift(offset),
           text: obj.text,
           textStyle: obj.textStyle,
+          fontCustomized: obj.fontCustomized,
           lineStyle: obj.lineStyle,
           angle: obj.angle,
           skewOffset: obj.skewOffset,
@@ -1073,6 +1081,203 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         ) as DrawingObject;
       }
     }
+
+    _emitWithHistory(
+      state.copyWith(drawingObjects: updatedObjects),
+      event,
+      emit,
+    );
+  }
+
+  /// Whether [obj] is a shape that carries customizable text/font.
+  static bool _hasFont(DrawingObject obj) =>
+      obj is RectangleObject ||
+      obj is CircleObject ||
+      obj is DiamondObject ||
+      obj is ParallelogramObject;
+
+  /// Reads the current per-shape [TextStyle] for a font-bearing shape, or null.
+  static TextStyle? _shapeTextStyle(DrawingObject obj) {
+    if (obj is RectangleObject) return obj.textStyle;
+    if (obj is CircleObject) return obj.textStyle;
+    if (obj is DiamondObject) return obj.textStyle;
+    if (obj is ParallelogramObject) return obj.textStyle;
+    return null;
+  }
+
+  /// Reads the `fontCustomized` flag for a font-bearing shape.
+  static bool _shapeFontCustomized(DrawingObject obj) {
+    if (obj is RectangleObject) return obj.fontCustomized;
+    if (obj is CircleObject) return obj.fontCustomized;
+    if (obj is DiamondObject) return obj.fontCustomized;
+    if (obj is ParallelogramObject) return obj.fontCustomized;
+    return false;
+  }
+
+  void _onGlobalFontChanged(
+      GlobalFontChanged event, Emitter<CanvasState> emit) {
+    // The default lives on the state; shapes read it at paint time, so simply
+    // updating the defaults repaints every non-customized shape. Customized
+    // shapes keep their own textStyle and are unaffected.
+    _emitWithHistory(
+      state.copyWith(
+        defaultFontFamily: event.fontFamily ?? state.defaultFontFamily,
+        defaultFontSize: event.fontSize ?? state.defaultFontSize,
+      ),
+      event,
+      emit,
+    );
+  }
+
+  void _onObjectFontChanged(
+      ObjectFontChanged event, Emitter<CanvasState> emit) {
+    final updatedObjects = Map<String, DrawingObject>.from(state.drawingObjects);
+
+    for (final id in event.selectedIds) {
+      final obj = updatedObjects[id];
+      if (obj == null || !_hasFont(obj)) continue;
+
+      // Start from the shape's current effective font so changing only the size
+      // (or only the family) preserves the other axis.
+      final current = _shapeTextStyle(obj);
+      final newStyle = TextStyle(
+        fontFamily: event.fontFamily ??
+            current?.fontFamily ??
+            state.defaultFontFamily,
+        fontSize:
+            event.fontSize ?? current?.fontSize ?? state.defaultFontSize,
+        color: current?.color,
+      );
+
+      updatedObjects[id] = (obj as dynamic).copyWith(
+        textStyle: newStyle,
+        fontCustomized: true,
+      ) as DrawingObject;
+    }
+
+    _emitWithHistory(
+      state.copyWith(drawingObjects: updatedObjects),
+      event,
+      emit,
+    );
+  }
+
+  void _onObjectFontReset(
+      ObjectFontReset event, Emitter<CanvasState> emit) {
+    final updatedObjects = Map<String, DrawingObject>.from(state.drawingObjects);
+
+    for (final id in event.selectedIds) {
+      final obj = updatedObjects[id];
+      if (obj == null || !_hasFont(obj)) continue;
+
+      // Preserve any explicit text color but drop the family/size override and
+      // clear the customized flag so the shape follows the global default.
+      // copyWith can't null out textStyle (it coalesces), so assign the field
+      // directly on the fresh copy.
+      final current = _shapeTextStyle(obj);
+      final reset = (obj as dynamic).copyWith(fontCustomized: false)
+          as DrawingObject;
+      final colorOnly =
+          current?.color != null ? TextStyle(color: current!.color) : null;
+      (reset as dynamic).textStyle = colorOnly;
+      updatedObjects[id] = reset;
+    }
+
+    _emitWithHistory(
+      state.copyWith(drawingObjects: updatedObjects),
+      event,
+      emit,
+    );
+  }
+
+  /// Returns the text label of a font-bearing shape, or null/empty when none.
+  static String? _shapeText(DrawingObject obj) {
+    if (obj is RectangleObject) return obj.text;
+    if (obj is CircleObject) return obj.text;
+    if (obj is DiamondObject) return obj.text;
+    if (obj is ParallelogramObject) return obj.text;
+    return null;
+  }
+
+  /// Computes the rect a shape should occupy to fit [text] exactly, centered on
+  /// the shape's current center. [obj] selects the per-type padding (diamond and
+  /// circle need more room since text sits inside a narrower inner region).
+  static Rect _fittedRect(
+    DrawingObject obj,
+    String text,
+    TextStyle style,
+    double margin,
+  ) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.center,
+    )..layout();
+
+    // Horizontal/vertical insets between the text bounds and the shape edge.
+    // Diamonds and ellipses taper, so their text must sit in a smaller central
+    // box — give them proportionally more padding than rectangles. The
+    // user-supplied [margin] adds a uniform extra gap on every side.
+    final double padX;
+    final double padY;
+    if (obj is DiamondObject) {
+      padX = painter.width * 0.6 + 24;
+      padY = painter.height * 0.6 + 16;
+    } else if (obj is CircleObject) {
+      padX = painter.width * 0.45 + 20;
+      padY = painter.height * 0.45 + 14;
+    } else if (obj is ParallelogramObject) {
+      padX = (obj.skewOffset * 2) + 24;
+      padY = 16;
+    } else {
+      padX = 24;
+      padY = 16;
+    }
+
+    // Never collapse a shape below a usable minimum. Margin is per-side, so it
+    // contributes twice to each dimension.
+    final width = max(painter.width + padX + margin * 2, 48.0);
+    final height = max(painter.height + padY + margin * 2, 32.0);
+
+    final center = obj.rect.center;
+    return Rect.fromCenter(center: center, width: width, height: height);
+  }
+
+  void _onNodesFittedToContent(
+      NodesFittedToContent event, Emitter<CanvasState> emit) {
+    final updatedObjects = Map<String, DrawingObject>.from(state.drawingObjects);
+
+    // Selection if any, else every text-bearing shape on the canvas.
+    final ids = event.selectedIds.isNotEmpty
+        ? event.selectedIds
+        : updatedObjects.keys.toSet();
+
+    var changed = false;
+    for (final id in ids) {
+      final obj = updatedObjects[id];
+      if (obj == null || !_hasFont(obj)) continue;
+
+      final text = _shapeText(obj);
+      if (text == null || text.isEmpty) continue;
+
+      final style = effectiveShapeTextStyle(
+        style: _shapeTextStyle(obj),
+        customized: _shapeFontCustomized(obj),
+        defaultFamily: state.defaultFontFamily,
+        defaultSize: state.defaultFontSize,
+      );
+
+      final newRect = _fittedRect(obj, text, style, event.margin);
+      if (newRect == obj.rect) continue;
+
+      // copyWith (not in-place mutation): the undo snapshot shares these object
+      // instances, so we must produce fresh objects to avoid corrupting history.
+      updatedObjects[id] = (obj as dynamic).copyWith(rect: newRect)
+          as DrawingObject;
+      changed = true;
+    }
+
+    if (!changed) return;
 
     _emitWithHistory(
       state.copyWith(drawingObjects: updatedObjects),
