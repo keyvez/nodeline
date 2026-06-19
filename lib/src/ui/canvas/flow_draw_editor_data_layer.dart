@@ -3655,14 +3655,14 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
               height: shapeObject.rect.height * zoom,
               child: Material(
                 color: Colors.transparent,
-                // Scale the whole editor by zoom so the controller's per-run
-                // styles (in world-unit font sizes) render at the correct
-                // on-screen size without having to pre-multiply each run. The
-                // scaled content is sized to the node's exact world rect (no
-                // Center shrink) so the editable area fills the visible box.
-                child: Transform.scale(
-                  scale: zoom,
-                  alignment: Alignment.center,
+                // The editor content is laid out at the node's exact world rect
+                // (rect.width x rect.height); FittedBox(fill) then scales it to
+                // fill the screen-sized Positioned edge-to-edge. This makes the
+                // editable/selection area match the visible node and renders
+                // per-run world-unit font sizes at the correct on-screen scale,
+                // without manual zoom math.
+                child: FittedBox(
+                  fit: BoxFit.fill,
                   child: SizedBox(
                     width: shapeObject.rect.width,
                     height: shapeObject.rect.height,
