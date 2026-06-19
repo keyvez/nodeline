@@ -336,6 +336,14 @@ class FlowDrawController implements FlowDrawControllerInterface {
     _canvasBloc!.add(const GridToggled());
   }
 
+  /// Runs the "Tidy" layered auto-layout: repositions boxes top-to-bottom to
+  /// minimize edge crossings and fits the view to the result.
+  @override
+  void tidy() {
+    _assertIsInitialized();
+    _canvasBloc!.add(const AutoLayoutRequested());
+  }
+
   /// Disposes of the controller's resources.
   /// Should be called when the controller is no longer needed.
   /// This is handled automatically by the `FlowDraw` widget.

@@ -187,7 +187,14 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     _toolBloc = context.read<ToolBloc>();
     GestureBinding.instance.pointerRouter.addGlobalRoute(_globalPointerRoute);
     _registerServiceExtensions();
+    // Tidy is triggered from the toolbar via the bloc's tidyRequests stream,
+    // but the layout needs rendered node geometry, so the data layer runs it.
+    _autoLayoutReqSub = _canvasBloc.tidyRequests.listen((_) {
+      if (mounted) _applyAutoLayout();
+    });
   }
+
+  StreamSubscription<void>? _autoLayoutReqSub;
 
   static bool _serviceExtensionsRegistered = false;
 
@@ -317,6 +324,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   @override
   void dispose() {
     GestureBinding.instance.pointerRouter.removeGlobalRoute(_globalPointerRoute);
+    _autoLayoutReqSub?.cancel();
     _canvasFocusNode.dispose();
     _kineticTimer?.cancel();
     _shapeTextController?.dispose();

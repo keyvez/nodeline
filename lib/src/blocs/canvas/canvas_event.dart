@@ -412,6 +412,20 @@ final class AutoLayoutApplied extends CanvasEvent {
   List<Object> get props => [nodeOffsets];
 }
 
+/// Signals that the user requested a "Tidy" auto-layout. The actual layout is
+/// computed in the data layer (it needs rendered node geometry), which listens
+/// for this event; the bloc handler is a no-op. Not undoable itself — the
+/// resulting [AutoLayoutApplied] carries the undo step.
+final class AutoLayoutRequested extends CanvasEvent {
+  const AutoLayoutRequested() : super(isUndoable: false);
+
+  @override
+  String get description => 'Tidy';
+
+  @override
+  List<Object> get props => [];
+}
+
 /// Attaches a review comment to an entity (or a bare canvas point).
 ///
 /// Not undoable — comments are feedback layered over the drawing, not part of

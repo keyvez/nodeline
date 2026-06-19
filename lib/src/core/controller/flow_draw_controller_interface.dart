@@ -80,6 +80,9 @@ abstract class FlowDrawControllerInterface {
 
   void toggleGrid();
 
+  /// Runs the layered "Tidy" auto-layout (minimize crossings + fit view).
+  void tidy();
+
   // --- Mermaid Methods ---
 
   String exportMermaid({Set<String>? selectedIds});

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:bloc/bloc.dart';
@@ -18,6 +19,13 @@ part 'canvas_state.dart';
 
 class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
   static const int _maxHistoryStack = 100;
+
+  /// Broadcasts "Tidy" (auto-layout) requests. The layout itself runs in the
+  /// data layer (it needs rendered node geometry), so the bloc just relays the
+  /// request rather than computing the new positions.
+  final StreamController<void> _tidyRequests =
+      StreamController<void>.broadcast();
+  Stream<void> get tidyRequests => _tidyRequests.stream;
   /// Snapshot of the state before an ongoing non-undoable operation
   /// (drag, resize, rotation). Captured on the first non-undoable event
   /// and consumed by the corresponding "ended" event.
@@ -64,8 +72,15 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         CommentRemoved e => _onCommentRemoved(e, emit),
         CommentResolvedToggled e => _onCommentResolvedToggled(e, emit),
         AutoLayoutApplied e => _onAutoLayoutApplied(e, emit),
+        AutoLayoutRequested _ => _tidyRequests.add(null),
       });
     });
+  }
+
+  @override
+  Future<void> close() {
+    _tidyRequests.close();
+    return super.close();
   }
 
   void _emitWithHistory(

@@ -344,6 +344,23 @@ class FlowDrawToolbar extends StatelessWidget {
             const PromptToWorkflowButton(),
             Gap(8),
             const _SvgExportButton(),
+            Padding(
+              padding: const EdgeInsets.only(left: 16),
+              child: GhostButton(
+                density: ButtonDensity.compact,
+                onPressed: () {
+                  context.read<CanvasBloc>().add(const AutoLayoutRequested());
+                },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(Icons.auto_awesome_mosaic, size: 16),
+                    SizedBox(width: 6),
+                    Text('Tidy', style: TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
             BlocBuilder<CanvasBloc, CanvasState>(
               builder: (context, canvasState) {
                 return Padding(
