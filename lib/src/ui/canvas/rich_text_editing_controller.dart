@@ -31,6 +31,14 @@ class RichTextEditingController extends TextEditingController {
   int _styleRevision = 0;
   int get styleRevision => _styleRevision;
 
+  /// The most recent ranged (non-collapsed) selection. When the editor's
+  /// [TextField] loses focus to a toolbar control, Flutter collapses the live
+  /// selection — so toolbar styling actions fall back to this remembered range
+  /// instead of becoming a no-op pending style. Updated on every selection
+  /// change while focused.
+  TextSelection? _lastRangedSelection;
+  TextSelection? get lastRangedSelection => _lastRangedSelection;
+
   RichTextEditingController({required this.base, List<TextRun>? runs})
       : _runStyles = const [],
         super(text: _plainText(runs)) {
@@ -39,6 +47,16 @@ class RichTextEditingController extends TextEditingController {
     // against it (not against empty), preserving the seeded per-char styles.
     _lastText = text;
     addListener(_syncOnEdit);
+    addListener(_trackSelection);
+  }
+
+  /// Remembers the last non-collapsed selection so toolbar actions can target
+  /// it even after focus (and the live selection) moves to a toolbar control.
+  void _trackSelection() {
+    final sel = selection;
+    if (sel.isValid && sel.start != sel.end) {
+      _lastRangedSelection = sel;
+    }
   }
 
   static String _plainText(List<TextRun>? runs) =>
@@ -129,10 +147,25 @@ class RichTextEditingController extends TextEditingController {
     if (inserted > 0) _pendingStyle = null;
   }
 
+  /// The selection toolbar actions should target: the live ranged selection if
+  /// there is one, otherwise the last remembered range (focus may have moved to
+  /// a toolbar control, collapsing the live selection), otherwise the caret.
+  TextSelection _effectiveSelection() {
+    final sel = selection;
+    if (sel.isValid && sel.start != sel.end) return sel;
+    final remembered = _lastRangedSelection;
+    if (remembered != null &&
+        remembered.start <= text.length &&
+        remembered.end <= text.length) {
+      return remembered;
+    }
+    return sel;
+  }
+
   /// The aggregate style of the current selection, for driving toolbar state.
   /// Returns null for an attribute when the selection spans mixed values.
   ResolvedSelectionStyle selectionStyle() {
-    final sel = selection;
+    final sel = _effectiveSelection();
     if (!sel.isValid || _runStyles.isEmpty) {
       final s = _pendingStyle ?? const _RunStyle();
       return ResolvedSelectionStyle._fromRun(s, base);
@@ -172,23 +205,30 @@ class RichTextEditingController extends TextEditingController {
           color: color,
         );
 
-    final sel = selection;
+    final sel = _effectiveSelection();
     if (!sel.isValid || sel.start == sel.end) {
       _pendingStyle = mutate(_pendingStyle ??
           (sel.isValid && sel.start > 0 && sel.start - 1 < _runStyles.length
               ? _runStyles[sel.start - 1]
               : const _RunStyle()));
+      _styleRevision++;
+      notifyListeners();
     } else {
       final start = sel.start.clamp(0, _runStyles.length);
       final end = sel.end.clamp(0, _runStyles.length);
       for (var i = start; i < end; i++) {
         _runStyles[i] = mutate(_runStyles[i]);
       }
+      _styleRevision++;
+      // Re-assert the selection as the live one so the highlight persists and
+      // repeated toolbar actions keep targeting it (setting `selection` here
+      // also notifies listeners). Guard against a no-op assignment.
+      if (selection != sel) {
+        selection = sel;
+      } else {
+        notifyListeners();
+      }
     }
-    _styleRevision++;
-    // Notify listeners (toolbar + the editor's text span) without changing
-    // text/selection. notifyListeners is protected; round-trip the value.
-    notifyListeners();
   }
 
   /// Compact run list for persistence, coalescing equal adjacent characters.

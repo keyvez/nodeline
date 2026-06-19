@@ -1118,6 +1118,30 @@ flowchart TD
       c.dispose();
     });
 
+    test('toolbar action still targets selection after focus collapses it', () {
+      // Repro: user selects "hello", then clicks the font button — the editor
+      // TextField loses focus and Flutter collapses the live selection. The
+      // remembered ranged selection must still receive the style.
+      final c = RichTextEditingController(
+        base: const TextStyle(fontSize: 16),
+        runs: const [TextRun('hello world')],
+      );
+      c.selection = const TextSelection(baseOffset: 0, extentOffset: 5);
+      // Simulate focus moving to the toolbar: selection collapses to a caret.
+      c.selection = const TextSelection.collapsed(offset: 5);
+      // Toolbar applies bold — should hit the remembered "hello" range.
+      c.applyToSelection(bold: const Attr.set(true));
+      final runs = c.toRuns();
+      expect(runs.first.text, 'hello');
+      expect(runs.first.bold, isTrue);
+      expect(runs.last.text, ' world');
+      expect(runs.last.bold, isNull);
+      // The selection is re-asserted so the highlight persists.
+      expect(c.selection.start, 0);
+      expect(c.selection.end, 5);
+      c.dispose();
+    });
+
     test('selectionStyle reports mixed attributes as null', () {
       final c = RichTextEditingController(
         base: const TextStyle(fontSize: 16),
