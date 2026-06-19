@@ -1913,7 +1913,13 @@ class FlowDrawEditorRenderBox extends RenderBox
     LineStyle lineStyle = LineStyle.solid,
   }) {
     final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-    final double arrowSize = 7.0 * dpr * clampedInverseZoom;
+    // Arrowheads are constant in screen pixels at normal/zoomed-in levels
+    // (factor = 1/zoom). But when zoomed OUT past [headConstantZoom], we cap the
+    // factor so the head size stops growing in world units — i.e. it shrinks on
+    // screen along with the diagram, instead of looking oversized.
+    const double headConstantZoom = 0.6;
+    final double headZoomFactor = 1.0 / max(zoom, headConstantZoom);
+    final double arrowSize = 7.0 * dpr * headZoomFactor;
     const double arrowAngle = 25 * (pi / 180);
 
     final lineVector = end - controlPoint;
