@@ -87,6 +87,164 @@ TextStyle? _textStyleFromJson(Object? raw) {
   );
 }
 
+/// A contiguous span of a shape's text that shares one set of style overrides.
+///
+/// Rich text inside a node is modeled as an ordered list of [TextRun]s whose
+/// [text] concatenated yields the node's plain text. Each style attribute is
+/// nullable: null means "inherit from the shape's base style" (which itself
+/// resolves against the global default via [effectiveShapeTextStyle]). This
+/// keeps a single-run node behaving exactly like the legacy single-`TextStyle`
+/// node while allowing per-character family/size/bold/italic/color.
+@immutable
+class TextRun extends Equatable {
+  final String text;
+  final String? fontFamily;
+  final double? fontSize;
+  final bool? bold;
+  final bool? italic;
+
+  /// ARGB color value (as from [Color.value]); null inherits the base color.
+  final int? color;
+
+  const TextRun(
+    this.text, {
+    this.fontFamily,
+    this.fontSize,
+    this.bold,
+    this.italic,
+    this.color,
+  });
+
+  /// Whether this run carries any style override at all. A run with no
+  /// overrides is purely inherited and can be merged with neighbours.
+  bool get hasOverrides =>
+      fontFamily != null ||
+      fontSize != null ||
+      bold != null ||
+      italic != null ||
+      color != null;
+
+  /// Whether [other] would render identically (ignoring [text]), so adjacent
+  /// runs can be coalesced.
+  bool sameStyle(TextRun other) =>
+      fontFamily == other.fontFamily &&
+      fontSize == other.fontSize &&
+      bold == other.bold &&
+      italic == other.italic &&
+      color == other.color;
+
+  /// Resolves this run against [base] (the shape's effective base style) into a
+  /// concrete [TextStyle] for painting/editing.
+  TextStyle resolve(TextStyle base) {
+    return base.copyWith(
+      fontFamily: fontFamily ?? base.fontFamily,
+      fontSize: fontSize ?? base.fontSize,
+      fontWeight: bold == null
+          ? base.fontWeight
+          : (bold! ? FontWeight.bold : FontWeight.normal),
+      fontStyle: italic == null
+          ? base.fontStyle
+          : (italic! ? FontStyle.italic : FontStyle.normal),
+      color: color != null ? Color(color!) : base.color,
+    );
+  }
+
+  TextRun copyWith({
+    String? text,
+    Object? fontFamily = _sentinel,
+    Object? fontSize = _sentinel,
+    Object? bold = _sentinel,
+    Object? italic = _sentinel,
+    Object? color = _sentinel,
+  }) {
+    return TextRun(
+      text ?? this.text,
+      fontFamily: fontFamily == _sentinel ? this.fontFamily : fontFamily as String?,
+      fontSize: fontSize == _sentinel ? this.fontSize : fontSize as double?,
+      bold: bold == _sentinel ? this.bold : bold as bool?,
+      italic: italic == _sentinel ? this.italic : italic as bool?,
+      color: color == _sentinel ? this.color : color as int?,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'text': text,
+        if (fontFamily != null) 'fontFamily': fontFamily,
+        if (fontSize != null) 'fontSize': fontSize,
+        if (bold != null) 'bold': bold,
+        if (italic != null) 'italic': italic,
+        if (color != null) 'color': color,
+      };
+
+  factory TextRun.fromJson(Map<String, dynamic> json) => TextRun(
+        json['text'] as String? ?? '',
+        fontFamily: json['fontFamily'] as String?,
+        fontSize: _sanitizeFontSize(json['fontSize'] as num?),
+        bold: json['bold'] as bool?,
+        italic: json['italic'] as bool?,
+        color: json['color'] as int?,
+      );
+
+  @override
+  List<Object?> get props => [text, fontFamily, fontSize, bold, italic, color];
+}
+
+/// Sentinel for [TextRun.copyWith] so callers can explicitly clear a style
+/// override (pass null) versus leave it unchanged (omit the argument).
+const Object _sentinel = Object();
+
+/// Serializes a list of runs (or null) to JSON.
+List<Map<String, dynamic>>? richTextToJson(List<TextRun>? runs) =>
+    runs == null ? null : runs.map((r) => r.toJson()).toList();
+
+/// Rebuilds a run list from JSON, returning null when absent.
+List<TextRun>? richTextFromJson(Object? raw) {
+  if (raw == null) return null;
+  final list = (raw as List)
+      .map((e) => TextRun.fromJson(e as Map<String, dynamic>))
+      .where((r) => r.text.isNotEmpty)
+      .toList();
+  return list.isEmpty ? null : list;
+}
+
+/// Coalesces adjacent runs with identical styling and drops empties, so the
+/// stored representation stays minimal.
+List<TextRun> normalizeRuns(List<TextRun> runs) {
+  final out = <TextRun>[];
+  for (final r in runs) {
+    if (r.text.isEmpty) continue;
+    if (out.isNotEmpty && out.last.sameStyle(r)) {
+      out[out.length - 1] = out.last.copyWith(text: out.last.text + r.text);
+    } else {
+      out.add(r);
+    }
+  }
+  return out;
+}
+
+/// Builds the [InlineSpan] for a shape's text. When [runs] holds more than one
+/// run (or a single run with overrides) a multi-child span is produced;
+/// otherwise a plain single span identical to the legacy path is returned.
+/// [base] must be the already-resolved effective style for the shape.
+TextSpan buildShapeTextSpan({
+  required String? text,
+  required List<TextRun>? runs,
+  required TextStyle base,
+}) {
+  if (runs == null || runs.isEmpty) {
+    return TextSpan(text: text ?? '', style: base);
+  }
+  if (runs.length == 1 && !runs.first.hasOverrides) {
+    return TextSpan(text: runs.first.text, style: base);
+  }
+  return TextSpan(
+    style: base,
+    children: [
+      for (final r in runs) TextSpan(text: r.text, style: r.resolve(base)),
+    ],
+  );
+}
+
 /// Direction of a connection port on a shape's boundary.
 enum PortDirection { top, right, bottom, left }
 
@@ -213,6 +371,11 @@ class RectangleObject extends DrawingObject {
   String? text;
   TextStyle? textStyle;
 
+  /// Per-run rich text. When non-null, [text] is the plain-text mirror of these
+  /// runs (kept in sync for search/export); rendering uses the runs so a node
+  /// can mix font families, sizes, weights, slants, and colors.
+  List<TextRun>? richText;
+
   /// Whether this shape's font (family/size) has been individually customized.
   /// When false, the shape follows the global default font and is updated by
   /// global font changes; when true, it keeps its own [textStyle].
@@ -230,7 +393,7 @@ class RectangleObject extends DrawingObject {
   /// Custom stroke/border color. When null, the default stroke is used.
   final Color? strokeColor;
 
-  RectangleObject({required super.id, required Rect rect, super.isSelected, super.angle, super.creationZoom, this.text, this.textStyle, this.fontCustomized = false, this.isEditing = false, this.lineStyle = LineStyle.solid, this.borderRadius = 0.0, this.fillColor, this.strokeColor})
+  RectangleObject({required super.id, required Rect rect, super.isSelected, super.angle, super.creationZoom, this.text, this.textStyle, this.richText, this.fontCustomized = false, this.isEditing = false, this.lineStyle = LineStyle.solid, this.borderRadius = 0.0, this.fillColor, this.strokeColor})
     : _rect = rect;
 
   @override
@@ -252,6 +415,7 @@ class RectangleObject extends DrawingObject {
       'fontSize': textStyle!.fontSize,
       'color': textStyle!.color?.value,
     },
+    if (richText != null) 'richText': richTextToJson(richText),
     if (fontCustomized) 'fontCustomized': true,
     'lineStyle': lineStyle.name,
     if (borderRadius > 0) 'borderRadius': borderRadius,
@@ -269,6 +433,7 @@ class RectangleObject extends DrawingObject {
       creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       textStyle: style,
+      richText: richTextFromJson(json['richText']),
       fontCustomized: json['fontCustomized'] as bool? ?? false,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
       borderRadius: (json['borderRadius'] as num?)?.toDouble() ?? 0.0,
@@ -278,7 +443,7 @@ class RectangleObject extends DrawingObject {
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, double? borderRadius, Color? fillColor, Color? strokeColor, TextStyle? textStyle, bool? fontCustomized}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, double? borderRadius, Color? fillColor, Color? strokeColor, TextStyle? textStyle, List<TextRun>? richText, bool? fontCustomized}) {
     return RectangleObject(
       id: id,
       rect: rect ?? _rect,
@@ -287,6 +452,7 @@ class RectangleObject extends DrawingObject {
       creationZoom: creationZoom ?? this.creationZoom,
       text: text,
       textStyle: textStyle ?? this.textStyle,
+      richText: richText ?? this.richText,
       fontCustomized: fontCustomized ?? this.fontCustomized,
       lineStyle: lineStyle ?? this.lineStyle,
       borderRadius: borderRadius ?? this.borderRadius,
@@ -301,13 +467,14 @@ class CircleObject extends DrawingObject {
   Rect _rect;
   String? text;
   TextStyle? textStyle;
+  List<TextRun>? richText;
   bool fontCustomized;
   bool isEditing;
   final LineStyle lineStyle;
   final Color? fillColor;
   final Color? strokeColor;
 
-  CircleObject({required super.id, required Rect rect, super.isSelected, super.angle, super.creationZoom, this.text, this.textStyle, this.fontCustomized = false, this.isEditing = false, this.lineStyle = LineStyle.solid, this.fillColor, this.strokeColor})
+  CircleObject({required super.id, required Rect rect, super.isSelected, super.angle, super.creationZoom, this.text, this.textStyle, this.richText, this.fontCustomized = false, this.isEditing = false, this.lineStyle = LineStyle.solid, this.fillColor, this.strokeColor})
     : _rect = rect;
 
   @override
@@ -329,6 +496,7 @@ class CircleObject extends DrawingObject {
       'fontSize': textStyle!.fontSize,
       'color': textStyle!.color?.value,
     },
+    if (richText != null) 'richText': richTextToJson(richText),
     if (fontCustomized) 'fontCustomized': true,
     'lineStyle': lineStyle.name,
     if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
@@ -345,6 +513,7 @@ class CircleObject extends DrawingObject {
       creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       textStyle: style,
+      richText: richTextFromJson(json['richText']),
       fontCustomized: json['fontCustomized'] as bool? ?? false,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
       fillColor: json['fillColor'] != null ? Color(json['fillColor'] as int) : null,
@@ -353,7 +522,7 @@ class CircleObject extends DrawingObject {
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, Color? fillColor, Color? strokeColor, TextStyle? textStyle, bool? fontCustomized}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, Color? fillColor, Color? strokeColor, TextStyle? textStyle, List<TextRun>? richText, bool? fontCustomized}) {
     return CircleObject(
       id: id,
       rect: rect ?? _rect,
@@ -362,6 +531,7 @@ class CircleObject extends DrawingObject {
       creationZoom: creationZoom ?? this.creationZoom,
       text: text,
       textStyle: textStyle ?? this.textStyle,
+      richText: richText ?? this.richText,
       fontCustomized: fontCustomized ?? this.fontCustomized,
       lineStyle: lineStyle ?? this.lineStyle,
       isEditing: isEditing ?? this.isEditing,
@@ -375,6 +545,7 @@ class DiamondObject extends DrawingObject {
   Rect _rect;
   String? text;
   TextStyle? textStyle;
+  List<TextRun>? richText;
   bool fontCustomized;
   bool isEditing;
   final LineStyle lineStyle;
@@ -389,6 +560,7 @@ class DiamondObject extends DrawingObject {
     super.creationZoom,
     this.text,
     this.textStyle,
+    this.richText,
     this.fontCustomized = false,
     this.isEditing = false,
     this.lineStyle = LineStyle.solid,
@@ -415,6 +587,7 @@ class DiamondObject extends DrawingObject {
       'fontSize': textStyle!.fontSize,
       'color': textStyle!.color?.value,
     },
+    if (richText != null) 'richText': richTextToJson(richText),
     if (fontCustomized) 'fontCustomized': true,
     'lineStyle': lineStyle.name,
     if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
@@ -431,6 +604,7 @@ class DiamondObject extends DrawingObject {
       creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       textStyle: style,
+      richText: richTextFromJson(json['richText']),
       fontCustomized: json['fontCustomized'] as bool? ?? false,
       lineStyle: json['lineStyle'] != null
           ? LineStyle.values.byName(json['lineStyle'])
@@ -463,6 +637,7 @@ class DiamondObject extends DrawingObject {
     Color? fillColor,
     Color? strokeColor,
     TextStyle? textStyle,
+    List<TextRun>? richText,
     bool? fontCustomized,
   }) {
     return DiamondObject(
@@ -473,6 +648,7 @@ class DiamondObject extends DrawingObject {
       creationZoom: creationZoom ?? this.creationZoom,
       text: text,
       textStyle: textStyle ?? this.textStyle,
+      richText: richText ?? this.richText,
       fontCustomized: fontCustomized ?? this.fontCustomized,
       lineStyle: lineStyle ?? this.lineStyle,
       isEditing: isEditing ?? this.isEditing,
@@ -487,6 +663,7 @@ class ParallelogramObject extends DrawingObject {
   Rect _rect;
   String? text;
   TextStyle? textStyle;
+  List<TextRun>? richText;
   bool fontCustomized;
   bool isEditing;
   final LineStyle lineStyle;
@@ -502,6 +679,7 @@ class ParallelogramObject extends DrawingObject {
     super.creationZoom,
     this.text,
     this.textStyle,
+    this.richText,
     this.fontCustomized = false,
     this.isEditing = false,
     this.lineStyle = LineStyle.solid,
@@ -529,6 +707,7 @@ class ParallelogramObject extends DrawingObject {
       'fontSize': textStyle!.fontSize,
       'color': textStyle!.color?.value,
     },
+    if (richText != null) 'richText': richTextToJson(richText),
     if (fontCustomized) 'fontCustomized': true,
     'lineStyle': lineStyle.name,
     'skewOffset': skewOffset,
@@ -546,6 +725,7 @@ class ParallelogramObject extends DrawingObject {
       creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       text: json['text'] as String?,
       textStyle: style,
+      richText: richTextFromJson(json['richText']),
       fontCustomized: json['fontCustomized'] as bool? ?? false,
       lineStyle: json['lineStyle'] != null
           ? LineStyle.values.byName(json['lineStyle'])
@@ -577,6 +757,7 @@ class ParallelogramObject extends DrawingObject {
     Color? fillColor,
     Color? strokeColor,
     TextStyle? textStyle,
+    List<TextRun>? richText,
     bool? fontCustomized,
   }) {
     return ParallelogramObject(
@@ -587,6 +768,7 @@ class ParallelogramObject extends DrawingObject {
       creationZoom: creationZoom ?? this.creationZoom,
       text: text,
       textStyle: textStyle ?? this.textStyle,
+      richText: richText ?? this.richText,
       fontCustomized: fontCustomized ?? this.fontCustomized,
       lineStyle: lineStyle ?? this.lineStyle,
       isEditing: isEditing ?? this.isEditing,

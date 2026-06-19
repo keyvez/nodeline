@@ -14,6 +14,8 @@ import 'package:flow_draw/src/core/utils/snap_utils.dart';
 import 'package:flow_draw/src/core/utils/renderbox.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flow_draw/src/ui/canvas/flow_draw_editor_render_object.dart';
+import 'package:flow_draw/src/ui/canvas/rich_text_editing_controller.dart';
+import 'package:flow_draw/src/ui/shared/active_text_editing.dart';
 import 'package:flow_draw/src/ui/shared/context_menu.dart';
 import 'package:flow_draw/src/ui/shared/snap_guides.dart';
 import 'package:flow_draw/src/ui/shared/improved_listener.dart';
@@ -349,6 +351,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     FocusManager.instance.removeListener(_onFocusChanged);
     _canvasFocusNode.dispose();
     _kineticTimer?.cancel();
+    if (activeTextEditing.value == _shapeTextController) {
+      activeTextEditing.value = null;
+    }
     _shapeTextController?.dispose();
     _shapeTextFocusNode?.dispose();
     super.dispose();
@@ -3022,7 +3027,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
   // Shape text editing state
   DrawingObject? _editingShapeObject;
-  TextEditingController? _shapeTextController;
+  RichTextEditingController? _shapeTextController;
   FocusNode? _shapeTextFocusNode;
   TextStyle _shapeTextStyle = const TextStyle(fontSize: 16, color: Colors.white, fontFamily: 'Courier');
 
@@ -3030,43 +3035,77 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
   void _beginShapeTextEditing(DrawingObject shapeObject) {
     const defaultStyle = TextStyle(fontSize: 16, color: Colors.white, fontFamily: 'Courier');
+    final canvasState = _canvasBloc.state;
 
     String? existingText;
-    TextStyle existingStyle = defaultStyle;
+    TextStyle? rawStyle;
+    bool customized = false;
+    List<TextRun>? existingRuns;
     if (shapeObject is RectangleObject) {
       existingText = shapeObject.text;
-      existingStyle = shapeObject.textStyle ?? defaultStyle;
+      rawStyle = shapeObject.textStyle;
+      customized = shapeObject.fontCustomized;
+      existingRuns = shapeObject.richText;
     } else if (shapeObject is CircleObject) {
       existingText = shapeObject.text;
-      existingStyle = shapeObject.textStyle ?? defaultStyle;
+      rawStyle = shapeObject.textStyle;
+      customized = shapeObject.fontCustomized;
+      existingRuns = shapeObject.richText;
     } else if (shapeObject is DiamondObject) {
       existingText = shapeObject.text;
-      existingStyle = shapeObject.textStyle ?? defaultStyle;
+      rawStyle = shapeObject.textStyle;
+      customized = shapeObject.fontCustomized;
+      existingRuns = shapeObject.richText;
     } else if (shapeObject is ParallelogramObject) {
       existingText = shapeObject.text;
-      existingStyle = shapeObject.textStyle ?? defaultStyle;
+      rawStyle = shapeObject.textStyle;
+      customized = shapeObject.fontCustomized;
+      existingRuns = shapeObject.richText;
     }
+
+    // The controller resolves per-run overrides on top of this base, so it must
+    // be the shape's *effective* style (folding in the global default).
+    final baseStyle = effectiveShapeTextStyle(
+      style: rawStyle,
+      customized: customized,
+      defaultFamily: canvasState.defaultFontFamily,
+      defaultSize: canvasState.defaultFontSize,
+    );
+
+    // Seed runs from richText when present, else from the plain text (so legacy
+    // single-style nodes still edit as one uniform run).
+    final seedRuns = existingRuns ??
+        (existingText != null && existingText.isNotEmpty
+            ? [TextRun(existingText)]
+            : null);
 
     _shapeTextController?.dispose();
     _shapeTextFocusNode?.dispose();
 
-    _shapeTextController = TextEditingController(text: existingText ?? '');
+    final controller =
+        RichTextEditingController(base: baseStyle, runs: seedRuns);
+    _shapeTextController = controller;
     _shapeTextFocusNode = FocusNode();
-    _shapeTextStyle = existingStyle;
+    _shapeTextStyle = baseStyle;
     _shapeEditOpenedAt = DateTime.now();
 
-    if (existingText != null && existingText.isNotEmpty) {
-      _shapeTextController!.selection = TextSelection(
+    final text = controller.text;
+    if (text.isNotEmpty) {
+      controller.selection = TextSelection(
         baseOffset: 0,
-        extentOffset: existingText.length,
+        extentOffset: text.length,
       );
     }
+
+    // Publish to the toolbar so its font controls retarget the live selection.
+    activeTextEditing.value = controller;
 
     setState(() {
       _editingShapeObject = shapeObject;
       if (shapeObject is RectangleObject) shapeObject.isEditing = true;
       if (shapeObject is CircleObject) shapeObject.isEditing = true;
       if (shapeObject is DiamondObject) shapeObject.isEditing = true;
+      if (shapeObject is ParallelogramObject) shapeObject.isEditing = true;
     });
 
     // Explicitly request focus for the text field after the next frame
@@ -3085,25 +3124,44 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     final shapeObject = _editingShapeObject;
     if (shapeObject == null) return;
 
-    final newText = _shapeTextController?.text.trim() ?? '';
+    final controller = _shapeTextController;
+    // The plain-text mirror is trimmed; rich runs come from the controller and
+    // are nulled out when there's no text (so an empty node serializes lean).
+    final newText = controller?.text.trim() ?? '';
+    List<TextRun>? newRuns = newText.isEmpty ? null : controller?.toRuns();
+    // Drop a single inherited run to null — it's indistinguishable from plain
+    // text and keeps round-tripping/serialization minimal.
+    if (newRuns != null &&
+        newRuns.length == 1 &&
+        !newRuns.first.hasOverrides) {
+      newRuns = null;
+    }
+
+    // Clear the toolbar channel before rebuilding so it stops targeting the
+    // (about-to-be-disposed) controller.
+    activeTextEditing.value = null;
 
     setState(() {
       if (shapeObject is RectangleObject) {
         shapeObject.isEditing = false;
         shapeObject.text = newText.isEmpty ? null : newText;
         shapeObject.textStyle = newText.isEmpty ? null : _shapeTextStyle;
+        shapeObject.richText = newRuns;
       } else if (shapeObject is CircleObject) {
         shapeObject.isEditing = false;
         shapeObject.text = newText.isEmpty ? null : newText;
         shapeObject.textStyle = newText.isEmpty ? null : _shapeTextStyle;
+        shapeObject.richText = newRuns;
       } else if (shapeObject is DiamondObject) {
         shapeObject.isEditing = false;
         shapeObject.text = newText.isEmpty ? null : newText;
         shapeObject.textStyle = newText.isEmpty ? null : _shapeTextStyle;
+        shapeObject.richText = newRuns;
       } else if (shapeObject is ParallelogramObject) {
         shapeObject.isEditing = false;
         shapeObject.text = newText.isEmpty ? null : newText;
         shapeObject.textStyle = newText.isEmpty ? null : _shapeTextStyle;
+        shapeObject.richText = newRuns;
       }
       _editingShapeObject = null;
     });
@@ -3597,33 +3655,41 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
               height: shapeObject.rect.height * zoom,
               child: Material(
                 color: Colors.transparent,
-                child: Center(
-                  child: Focus(
-                    onKeyEvent: (node, event) {
-                      if (event is KeyDownEvent &&
-                          event.logicalKey == LogicalKeyboardKey.enter &&
-                          !HardwareKeyboard.instance.isShiftPressed &&
-                          !HardwareKeyboard.instance.isAltPressed) {
-                        _finishShapeTextEditing();
-                        return KeyEventResult.handled;
-                      }
-                      return KeyEventResult.ignored;
-                    },
-                    child: TextField(
-                      key: const ValueKey('shape_text_editor'),
-                      controller: _shapeTextController,
-                      focusNode: _shapeTextFocusNode,
-                      textAlign: TextAlign.center,
-                      textAlignVertical: TextAlignVertical.center,
-                      style: _shapeTextStyle.copyWith(
-                        fontSize: (_shapeTextStyle.fontSize ?? 16) * zoom,
-                      ),
-                      maxLines: null,
-                      autofocus: true,
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 4),
-                        isDense: true,
+                // Scale the whole editor by zoom so the controller's per-run
+                // styles (in world-unit font sizes) render at the correct
+                // on-screen size without having to pre-multiply each run.
+                child: Transform.scale(
+                  scale: zoom,
+                  alignment: Alignment.center,
+                  child: Center(
+                    child: SizedBox(
+                      width: shapeObject.rect.width,
+                      child: Focus(
+                        onKeyEvent: (node, event) {
+                          if (event is KeyDownEvent &&
+                              event.logicalKey == LogicalKeyboardKey.enter &&
+                              !HardwareKeyboard.instance.isShiftPressed &&
+                              !HardwareKeyboard.instance.isAltPressed) {
+                            _finishShapeTextEditing();
+                            return KeyEventResult.handled;
+                          }
+                          return KeyEventResult.ignored;
+                        },
+                        child: TextField(
+                          key: const ValueKey('shape_text_editor'),
+                          controller: _shapeTextController,
+                          focusNode: _shapeTextFocusNode,
+                          textAlign: TextAlign.center,
+                          textAlignVertical: TextAlignVertical.center,
+                          style: _shapeTextStyle,
+                          maxLines: null,
+                          autofocus: true,
+                          decoration: const InputDecoration(
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.symmetric(horizontal: 4),
+                            isDense: true,
+                          ),
+                        ),
                       ),
                     ),
                   ),

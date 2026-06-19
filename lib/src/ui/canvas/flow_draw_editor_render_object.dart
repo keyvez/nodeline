@@ -811,7 +811,7 @@ class FlowDrawEditorRenderBox extends RenderBox
             _paintStyledPath(canvas, ovalPath, circleStroke, obj.lineStyle, seed: obj.id.hashCode);
           }
           if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
-            _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle, obj.fontCustomized);
+            _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle, obj.fontCustomized, obj.richText);
           }
         } else if (obj is RectangleObject) {
           // Apple-style rounded superellipse (squircle) corners. Radius is a
@@ -830,7 +830,7 @@ class FlowDrawEditorRenderBox extends RenderBox
             _paintStyledPath(canvas, squirclePath, rectStroke, obj.lineStyle, seed: obj.id.hashCode);
           }
           if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
-            _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle, obj.fontCustomized);
+            _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle, obj.fontCustomized, obj.richText);
           }
         } else if (obj is DiamondObject) {
           final diamondPath = obj.path;
@@ -843,7 +843,7 @@ class FlowDrawEditorRenderBox extends RenderBox
             _paintStyledPath(canvas, diamondPath, diaStroke, obj.lineStyle, seed: obj.id.hashCode);
           }
           if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
-            _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle, obj.fontCustomized);
+            _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle, obj.fontCustomized, obj.richText);
           }
         } else if (obj is ParallelogramObject) {
           final paraPath = obj.path;
@@ -856,7 +856,7 @@ class FlowDrawEditorRenderBox extends RenderBox
             _paintStyledPath(canvas, paraPath, paraStroke, obj.lineStyle, seed: obj.id.hashCode);
           }
           if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
-            _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle, obj.fontCustomized);
+            _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle, obj.fontCustomized, obj.richText);
           }
         } else if (obj is ForkJoinObject) {
           // Fork/join renders as a thick bar
@@ -1737,7 +1737,7 @@ class FlowDrawEditorRenderBox extends RenderBox
   }
 
   /// Paints centered text inside a shape's rect.
-  void _paintShapeText(Canvas canvas, Rect shapeRect, String text, TextStyle? style, bool fontCustomized) {
+  void _paintShapeText(Canvas canvas, Rect shapeRect, String text, TextStyle? style, bool fontCustomized, [List<TextRun>? runs]) {
     final resolvedStyle = effectiveShapeTextStyle(
       style: style,
       customized: fontCustomized,
@@ -1745,7 +1745,7 @@ class FlowDrawEditorRenderBox extends RenderBox
       defaultSize: canvasState.defaultFontSize,
     );
     final textPainter = TextPainter(
-      text: TextSpan(text: text, style: resolvedStyle),
+      text: buildShapeTextSpan(text: text, runs: runs, base: resolvedStyle),
       textDirection: TextDirection.ltr,
       textAlign: TextAlign.center,
     )..layout(maxWidth: shapeRect.width - 8);

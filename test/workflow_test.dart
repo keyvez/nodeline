@@ -1,9 +1,16 @@
 import 'dart:ui';
-import 'package:flutter/material.dart' show TextStyle;
+import 'package:flutter/material.dart'
+    show
+        TextStyle,
+        TextSpan,
+        TextSelection,
+        TextEditingValue,
+        FontWeight;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flow_draw/flow_draw.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flow_draw/src/core/utils/svg_exporter.dart';
+import 'package:flow_draw/src/ui/canvas/rich_text_editing_controller.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -1000,6 +1007,141 @@ flowchart TD
       expect(loose.height, closeTo(tight.height + 80, 0.01));
       await small.close();
       await big.close();
+    });
+  });
+
+  group('Rich text (multiple styles per node)', () {
+    test('TextRun JSON round-trips all attributes', () {
+      const run = TextRun('Hi',
+          fontFamily: 'serif',
+          fontSize: 24,
+          bold: true,
+          italic: true,
+          color: 0xFFFF0000);
+      final restored = TextRun.fromJson(run.toJson());
+      expect(restored, run);
+    });
+
+    test('a run with no overrides serializes lean', () {
+      const run = TextRun('plain');
+      expect(run.toJson().keys, ['text']);
+      expect(run.hasOverrides, isFalse);
+    });
+
+    test('RectangleObject richText round-trips through JSON', () {
+      final rect = RectangleObject(
+        id: 'r1',
+        rect: const Rect.fromLTWH(0, 0, 100, 40),
+        text: 'AB',
+        richText: const [
+          TextRun('A', bold: true),
+          TextRun('B', fontSize: 30, color: 0xFF00FF00),
+        ],
+      );
+      final restored = RectangleObject.fromJson(rect.toJson());
+      expect(restored.text, 'AB');
+      expect(restored.richText, isNotNull);
+      expect(restored.richText!.length, 2);
+      expect(restored.richText![0].bold, isTrue);
+      expect(restored.richText![1].fontSize, 30);
+      expect(restored.richText![1].color, 0xFF00FF00);
+    });
+
+    test('normalizeRuns coalesces adjacent equal styles', () {
+      final runs = normalizeRuns(const [
+        TextRun('a', bold: true),
+        TextRun('b', bold: true),
+        TextRun('c'),
+      ]);
+      expect(runs.length, 2);
+      expect(runs[0].text, 'ab');
+      expect(runs[1].text, 'c');
+    });
+
+    test('buildShapeTextSpan: single inherited run returns a plain span', () {
+      const base = TextStyle(fontSize: 16);
+      final span = buildShapeTextSpan(
+        text: 'hello',
+        runs: const [TextRun('hello')],
+        base: base,
+      );
+      expect(span.children, isNull);
+      expect(span.text, 'hello');
+    });
+
+    test('buildShapeTextSpan: mixed runs produce styled children', () {
+      const base = TextStyle(fontSize: 16, fontFamily: 'Courier');
+      final span = buildShapeTextSpan(
+        text: 'AB',
+        runs: const [TextRun('A', bold: true), TextRun('B', fontSize: 30)],
+        base: base,
+      );
+      expect(span.children, hasLength(2));
+      final a = span.children![0] as TextSpan;
+      final b = span.children![1] as TextSpan;
+      expect(a.style!.fontWeight, FontWeight.bold);
+      expect(b.style!.fontSize, 30);
+      // Unspecified attributes inherit the base.
+      expect(b.style!.fontFamily, 'Courier');
+    });
+
+    test('controller applies bold to a selection and exports runs', () {
+      final c = RichTextEditingController(
+        base: const TextStyle(fontSize: 16),
+        runs: const [TextRun('hello world')],
+      );
+      // Select "hello".
+      c.selection = const TextSelection(baseOffset: 0, extentOffset: 5);
+      c.applyToSelection(bold: const Attr.set(true));
+      final runs = c.toRuns();
+      expect(runs.first.text, 'hello');
+      expect(runs.first.bold, isTrue);
+      expect(runs.last.text, ' world');
+      expect(runs.last.bold, isNull);
+      c.dispose();
+    });
+
+    test('controller keeps runs aligned when text is inserted', () {
+      final c = RichTextEditingController(
+        base: const TextStyle(fontSize: 16),
+        runs: const [TextRun('AB', bold: true)],
+      );
+      // Type "X" between A and B; it should inherit the left char's bold.
+      c.value = const TextEditingValue(
+        text: 'AXB',
+        selection: TextSelection.collapsed(offset: 2),
+      );
+      final runs = c.toRuns();
+      expect(runs.length, 1);
+      expect(runs.first.text, 'AXB');
+      expect(runs.first.bold, isTrue);
+      c.dispose();
+    });
+
+    test('selectionStyle reports mixed attributes as null', () {
+      final c = RichTextEditingController(
+        base: const TextStyle(fontSize: 16),
+        runs: const [TextRun('A', bold: true), TextRun('B')],
+      );
+      c.selection = const TextSelection(baseOffset: 0, extentOffset: 2);
+      expect(c.selectionStyle().bold, isNull); // mixed bold/non-bold
+      c.dispose();
+    });
+
+    test('SVG export emits tspans for rich runs', () {
+      final rect = RectangleObject(
+        id: 'r1',
+        rect: const Rect.fromLTWH(0, 0, 120, 40),
+        text: 'AB',
+        richText: const [
+          TextRun('A', bold: true),
+          TextRun('B', color: 0xFFFF0000),
+        ],
+      );
+      final svg = SvgExporter.export({'r1': rect});
+      expect(svg, contains('<tspan'));
+      expect(svg, contains('font-weight="bold"'));
+      expect(svg, contains('fill="#ff0000"'));
     });
   });
 }

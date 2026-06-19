@@ -744,6 +744,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           rect: obj.rect.shift(offset),
           text: obj.text,
           textStyle: obj.textStyle,
+          richText: obj.richText,
           fontCustomized: obj.fontCustomized,
           lineStyle: obj.lineStyle,
           angle: obj.angle,
@@ -754,6 +755,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           rect: obj.rect.shift(offset),
           text: obj.text,
           textStyle: obj.textStyle,
+          richText: obj.richText,
           fontCustomized: obj.fontCustomized,
           lineStyle: obj.lineStyle,
           angle: obj.angle,
@@ -764,6 +766,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           rect: obj.rect.shift(offset),
           text: obj.text,
           textStyle: obj.textStyle,
+          richText: obj.richText,
           fontCustomized: obj.fontCustomized,
           lineStyle: obj.lineStyle,
           angle: obj.angle,
@@ -774,6 +777,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           rect: obj.rect.shift(offset),
           text: obj.text,
           textStyle: obj.textStyle,
+          richText: obj.richText,
           fontCustomized: obj.fontCustomized,
           lineStyle: obj.lineStyle,
           angle: obj.angle,
@@ -1199,10 +1203,15 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         // font control edits it directly.
         updatedObjects[id] = obj.copyWith(style: newStyle);
       } else {
-        updatedObjects[id] = (obj as dynamic).copyWith(
+        final updated = (obj as dynamic).copyWith(
           textStyle: newStyle,
           fontCustomized: true,
         ) as DrawingObject;
+        // A whole-node font change supersedes per-character runs — otherwise the
+        // runs would override the new uniform font. copyWith can't null richText
+        // (it coalesces), so clear it on the fresh copy.
+        (updated as dynamic).richText = null;
+        updatedObjects[id] = updated;
       }
     }
 
@@ -1233,6 +1242,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       final colorOnly =
           current?.color != null ? TextStyle(color: current!.color) : null;
       (reset as dynamic).textStyle = colorOnly;
+      // Resetting to the global default also drops per-character runs.
+      (reset as dynamic).richText = null;
       updatedObjects[id] = reset;
     }
 

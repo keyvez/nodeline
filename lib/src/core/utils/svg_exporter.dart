@@ -53,6 +53,48 @@ class SvgExporter {
     return 'font-size="$size" font-family="$family"';
   }
 
+  /// Builds the inner content of a shape's `<text>` element. For rich text
+  /// ([runs] non-null) each run becomes a `<tspan>` carrying only the
+  /// attributes it overrides; the outer `<text>` supplies the defaults via
+  /// [_shapeFontAttrs]. For plain text the escaped string is returned directly.
+  static String _shapeTextContent(String text, List<TextRun>? runs) {
+    if (runs == null || runs.isEmpty) {
+      return _escapeXml(text);
+    }
+    final buf = StringBuffer();
+    for (final r in runs) {
+      final attrs = <String>[];
+      if (r.fontFamily != null) {
+        attrs.add('font-family="${_cssFontFamily(r.fontFamily!)}"');
+      }
+      if (r.fontSize != null) {
+        attrs.add('font-size="${r.fontSize!.toStringAsFixed(1)}"');
+      }
+      if (r.bold != null) {
+        attrs.add('font-weight="${r.bold! ? 'bold' : 'normal'}"');
+      }
+      if (r.italic != null) {
+        attrs.add('font-style="${r.italic! ? 'italic' : 'normal'}"');
+      }
+      if (r.color != null) {
+        attrs.add('fill="${_hexColor(r.color!)}"');
+      }
+      final escaped = _escapeXml(r.text);
+      if (attrs.isEmpty) {
+        buf.write(escaped);
+      } else {
+        buf.write('<tspan ${attrs.join(' ')}>$escaped</tspan>');
+      }
+    }
+    return buf.toString();
+  }
+
+  /// Formats an ARGB color int as an SVG `#rrggbb` hex string.
+  static String _hexColor(int argb) {
+    final rgb = argb & 0xFFFFFF;
+    return '#${rgb.toRadixString(16).padLeft(6, '0')}';
+  }
+
   /// Exports a map of drawing objects to an SVG string.
   ///
   /// [defaultFontFamily]/[defaultFontSize] supply the global default font for
@@ -170,7 +212,7 @@ class SvgExporter {
       svg.add('  <text x="${rect.center.dx}" y="${rect.center.dy}" '
           'fill="$_textColor" ${_shapeFontAttrs(obj.textStyle, obj.fontCustomized)} '
           'text-anchor="middle" dominant-baseline="central">'
-          '${_escapeXml(obj.text!)}</text>');
+          '${_shapeTextContent(obj.text!, obj.richText)}</text>');
     }
 
     if (rotClose.isNotEmpty) svg.add(rotClose);
@@ -205,7 +247,7 @@ class SvgExporter {
       svg.add('  <text x="$cx" y="$cy" '
           'fill="$_textColor" ${_shapeFontAttrs(obj.textStyle, obj.fontCustomized)} '
           'text-anchor="middle" dominant-baseline="central">'
-          '${_escapeXml(obj.text!)}</text>');
+          '${_shapeTextContent(obj.text!, obj.richText)}</text>');
     }
 
     if (rotClose.isNotEmpty) svg.add(rotClose);
@@ -241,7 +283,7 @@ class SvgExporter {
       svg.add('  <text x="$cx" y="$cy" '
           'fill="$_textColor" ${_shapeFontAttrs(obj.textStyle, obj.fontCustomized)} '
           'text-anchor="middle" dominant-baseline="central">'
-          '${_escapeXml(obj.text!)}</text>');
+          '${_shapeTextContent(obj.text!, obj.richText)}</text>');
     }
 
     if (rotClose.isNotEmpty) svg.add(rotClose);
@@ -270,7 +312,7 @@ class SvgExporter {
       svg.add('  <text x="${r.center.dx}" y="${r.center.dy}" '
           'fill="$_textColor" ${_shapeFontAttrs(obj.textStyle, obj.fontCustomized)} '
           'text-anchor="middle" dominant-baseline="central">'
-          '${_escapeXml(obj.text!)}</text>');
+          '${_shapeTextContent(obj.text!, obj.richText)}</text>');
     }
     if (rotClose.isNotEmpty) svg.add(rotClose);
     bounds.add(r);

@@ -7,6 +7,8 @@ import 'package:flow_draw/src/core/utils/renderbox.dart';
 import 'package:flow_draw/src/core/utils/snackbar.dart';
 import 'package:flow_draw/src/core/utils/svg_exporter.dart';
 import 'package:flow_draw/src/gen/assets.gen.dart';
+import 'package:flow_draw/src/ui/canvas/rich_text_editing_controller.dart';
+import 'package:flow_draw/src/ui/shared/active_text_editing.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -851,6 +853,10 @@ class _GlobalFontButton extends StatelessWidget {
       } else if (obj is ParallelogramObject) {
         style = obj.textStyle;
         objCustomized = obj.fontCustomized;
+      } else if (obj is TextObject) {
+        // A text box owns its font explicitly (no global-default fallback).
+        style = obj.style;
+        objCustomized = true;
       } else {
         continue;
       }
@@ -874,6 +880,20 @@ class _GlobalFontButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // While a node's text is being edited inline, the control retargets the
+    // live text selection inside that node (so styling applies per-character).
+    return ValueListenableBuilder<RichTextEditingController?>(
+      valueListenable: activeTextEditing,
+      builder: (context, activeController, _) {
+        if (activeController != null) {
+          return _RichFontButton(controller: activeController);
+        }
+        return _buildShapeOrGlobal(context);
+      },
+    );
+  }
+
+  Widget _buildShapeOrGlobal(BuildContext context) {
     // Rebuild on selection OR global-font changes so the button label and the
     // seeded popup values always reflect what would be edited.
     return BlocBuilder<SelectionBloc, SelectionState>(
@@ -958,6 +978,117 @@ class _GlobalFontButton extends StatelessWidget {
   }
 }
 
+/// Font control shown while a node's text is being edited inline. Targets the
+/// live text selection inside [controller], so family/size/bold/italic/color
+/// apply per-character. Rebuilds on the controller's selection/style changes so
+/// the displayed values track the caret.
+class _RichFontButton extends StatelessWidget {
+  final RichTextEditingController controller;
+  const _RichFontButton({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final sel = controller.selectionStyle();
+        final family = sel.fontFamily ?? '—';
+        final sizeLabel = sel.fontSize != null ? sel.fontSize!.round().toString() : '—';
+        final bold = sel.bold ?? false;
+        final italic = sel.italic ?? false;
+
+        void openPopover() {
+          showPopover(
+            context: context,
+            alignment: Alignment.topCenter,
+            builder: (popoverContext) {
+              return ModalContainer(
+                child: SizedBox(
+                  width: 240,
+                  child: _FontControls(
+                    editingSelection: true,
+                    customized: false,
+                    family: sel.fontFamily ?? kEditorDefaultFontFamily,
+                    size: sel.fontSize ?? kEditorDefaultFontSize,
+                    // Rich mode: route family/size to the live selection.
+                    onChanged: (f, s) {
+                      controller.applyToSelection(
+                        fontFamily: Attr.set(f),
+                        fontSize: Attr.set(s),
+                      );
+                    },
+                    // Extra rich-text attributes (only present in this mode).
+                    richController: controller,
+                    selBold: sel.bold,
+                    selItalic: sel.italic,
+                    selColor: sel.color,
+                  ),
+                ),
+              ).withPadding(top: 8);
+            },
+          );
+        }
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GhostButton(
+              density: ButtonDensity.compact,
+              onPressed: openPopover,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.text_format, size: 16),
+                  const Gap(4),
+                  Text('$family $sizeLabel',
+                      style: const TextStyle(fontSize: 12)),
+                ],
+              ),
+            ),
+            _FormatToggle(
+              icon: Icons.format_bold,
+              active: bold,
+              onTap: () => controller.applyToSelection(bold: Attr.set(!bold)),
+            ),
+            _FormatToggle(
+              icon: Icons.format_italic,
+              active: italic,
+              onTap: () =>
+                  controller.applyToSelection(italic: Attr.set(!italic)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A compact toggle button for bold/italic in the inline format bar.
+class _FormatToggle extends StatelessWidget {
+  final IconData icon;
+  final bool active;
+  final VoidCallback onTap;
+  const _FormatToggle(
+      {required this.icon, required this.active, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 1),
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: active ? const Color(0x3DFFFFFF) : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Icon(icon, size: 16),
+      ),
+    );
+  }
+}
+
 /// Reusable family-picker + size-stepper used by both the global font control
 /// and the per-node floating-toolbar control. [onChanged] reports the full
 /// desired (family, size) on every interaction.
@@ -976,6 +1107,15 @@ class _FontControls extends StatefulWidget {
   /// Clears the per-shape override so the selection follows the global default.
   final VoidCallback? onReset;
 
+  /// When non-null, the popover is editing live rich text: bold/italic/color
+  /// rows are shown and applied to the controller's current selection.
+  final RichTextEditingController? richController;
+
+  /// Current selection's bold/italic/color (null = mixed), for rich mode.
+  final bool? selBold;
+  final bool? selItalic;
+  final int? selColor;
+
   const _FontControls({
     required this.family,
     required this.size,
@@ -983,6 +1123,10 @@ class _FontControls extends StatefulWidget {
     this.editingSelection = false,
     this.customized = false,
     this.onReset,
+    this.richController,
+    this.selBold,
+    this.selItalic,
+    this.selColor,
   });
 
   @override
@@ -1066,6 +1210,7 @@ class _FontControlsState extends State<_FontControls> {
             ),
           ],
         ),
+        if (widget.richController != null) ..._richFormatRows(),
         if (widget.editingSelection && widget.customized && widget.onReset != null) ...[
           const Gap(8),
           GestureDetector(
@@ -1085,6 +1230,75 @@ class _FontControlsState extends State<_FontControls> {
         ],
       ],
     );
+  }
+
+  /// Bold/italic toggles + a small color palette, shown only in rich-text mode.
+  /// These act immediately on the controller's current selection.
+  static const List<Color> _textColors = [
+    Colors.white,
+    Colors.black,
+    Color(0xFFE53935), // red
+    Color(0xFFFB8C00), // orange
+    Color(0xFFFDD835), // yellow
+    Color(0xFF43A047), // green
+    Color(0xFF1E88E5), // blue
+    Color(0xFF8E24AA), // purple
+  ];
+
+  List<Widget> _richFormatRows() {
+    final c = widget.richController!;
+    final bold = widget.selBold ?? false;
+    final italic = widget.selItalic ?? false;
+    return [
+      const Gap(12),
+      const Text('Format',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+      const Gap(8),
+      Row(
+        children: [
+          _FormatToggle(
+            icon: Icons.format_bold,
+            active: bold,
+            onTap: () => c.applyToSelection(bold: Attr.set(!bold)),
+          ),
+          const Gap(4),
+          _FormatToggle(
+            icon: Icons.format_italic,
+            active: italic,
+            onTap: () => c.applyToSelection(italic: Attr.set(!italic)),
+          ),
+        ],
+      ),
+      const Gap(10),
+      const Text('Color', style: TextStyle(fontSize: 12)),
+      const Gap(6),
+      Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final color in _textColors)
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () =>
+                  c.applyToSelection(color: Attr.set(color.value)),
+              child: Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: widget.selColor == color.value
+                        ? const Color(0xFF448AFF)
+                        : const Color(0x4DFFFFFF),
+                    width: widget.selColor == color.value ? 2 : 1,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    ];
   }
 }
 
