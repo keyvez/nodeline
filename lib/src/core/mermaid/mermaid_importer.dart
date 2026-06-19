@@ -577,17 +577,33 @@ class MermaidImporter {
     }
   }
 
-  static void _calculateNodeSize(_MermaidNode node) {
-    final painter = TextPainter(
-      text: TextSpan(
-        text: node.label,
-        style: const TextStyle(fontSize: 14),
-      ),
-      textDirection: TextDirection.ltr,
-      textAlign: TextAlign.center,
-    )..layout(maxWidth: _minNodeWidth * 1.5);
+  // Widest a node box grows to fit its label before the text wraps to another
+  // line. Generous so long labels (common in imported diagrams) stay on one or
+  // two lines and don't overflow their box into neighbouring columns.
+  static const double _maxNodeWidth = 360.0;
 
-    final width = max(_minNodeWidth, painter.width + _nodePaddingH * 2);
+  static void _calculateNodeSize(_MermaidNode node) {
+    TextPainter measure(double maxWidth) => TextPainter(
+          text: TextSpan(
+            text: node.label,
+            style: const TextStyle(fontSize: 14),
+          ),
+          textDirection: TextDirection.ltr,
+          textAlign: TextAlign.center,
+        )..layout(maxWidth: maxWidth);
+
+    // Measure unconstrained first; only wrap (and grow the box) once the label
+    // exceeds the max width. This keeps short labels compact while letting long
+    // ones widen up to the cap instead of overflowing a too-narrow box.
+    final natural = measure(double.infinity);
+    final painter = natural.width + _nodePaddingH * 2 <= _maxNodeWidth
+        ? natural
+        : measure(_maxNodeWidth - _nodePaddingH * 2);
+
+    final width = max(
+      _minNodeWidth,
+      min(_maxNodeWidth, painter.width + _nodePaddingH * 2),
+    );
     final height = max(_minNodeHeight, painter.height + _nodePaddingV * 2);
     node.rect = Rect.fromLTWH(0, 0, width, height);
   }
