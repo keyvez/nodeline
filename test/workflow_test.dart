@@ -502,6 +502,71 @@ graph LR
         }
       }
     });
+
+    test('lays subgraph clusters out as ordered flow columns in LR', () {
+      const mermaid = '''
+graph LR
+    subgraph "Emotion"
+        Bored[Bored]
+        Sad[Sadness]
+    end
+    subgraph "Food"
+        FoodBored[Snacks]
+        FoodSad[Comfort]
+    end
+    subgraph "Solution"
+        SolBored[Hobby]
+        SolSad[Journal]
+    end
+    Bored --> FoodBored
+    Bored -.-> SolBored
+    Sad --> FoodSad
+    Sad -.-> SolSad
+''';
+      final result = MermaidImporter.import(mermaid);
+      final objects = (result['drawingObjects'] as List).cast<Map>();
+
+      // The three subgraph containers form left-to-right columns in the
+      // order they're chained by edges: Emotion < Food < Solution.
+      double leftOf(String title) {
+        final box = objects.firstWhere((o) =>
+            o['type'] == 'rectangle' &&
+            o['lineStyle'] == 'dashed' &&
+            o['text'] == title);
+        return ((box['rect'] as Map)['left'] as num).toDouble();
+      }
+      final emo = leftOf('Emotion');
+      final food = leftOf('Food');
+      final sol = leftOf('Solution');
+      expect(emo, lessThan(food));
+      expect(food, lessThan(sol));
+
+      // Edges flow forward into the food column: the food node is entered from
+      // its left side (relativePosition.dx == 0.0), i.e. the arrow comes from
+      // the emotion column on its left rather than wrapping around.
+      Map nodeByText(String t) =>
+          objects.firstWhere((o) => o['text'] == t);
+      final boredId = nodeByText('Bored')['id'];
+      final foodId = nodeByText('Snacks')['id'];
+      final seek = objects.firstWhere((o) =>
+          o['type'] == 'arrow' &&
+          (o['startAttachment'] as Map?)?['objectId'] == boredId &&
+          (o['endAttachment'] as Map?)?['objectId'] == foodId);
+      final eRel = (seek['endAttachment'] as Map)['relativePosition'] as List;
+      expect(eRel[0], 0.0); // enters left side of target
+
+      // And the food node sits to the right of its emotion source, so the edge
+      // genuinely runs left-to-right.
+      Rect rOf(Map o) {
+        final r = o['rect'] as Map;
+        return Rect.fromLTWH((r['left'] as num).toDouble(),
+            (r['top'] as num).toDouble(),
+            (r['width'] as num).toDouble(),
+            (r['height'] as num).toDouble());
+      }
+      expect(rOf(nodeByText('Snacks')).left,
+          greaterThan(rOf(nodeByText('Bored')).right));
+    });
   });
 
   group('MermaidExporter parallelogram', () {

@@ -272,6 +272,18 @@ class MermaidImporter {
     final reversedEdges = <(String, String)>[];
     _detectAndRemoveCycles(nodeIds, adj, reversedEdges);
 
+    // When subgraphs partition (most of) the graph and form a clean chain of
+    // clusters, lay them out as independent clusters placed along the flow axis
+    // — this is what Mermaid does and keeps inter-cluster edges straight. We
+    // fall back to plain DAG layering when subgraphs don't cover enough nodes.
+    if (_tryClusterLayout(nodes, edges, direction, subgraphs, adj)) {
+      for (final edge in reversedEdges) {
+        adj[edge.$1]!.add(edge.$2);
+        adj[edge.$2]!.remove(edge.$1);
+      }
+      return;
+    }
+
     // Assign layers.
     final layers = _assignLayers(nodeIds, adj);
 
@@ -297,6 +309,199 @@ class MermaidImporter {
       adj[edge.$1]!.add(edge.$2);
       adj[edge.$2]!.remove(edge.$1);
     }
+  }
+
+  /// Cluster layout: place each subgraph as its own column (LR/RL) or row
+  /// (TD/BT) along the flow axis, ordered so edges flow forward. Members stack
+  /// along the cross axis; later clusters order their members by the barycenter
+  /// of their connections into earlier clusters to reduce crossings. Returns
+  /// true if it ran (subgraphs cover enough of the graph), false to fall back.
+  static bool _tryClusterLayout(
+    Map<String, _MermaidNode> nodes,
+    List<_MermaidEdge> edges,
+    String direction,
+    List<_MermaidSubgraph> subgraphs,
+    Map<String, List<String>> adj,
+  ) {
+    if (subgraphs.length < 2) return false;
+
+    // Map node -> cluster index (first owning subgraph).
+    final cluster = <String, int>{};
+    for (int s = 0; s < subgraphs.length; s++) {
+      for (final id in subgraphs[s].memberIds) {
+        if (nodes.containsKey(id)) cluster.putIfAbsent(id, () => s);
+      }
+    }
+    // Require subgraphs to cover most nodes — otherwise plain layering is safer.
+    if (cluster.length < nodes.length * 0.6) return false;
+
+    final k = subgraphs.length;
+
+    // Order clusters along the flow axis. Build a cluster-level DAG from edges
+    // that cross clusters, then topologically rank it; ties keep declaration
+    // order. Self-edges (within a cluster) are ignored.
+    final cAdj = {for (int i = 0; i < k; i++) i: <int>{}};
+    final cIndeg = List<int>.filled(k, 0);
+    for (final e in edges) {
+      final a = cluster[e.from], b = cluster[e.to];
+      if (a == null || b == null || a == b) continue;
+      if (cAdj[a]!.add(b)) cIndeg[b]++;
+    }
+    // Kahn's algorithm with declaration-order tie-breaking.
+    final rank = List<int>.filled(k, 0);
+    final indeg = List<int>.from(cIndeg);
+    final ready = <int>[for (int i = 0; i < k; i++) if (indeg[i] == 0) i];
+    int placed = 0, r = 0;
+    final seen = <int>{};
+    while (ready.isNotEmpty) {
+      ready.sort();
+      final next = <int>[];
+      for (final c in ready) {
+        if (seen.contains(c)) continue;
+        seen.add(c);
+        rank[c] = r;
+        placed++;
+        for (final m in cAdj[c]!) {
+          if (--indeg[m] == 0) next.add(m);
+        }
+      }
+      ready
+        ..clear()
+        ..addAll(next);
+      r++;
+    }
+    // Cycles among clusters → bail to plain layering.
+    if (placed < k) return false;
+
+    // Expand clusters that share a topological rank into consecutive flow
+    // columns (declaration order). This keeps every cluster in its own column
+    // — e.g. Emotion | Food | Solution flow left-to-right — so inter-cluster
+    // edges stay short and horizontal instead of one cluster being stacked far
+    // below another it shares a rank with.
+    final ordered = [for (int c = 0; c < k; c++) c]
+      ..sort((a, b) {
+        if (rank[a] != rank[b]) return rank[a].compareTo(rank[b]);
+        return a.compareTo(b); // declaration order within a rank
+      });
+    for (int i = 0; i < ordered.length; i++) {
+      rank[ordered[i]] = i;
+    }
+
+    // One cluster per rank now; group for the placement loop below.
+    final byRank = <int, List<int>>{};
+    for (int c = 0; c < k; c++) {
+      byRank.putIfAbsent(rank[c], () => []).add(c);
+    }
+
+    final horizontalFlow = direction == 'LR' || direction == 'RL';
+    const memberGap = 40.0; // cross-axis gap between members in a cluster
+    const clusterFlowGap = 160.0; // flow-axis gap between cluster columns
+    const clusterCrossGap = 80.0; // cross-axis gap between stacked clusters
+
+    // Cross-axis extent of a node.
+    double crossExt(_MermaidNode n) =>
+        horizontalFlow ? n.rect.height : n.rect.width;
+    double flowExt(_MermaidNode n) =>
+        horizontalFlow ? n.rect.width : n.rect.height;
+
+    // Order members within each cluster. For the first ranks use declaration
+    // order; for later ranks order by barycenter of cross-position of already
+    // placed neighbours so connected members line up.
+    final memberOrder = <int, List<String>>{};
+    for (int c = 0; c < k; c++) {
+      memberOrder[c] =
+          subgraphs[c].memberIds.where(nodes.containsKey).toList();
+    }
+
+    // Cross-axis position (center) assigned per node as we place ranks.
+    final crossCenter = <String, double>{};
+
+    final ranksSorted = byRank.keys.toList()..sort();
+    double flowCursor = 0;
+    for (final rk in ranksSorted) {
+      final clustersHere = byRank[rk]!..sort();
+
+      // Determine the flow-axis thickness of this rank (max cluster column
+      // width) and lay each cluster's members as a cross-axis stack.
+      double rankFlowThickness = 0;
+      double crossCursor = 0;
+
+      for (final c in clustersHere) {
+        final members = memberOrder[c]!;
+        if (members.isEmpty) continue;
+
+        // Order members by barycenter of predecessors' cross centers.
+        members.sort((a, b) {
+          double bary(String id) {
+            final preds = <double>[];
+            for (final e in edges) {
+              final other = e.from == id ? e.to : (e.to == id ? e.from : null);
+              if (other == null) continue;
+              final cc = crossCenter[other];
+              if (cc != null) preds.add(cc);
+            }
+            if (preds.isEmpty) return double.maxFinite; // unconnected → end
+            return preds.reduce((x, y) => x + y) / preds.length;
+          }
+
+          final ba = bary(a), bb = bary(b);
+          if (ba == bb) {
+            return memberOrder[c]!.indexOf(a).compareTo(
+                memberOrder[c]!.indexOf(b));
+          }
+          return ba.compareTo(bb);
+        });
+
+        // Stack members along the cross axis.
+        double localCross = crossCursor;
+        double clusterFlow = 0;
+        for (final id in members) {
+          final n = nodes[id]!;
+          final center = localCross + crossExt(n) / 2;
+          crossCenter[id] = center;
+          clusterFlow = max(clusterFlow, flowExt(n));
+          // Temporarily store cross center; flow set after thickness known.
+          n.rect = Rect.fromLTWH(
+            horizontalFlow ? flowCursor : center - n.rect.width / 2,
+            horizontalFlow ? center - n.rect.height / 2 : flowCursor,
+            n.rect.width,
+            n.rect.height,
+          );
+          localCross += crossExt(n) + memberGap;
+        }
+        rankFlowThickness = max(rankFlowThickness, clusterFlow);
+        crossCursor = localCross + clusterCrossGap;
+      }
+
+      flowCursor += rankFlowThickness + clusterFlowGap;
+    }
+
+    // Center the whole graph on the cross axis around 0.
+    if (crossCenter.isNotEmpty) {
+      final centers = crossCenter.values;
+      final mid = (centers.reduce(min) + centers.reduce(max)) / 2;
+      for (final n in nodes.values) {
+        final rr = n.rect;
+        n.rect = horizontalFlow
+            ? Rect.fromLTWH(rr.left, rr.top - mid, rr.width, rr.height)
+            : Rect.fromLTWH(rr.left - mid, rr.top, rr.width, rr.height);
+      }
+    }
+
+    // Reverse the flow axis for BT/RL.
+    if (direction == 'BT' || direction == 'RL') {
+      final m = horizontalFlow
+          ? nodes.values.map((n) => n.rect.right).reduce(max)
+          : nodes.values.map((n) => n.rect.bottom).reduce(max);
+      for (final n in nodes.values) {
+        final rr = n.rect;
+        n.rect = horizontalFlow
+            ? Rect.fromLTWH(m - rr.right, rr.top, rr.width, rr.height)
+            : Rect.fromLTWH(rr.left, m - rr.bottom, rr.width, rr.height);
+      }
+    }
+
+    return true;
   }
 
   /// Container bounds (with padding/title) of a subgraph's members.
