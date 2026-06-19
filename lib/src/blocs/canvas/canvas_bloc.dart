@@ -60,6 +60,10 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         ObjectDuplicatedWithConnection e => _onObjectDuplicatedWithConnection(e, emit),
         GridToggled e => _onGridToggled(e, emit),
         CrossingsMinimized e => _onCrossingsMinimized(e, emit),
+        CommentAdded e => _onCommentAdded(e, emit),
+        CommentRemoved e => _onCommentRemoved(e, emit),
+        CommentResolvedToggled e => _onCommentResolvedToggled(e, emit),
+        AutoLayoutApplied e => _onAutoLayoutApplied(e, emit),
       });
     });
   }
@@ -446,7 +450,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       ..add((currentStateForRedo, lastEvent));
 
     emit(
-      previousState.copyWith(undoStack: newUndoStack, redoStack: newRedoStack, showGrid: state.showGrid),
+      previousState.copyWith(undoStack: newUndoStack, redoStack: newRedoStack, showGrid: state.showGrid, comments: state.comments),
     );
   }
 
@@ -466,7 +470,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     final newUndoStack = List<HistoryEntry>.from(state.undoStack)
       ..add((currentStateForUndo, nextEvent));
 
-    emit(nextState.copyWith(undoStack: newUndoStack, redoStack: newRedoStack, showGrid: state.showGrid));
+    emit(nextState.copyWith(undoStack: newUndoStack, redoStack: newRedoStack, showGrid: state.showGrid, comments: state.comments));
   }
 
   void _onNewProjectCreated(
@@ -484,6 +488,68 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     emit(state.copyWith(showGrid: !state.showGrid));
   }
 
+  void _onAutoLayoutApplied(
+      AutoLayoutApplied event, Emitter<CanvasState> emit) {
+    _pushToUndoStack(event, emit, state);
+    final newNodes = Map<String, NodeInstance>.from(state.nodes);
+    final newDrawingObjects =
+        Map<String, DrawingObject>.from(state.drawingObjects);
+
+    event.nodeOffsets.forEach((id, offset) {
+      final node = newNodes[id];
+      if (node != null) {
+        newNodes[id] = node.copyWith(offset: offset);
+        return;
+      }
+      // Shape drawing objects move by repositioning their rect's top-left.
+      final obj = newDrawingObjects[id];
+      if (obj == null) return;
+      final r = obj.rect;
+      final newRect = Rect.fromLTWH(offset.dx, offset.dy, r.width, r.height);
+      if (obj is RectangleObject) {
+        newDrawingObjects[id] = obj.copyWith(rect: newRect);
+      } else if (obj is CircleObject) {
+        newDrawingObjects[id] = obj.copyWith(rect: newRect);
+      } else if (obj is DiamondObject) {
+        newDrawingObjects[id] = obj.copyWith(rect: newRect);
+      } else if (obj is ParallelogramObject) {
+        newDrawingObjects[id] = obj.copyWith(rect: newRect);
+      } else if (obj is ForkJoinObject) {
+        newDrawingObjects[id] = obj.copyWith(rect: newRect);
+      } else if (obj is FigureObject) {
+        newDrawingObjects[id] = obj.copyWith(rect: newRect);
+      } else if (obj is TextObject) {
+        newDrawingObjects[id] = obj.copyWith(rect: newRect);
+      } else if (obj is SvgObject) {
+        newDrawingObjects[id] = obj.copyWith(rect: newRect);
+      }
+    });
+    emit(state.copyWith(nodes: newNodes, drawingObjects: newDrawingObjects));
+  }
+
+  void _onCommentAdded(CommentAdded event, Emitter<CanvasState> emit) {
+    final newComments = Map<String, EntityComment>.from(state.comments)
+      ..[event.comment.id] = event.comment;
+    emit(state.copyWith(comments: newComments));
+  }
+
+  void _onCommentRemoved(CommentRemoved event, Emitter<CanvasState> emit) {
+    final newComments = Map<String, EntityComment>.from(state.comments)
+      ..remove(event.commentId);
+    emit(state.copyWith(comments: newComments));
+  }
+
+  void _onCommentResolvedToggled(
+    CommentResolvedToggled event,
+    Emitter<CanvasState> emit,
+  ) {
+    final existing = state.comments[event.commentId];
+    if (existing == null) return;
+    final newComments = Map<String, EntityComment>.from(state.comments)
+      ..[event.commentId] = existing.copyWith(resolved: !existing.resolved);
+    emit(state.copyWith(comments: newComments));
+  }
+
   void _onProjectSaved(ProjectSaved event, Emitter<CanvasState> emit) {
     final jsonData = {
       'viewport': {
@@ -494,6 +560,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       'drawingObjects': state.drawingObjects.values
           .map((obj) => obj.toJson())
           .toList(),
+      'comments': state.comments.values.map((c) => c.toJson()).toList(),
     };
     event.onSave(jsonData);
   }
@@ -544,12 +611,19 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           .toList();
       final drawingObjects = {for (var obj in drawingObjectsList) obj.id: obj};
 
+      final commentsList = (event.data['comments'] as List?)
+              ?.map((json) => EntityComment.fromJson(json))
+              .toList() ??
+          const <EntityComment>[];
+      final comments = {for (var c in commentsList) c.id: c};
+
       emit(
         CanvasState(
           viewportOffset: offset,
           viewportZoom: zoom,
           nodes: nodes,
           drawingObjects: drawingObjects,
+          comments: comments,
         ),
       );
     } catch (e, s) {

@@ -380,6 +380,7 @@ class FlowDrawEditorRenderBox extends RenderBox
     _paintTempDrawingObject(context.canvas);
     _paintSnapGuides(context.canvas, viewport);
     _paintSelectionArea(context.canvas, viewport);
+    _paintCommentPins(context.canvas);
 
     _transformMatrixDirty = false;
 
@@ -480,6 +481,63 @@ class FlowDrawEditorRenderBox extends RenderBox
     if (snapHandlePosition == null) return;
     final paint = Paint()..color = Colors.cyan.withOpacity(0.8);
     canvas.drawCircle(snapHandlePosition!, 6.0 / zoom, paint);
+  }
+
+  /// Paints a small marker pin at each review comment's anchor. Pins are sized
+  /// in screen pixels (divided by zoom) so they stay constant on screen, and
+  /// numbered in creation order so the human and an agent can refer to them
+  /// ("comment 2 is on the connector I can't drag").
+  void _paintCommentPins(Canvas canvas) {
+    final comments = canvasState.comments;
+    if (comments.isEmpty) return;
+
+    final iz = 1.0 / zoom;
+    final radius = 9.0 * iz;
+    // Stable ordering so badge numbers don't jump around frame to frame.
+    final ordered = comments.values.toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+    for (var i = 0; i < ordered.length; i++) {
+      final c = ordered[i];
+      final center = c.anchorWorld;
+
+      final fill = Paint()
+        ..color = c.resolved
+            ? const Color(0xFF4CAF50)
+            : const Color(0xFFFFB300);
+      final border = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5 * iz
+        ..color = const Color(0xFF5D4037);
+
+      // Teardrop-ish pin: a circle with a small pointer to the anchor.
+      final pinCenter = center.translate(0, -radius * 1.4);
+      final path = Path()
+        ..moveTo(center.dx, center.dy)
+        ..lineTo(pinCenter.dx - radius * 0.5, pinCenter.dy + radius * 0.5)
+        ..lineTo(pinCenter.dx + radius * 0.5, pinCenter.dy + radius * 0.5)
+        ..close();
+      canvas.drawPath(path, fill);
+      canvas.drawCircle(pinCenter, radius, fill);
+      canvas.drawCircle(pinCenter, radius, border);
+
+      // Badge number.
+      final tp = TextPainter(
+        text: TextSpan(
+          text: '${i + 1}',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 11 * iz,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        textDirection: ui.TextDirection.ltr,
+      )..layout();
+      tp.paint(
+        canvas,
+        Offset(pinCenter.dx - tp.width / 2, pinCenter.dy - tp.height / 2),
+      );
+    }
   }
 
   void _paintSnapGuides(Canvas canvas, Rect viewport) {

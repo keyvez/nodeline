@@ -396,3 +396,60 @@ final class CrossingsMinimized extends CanvasEvent {
   @override
   List<Object> get props => [selectedIds, changeConnectionPoints];
 }
+
+/// Repositions nodes to new top-left offsets computed by an auto-layout
+/// (layered/Sugiyama). Undoable as a single step.
+final class AutoLayoutApplied extends CanvasEvent {
+  /// New top-left offset per node id.
+  final Map<String, Offset> nodeOffsets;
+
+  const AutoLayoutApplied(this.nodeOffsets);
+
+  @override
+  String get description => 'Auto-layout';
+
+  @override
+  List<Object> get props => [nodeOffsets];
+}
+
+/// Attaches a review comment to an entity (or a bare canvas point).
+///
+/// Not undoable — comments are feedback layered over the drawing, not part of
+/// the document edit history.
+final class CommentAdded extends CanvasEvent {
+  final EntityComment comment;
+
+  const CommentAdded(this.comment) : super(isUndoable: false);
+
+  @override
+  String get description => 'Added comment';
+
+  @override
+  List<Object> get props => [comment];
+}
+
+/// Removes a comment by id.
+final class CommentRemoved extends CanvasEvent {
+  final String commentId;
+
+  const CommentRemoved(this.commentId) : super(isUndoable: false);
+
+  @override
+  String get description => 'Removed comment';
+
+  @override
+  List<Object> get props => [commentId];
+}
+
+/// Toggles a comment's resolved flag.
+final class CommentResolvedToggled extends CanvasEvent {
+  final String commentId;
+
+  const CommentResolvedToggled(this.commentId) : super(isUndoable: false);
+
+  @override
+  String get description => 'Toggled comment resolved';
+
+  @override
+  List<Object> get props => [commentId];
+}

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:developer' as developer;
 import 'package:flow_draw/src/core/utils/platform_info/platform_info.dart'
     show PlatformInfoImpl;
 import 'dart:math';
@@ -7,6 +9,7 @@ import 'package:flow_draw/flow_draw.dart';
 import 'package:flow_draw/src/core/node_editor/clipboard.dart';
 import 'package:flow_draw/src/core/utils/json_extensions.dart';
 import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
+import 'package:flow_draw/src/core/utils/layered_layout.dart';
 import 'package:flow_draw/src/core/utils/snap_utils.dart';
 import 'package:flow_draw/src/core/utils/renderbox.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
@@ -123,6 +126,42 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   /// Computes the minimum allowed zoom so the entire diagram never shrinks
   /// below 32 screen pixels in its largest dimension. Returns a very small
   /// value when the canvas is empty (allowing infinite zoom out).
+  /// Fits the viewport to all content (drawing objects + nodes), centering it.
+  /// World→screen is `size/2 + zoom*(w + offset)`, so centering the content's
+  /// bbox center `c` means `offset = -c`, and zoom = fit ratio with a margin.
+  void _fitViewToContent() {
+    final canvasState = _canvasBloc.state;
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    void acc(Rect r) {
+      minX = min(minX, r.left);
+      minY = min(minY, r.top);
+      maxX = max(maxX, r.right);
+      maxY = max(maxY, r.bottom);
+    }
+
+    for (final obj in canvasState.drawingObjects.values) {
+      if (obj is ArrowObject || obj is LineObject) continue;
+      acc(obj.rect);
+    }
+    for (final node in canvasState.nodes.values) {
+      final b = getNodeBoundsInWorld(node);
+      if (b != null) acc(b);
+    }
+    if (minX == double.infinity) return;
+
+    final bbox = Rect.fromLTRB(minX, minY, maxX, maxY);
+    final editorBounds = getEditorBoundsInScreen(kNodeEditorWidgetKey);
+    if (editorBounds == null) return;
+    final size = editorBounds.size;
+    if (bbox.width <= 0 || bbox.height <= 0) return;
+
+    const margin = 0.85;
+    final zoom = (min(size.width / bbox.width, size.height / bbox.height) * margin)
+        .clamp(1e-4, 2.0);
+    _canvasBloc.add(CanvasTransformed(zoom: zoom, offset: -bbox.center));
+  }
+
   double _computeMinZoom() {
     final objects = _canvasBloc.state.drawingObjects;
     if (objects.isEmpty) return 1e-7;
@@ -147,6 +186,121 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     _selectionBloc = context.read<SelectionBloc>();
     _toolBloc = context.read<ToolBloc>();
     GestureBinding.instance.pointerRouter.addGlobalRoute(_globalPointerRoute);
+    _registerServiceExtensions();
+  }
+
+  static bool _serviceExtensionsRegistered = false;
+
+  /// Registers VM service extensions that let an external agent (e.g. via Flan)
+  /// read review comments and resolve a screen point to the entity under it,
+  /// without taking screenshots. Closes the human→agent feedback loop: a human
+  /// points at a connector ("can't drag this"), and the agent resolves that to
+  /// an unambiguous entity id, type, and geometry.
+  void _registerServiceExtensions() {
+    if (_serviceExtensionsRegistered) return;
+    _serviceExtensionsRegistered = true;
+
+    // ext.fldraw.comments — returns every comment with its resolved entity
+    // metadata (kind, label, endpoints, and current rendered path for arrows).
+    developer.registerExtension('ext.fldraw.comments', (method, params) async {
+      final ordered = _canvasBloc.state.comments.values.toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      final list = <Map<String, dynamic>>[];
+      for (var i = 0; i < ordered.length; i++) {
+        final c = ordered[i];
+        list.add({
+          'index': i + 1,
+          ...c.toJson(),
+          'entity': _describeEntity(c.targetId),
+        });
+      }
+      return developer.ServiceExtensionResponse.result(
+        jsonEncode({'comments': list}),
+      );
+    });
+
+    // ext.fldraw.entityAt — resolves screen coordinates (x, y) to the entity
+    // under that point. Pass params {x, y}. Returns the same entity description
+    // used by comments, so an annotation dropped anywhere can be identified.
+    developer.registerExtension('ext.fldraw.entityAt', (method, params) async {
+      final x = double.tryParse(params['x'] ?? '');
+      final y = double.tryParse(params['y'] ?? '');
+      if (x == null || y == null) {
+        return developer.ServiceExtensionResponse.error(
+          developer.ServiceExtensionResponse.invalidParams,
+          'entityAt requires numeric x and y params (screen coordinates)',
+        );
+      }
+      final worldPos = screenToWorld(
+        Offset(x, y),
+        _canvasBloc.state.viewportOffset,
+        _canvasBloc.state.viewportZoom,
+      );
+      final hitId = worldPos == null ? null : _findHitObject(worldPos);
+      return developer.ServiceExtensionResponse.result(
+        jsonEncode({
+          'screen': {'x': x, 'y': y},
+          'world': worldPos == null ? null : {'x': worldPos.dx, 'y': worldPos.dy},
+          'entity': _describeEntity(hitId),
+        }),
+      );
+    });
+
+    // ext.fldraw.autoLayout — trigger the layered "Tidy" auto-layout
+    // programmatically (same as the Cmd/Ctrl+Shift+L shortcut).
+    developer.registerExtension('ext.fldraw.autoLayout', (method, params) async {
+      _applyAutoLayout();
+      return developer.ServiceExtensionResponse.result(jsonEncode({'ok': true}));
+    });
+  }
+
+  /// Builds a JSON-able description of the entity with [id], or a `canvas`
+  /// placeholder when [id] is null (a bare-canvas hit).
+  Map<String, dynamic> _describeEntity(String? id) {
+    if (id == null) {
+      return {'id': null, 'kind': 'canvas'};
+    }
+    final obj = _canvasBloc.state.drawingObjects[id];
+    if (obj is ArrowObject) {
+      return {
+        'id': id,
+        'kind': 'arrow',
+        'label': obj.arrowLabel,
+        'pathType': obj.pathType.name,
+        'source': obj.startAttachment?.objectId,
+        'target': obj.endAttachment?.objectId,
+        'renderedPath': obj.renderedPath
+            ?.map((p) => [p.dx, p.dy])
+            .toList(),
+      };
+    }
+    if (obj is LineObject) {
+      return {
+        'id': id,
+        'kind': 'line',
+        'source': obj.startAttachment?.objectId,
+        'target': obj.endAttachment?.objectId,
+      };
+    }
+    if (obj != null) {
+      final rect = obj.rect;
+      return {
+        'id': id,
+        'kind': 'shape',
+        'type': obj.runtimeType.toString(),
+        'rect': [rect.left, rect.top, rect.width, rect.height],
+      };
+    }
+    final node = _canvasBloc.state.nodes[id];
+    if (node != null) {
+      return {
+        'id': id,
+        'kind': 'node',
+        'heading': node.heading,
+        'value': node.value,
+      };
+    }
+    return {'id': id, 'kind': 'unknown'};
   }
 
   void _globalPointerRoute(PointerEvent event) {
@@ -201,14 +355,19 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     final tool = _toolBloc.state.activeTool;
     final canvasState = _canvasBloc.state;
 
-    bool shouldCheckForSnapping =
-        ((tool == EditorTool.arrowTopRight || tool == EditorTool.line) &&
-            !_isDrawing) ||
-        (_isDrawing &&
-            (_tempDrawingObject?.tool == EditorTool.arrowTopRight ||
-                _tempDrawingObject?.tool == EditorTool.line)) ||
-        (_isResizing.handle == Handle.arrowStart ||
-            _isResizing.handle == Handle.arrowEnd);
+    // Holding Shift suppresses snapping entirely, giving a free-drag escape
+    // hatch — essential in dense diagrams where an endpoint would otherwise be
+    // captured by some node border on almost every move.
+    final bool snapSuppressed = HardwareKeyboard.instance.isShiftPressed;
+
+    bool shouldCheckForSnapping = !snapSuppressed &&
+        (((tool == EditorTool.arrowTopRight || tool == EditorTool.line) &&
+                !_isDrawing) ||
+            (_isDrawing &&
+                (_tempDrawingObject?.tool == EditorTool.arrowTopRight ||
+                    _tempDrawingObject?.tool == EditorTool.line)) ||
+            (_isResizing.handle == Handle.arrowStart ||
+                _isResizing.handle == Handle.arrowEnd));
     if (!shouldCheckForSnapping) {
       if (_hoveredSnapPoint != null) {
         setState(() => _hoveredSnapPoint = null);
@@ -265,13 +424,14 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     }
 
     if (newSnapPoint != _hoveredSnapPoint) {
+      // Always track the CURRENT nearest snap point (or null when the cursor
+      // leaves every snap band). The old code returned early when both an
+      // existing start-snap and a new snap were present, which froze
+      // _hoveredSnapPoint at its first value and made a dragged endpoint stick
+      // to whatever it first snapped to — you couldn't drag back out.
       _hoveredSnapPoint = newSnapPoint;
-      if (shouldCheckForSnapping &&
-          _startSnapPoint != null &&
-          newSnapPoint != null) {
-        return;
-      } else if (shouldCheckForSnapping && _hoveredSnapPoint != null) {
-        _startSnapPoint = _hoveredSnapPoint;
+      if (shouldCheckForSnapping && _startSnapPoint == null && newSnapPoint != null) {
+        _startSnapPoint = newSnapPoint;
       }
       setState(() {});
     }
@@ -556,6 +716,18 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       return;
     }
 
+    // A click on a comment pin opens its popup (view / resolve / delete),
+    // regardless of the active tool. Checked FIRST — before resize handles and
+    // tool handling — so a deliberate click on a pin always wins over the node
+    // it sits on (pins overlap their target, especially when zoomed out).
+    if (event.buttons == kPrimaryMouseButton) {
+      final pinComment = _findCommentAt(worldPos);
+      if (pinComment != null) {
+        _openCommentPopup(pinComment, event.position);
+        return;
+      }
+    }
+
     // Update hovered handle from tap position before checking —
     // on touch devices there are no hover events, so the handle
     // state can be stale from a previous interaction.
@@ -577,11 +749,55 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       return;
     }
 
-    if (tool == EditorTool.arrow) {
+    if (tool == EditorTool.comment) {
+      _handleCommentToolPointerDown(worldPos);
+    } else if (tool == EditorTool.arrow) {
       _handleArrowToolPointerDown(event, worldPos);
     } else {
       _handleDrawingToolPointerDown(event, worldPos);
     }
+  }
+
+  /// Resolves the entity under [worldPos] and opens a small text overlay to
+  /// attach a review comment to it. For arrows we also capture the source/target
+  /// connections and the polyline actually drawn, so feedback about dragging or
+  /// routing references the real geometry.
+  void _handleCommentToolPointerDown(Offset worldPos) {
+    final hitId = _findHitObject(worldPos);
+
+    CommentTargetType targetType = CommentTargetType.canvas;
+    String? sourceObjectId;
+    String? targetObjectId;
+    List<Offset>? renderedPath;
+
+    if (hitId != null) {
+      final obj = _canvasBloc.state.drawingObjects[hitId];
+      if (obj is ArrowObject) {
+        targetType = CommentTargetType.arrow;
+        sourceObjectId = obj.startAttachment?.objectId;
+        targetObjectId = obj.endAttachment?.objectId;
+        renderedPath = obj.renderedPath != null
+            ? List<Offset>.from(obj.renderedPath!)
+            : null;
+      } else if (obj is LineObject) {
+        targetType = CommentTargetType.line;
+        sourceObjectId = obj.startAttachment?.objectId;
+        targetObjectId = obj.endAttachment?.objectId;
+      } else if (obj != null) {
+        targetType = CommentTargetType.shape;
+      } else if (_canvasBloc.state.nodes.containsKey(hitId)) {
+        targetType = CommentTargetType.node;
+      }
+    }
+
+    _beginCommentEditing(
+      anchorWorld: worldPos,
+      targetId: hitId,
+      targetType: targetType,
+      sourceObjectId: sourceObjectId,
+      targetObjectId: targetObjectId,
+      renderedPath: renderedPath,
+    );
   }
 
   void _onPointerMove(PointerMoveEvent event) {
@@ -1024,7 +1240,12 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
       // Show a preview temp line for endpoint drags; midpoint updates live.
       if (handle == Handle.arrowStart || handle == Handle.arrowEnd) {
-        final dragPos = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
+        // Shift = free drag: skip object-snap (cleared in _updateSnapHandle)
+        // AND grid-snap, so the endpoint follows the cursor exactly.
+        final dragPos = _hoveredSnapPoint?.worldPosition ??
+            (HardwareKeyboard.instance.isShiftPressed
+                ? worldPos
+                : snapOffset(worldPos));
         final tempStart = handle == Handle.arrowStart ? dragPos : start;
         final tempEnd = handle == Handle.arrowEnd ? dragPos : end;
 
@@ -1105,7 +1326,10 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       final (start, end) = _getDynamicEndpoints(object);
 
       if (_isResizing.handle == Handle.arrowStart || _isResizing.handle == Handle.arrowEnd) {
-        final dragPos = _hoveredSnapPoint?.worldPosition ?? snapOffset(worldPos);
+        final dragPos = _hoveredSnapPoint?.worldPosition ??
+            (HardwareKeyboard.instance.isShiftPressed
+                ? worldPos
+                : snapOffset(worldPos));
         final tempStart = _isResizing.handle == Handle.arrowStart ? dragPos : start;
         final tempEnd = _isResizing.handle == Handle.arrowEnd ? dragPos : end;
         setState(() {
@@ -1632,6 +1856,178 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     return (start, end);
   }
 
+  /// Runs a layered (top-to-bottom) auto-layout over all nodes on the canvas,
+  /// repositioning them to minimize edge crossings, then runs the existing
+  /// port/route optimizer as a finishing pass. Reroute of attached arrows
+  /// happens automatically in paint once nodes move.
+  void _applyAutoLayout() {
+    final canvasState = _canvasBloc.state;
+
+    // Layout operates on every "box": NodeInstance nodes AND shape drawing
+    // objects (rectangles/circles/diamonds/etc.). Diagrams imported from
+    // Mermaid use RectangleObjects, not nodes, so both must be handled.
+    final layoutNodes = <LayoutNode>[];
+    final boxIds = <String>{};
+
+    for (final node in canvasState.nodes.values) {
+      final bounds = getNodeBoundsInWorld(node);
+      final size = bounds?.size ?? const Size(120, 48);
+      layoutNodes.add(LayoutNode(node.id, size));
+      boxIds.add(node.id);
+    }
+    for (final obj in canvasState.drawingObjects.values) {
+      if (obj is ArrowObject ||
+          obj is LineObject ||
+          obj is PencilStrokeObject) {
+        continue;
+      }
+      layoutNodes.add(LayoutNode(obj.id, obj.rect.size));
+      boxIds.add(obj.id);
+    }
+
+    if (layoutNodes.isEmpty) return;
+
+    // Directed edges from arrows that connect two boxes (node or shape).
+    final edges = <(String, String)>[];
+    for (final obj in canvasState.drawingObjects.values) {
+      if (obj is ArrowObject) {
+        final s = obj.startAttachment?.objectId;
+        final t = obj.endAttachment?.objectId;
+        if (s != null && t != null && boxIds.contains(s) && boxIds.contains(t)) {
+          edges.add((s, t));
+        }
+      }
+    }
+
+    // Anchor the laid-out block near the current centroid so the view doesn't
+    // jump far away.
+    Offset centroid = Offset.zero;
+    int count = 0;
+    for (final n in canvasState.nodes.values) {
+      centroid += n.offset;
+      count++;
+    }
+    for (final id in boxIds) {
+      final obj = canvasState.drawingObjects[id];
+      if (obj != null) {
+        centroid += obj.rect.topLeft;
+        count++;
+      }
+    }
+    centroid = count > 0 ? centroid / count.toDouble() : Offset.zero;
+
+    // Generous spacing so the orthogonal router has room to run edges straight
+    // — tight packing makes it zigzag and reintroduces crossings the layered
+    // model doesn't see.
+    final layout = LayeredLayout(
+      origin: centroid,
+      nodeSpacing: 80,
+      rankSpacing: 140,
+    );
+    final offsets = layout.layout(layoutNodes, edges);
+    if (offsets.isEmpty) return;
+
+    _canvasBloc.add(AutoLayoutApplied(offsets));
+
+    // Port assignment by geometry: once nodes have moved, attach each arrow's
+    // endpoints to the cardinal ports that match the boxes' relative positions
+    // (downward edge → source bottom / target top, etc.). This is what makes
+    // the router run clean L-shapes instead of long crossing detours — the
+    // same thing you do by hand when picking better connection points.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // Set each arrow's ports to the cardinal side matching the boxes' new
+      // relative geometry (downward edge → source bottom / target top, etc.),
+      // so the router runs clean L-shapes. (Finer crossing-aware port search was
+      // explored but couldn't beat the renderer's own routing reliably; left to
+      // manual tuning.)
+      _assignPortsByGeometry();
+      // Center + zoom the view on the freshly laid-out content.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _fitViewToContent();
+      });
+    });
+  }
+
+  /// After an auto-layout, reassigns every connecting arrow's start/end ports
+  /// (the attachment [relativePosition]) to the cardinal port best matching the
+  /// two boxes' current relative geometry. Top-to-bottom layouts want downward
+  /// edges leaving the source bottom and entering the target top; back-edges
+  /// and sideways edges pick top/left/right accordingly.
+  void _assignPortsByGeometry() {
+    final canvasState = _canvasBloc.state;
+
+    Rect? rectOf(String id) {
+      final node = canvasState.nodes[id];
+      if (node != null) return getNodeBoundsInWorld(node);
+      return canvasState.drawingObjects[id]?.rect;
+    }
+
+    // Cardinal port → attachment relativePosition.
+    const top = Offset(0.5, 0.0);
+    const bottom = Offset(0.5, 1.0);
+    const left = Offset(0.0, 0.5);
+    const right = Offset(1.0, 0.5);
+
+    for (final obj in canvasState.drawingObjects.values) {
+      if (obj is! ArrowObject) continue;
+      final sId = obj.startAttachment?.objectId;
+      final tId = obj.endAttachment?.objectId;
+      if (sId == null || tId == null) continue;
+      final sRect = rectOf(sId);
+      final tRect = rectOf(tId);
+      if (sRect == null || tRect == null) continue;
+
+      final d = tRect.center - sRect.center;
+      late Offset startRel;
+      late Offset endRel;
+      if (d.dy.abs() >= d.dx.abs()) {
+        // Predominantly vertical.
+        if (d.dy >= 0) {
+          startRel = bottom; // target below
+          endRel = top;
+        } else {
+          startRel = top; // target above (back-edge)
+          endRel = bottom;
+        }
+      } else {
+        // Predominantly horizontal.
+        if (d.dx >= 0) {
+          startRel = right; // target to the right
+          endRel = left;
+        } else {
+          startRel = left;
+          endRel = right;
+        }
+      }
+
+      _canvasBloc.add(DrawingObjectUpdated(obj.copyWith(
+        startAttachment: ObjectAttachment(objectId: sId, relativePosition: startRel),
+        endAttachment: ObjectAttachment(objectId: tId, relativePosition: endRel),
+      )));
+    }
+  }
+
+  /// Returns the comment whose pin marker is under [worldPos], or null.
+  ///
+  /// Mirrors the pin geometry in the render object: a circle of screen-radius
+  /// 9px centered at `anchorWorld + (0, -radius*1.4)`. The hit radius is a bit
+  /// generous so the small marker is easy to click.
+  EntityComment? _findCommentAt(Offset worldPos) {
+    final zoom = _canvasBloc.state.viewportZoom;
+    final iz = 1.0 / zoom;
+    final radius = 9.0 * iz;
+    final hitRadius = 13.0 * iz; // a little larger than the visual pin
+    // Newest pins are drawn last (on top), so prefer them on overlap.
+    final ordered = _canvasBloc.state.comments.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    for (final c in ordered) {
+      final pinCenter = c.anchorWorld.translate(0, -radius * 1.4);
+      if ((worldPos - pinCenter).distance <= hitRadius) return c;
+    }
+    return null;
+  }
+
   String? _findHitObject(Offset worldPos) {
     final canvasState = _canvasBloc.state;
     final tolerance = 12.0 / canvasState.viewportZoom;
@@ -1936,9 +2332,20 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         final onCurveMidPoint =
             (start * 0.25) + (midPoint * 0.5) + (end * 0.25);
 
-        consider(objectId, Handle.arrowStart, (worldPos - start).distance,
+        // The grab zone must sit where the line is actually DRAWN. For
+        // orthogonal arrows the router snaps endpoints to a node-edge port,
+        // which can be far from the relative-position point _getDynamicEndpoints
+        // returns — so the visible endpoint and the hit zone diverged (you'd
+        // click the line's end but grab nothing). Prefer renderedPath endpoints.
+        // See memory: hit-test-path-must-match-render.
+        final rendered = obj.renderedPath;
+        final bool useRendered = rendered != null && rendered.length >= 2;
+        final Offset hitStart = useRendered ? rendered.first : start;
+        final Offset hitEnd = useRendered ? rendered.last : end;
+
+        consider(objectId, Handle.arrowStart, (worldPos - hitStart).distance,
             handleHitAreaRadius * endpointRadiusFactor, endpointDistanceBias);
-        consider(objectId, Handle.arrowEnd, (worldPos - end).distance,
+        consider(objectId, Handle.arrowEnd, (worldPos - hitEnd).distance,
             handleHitAreaRadius * endpointRadiusFactor, endpointDistanceBias);
 
         // For orthogonal arrows with waypoints, hide the midpoint handle.
@@ -2161,6 +2568,246 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     Overlay.of(context).insert(overlayEntry);
   }
 
+  /// Opens a small text overlay at the comment anchor to capture comment text,
+  /// then dispatches [CommentAdded] with the resolved entity metadata.
+  void _beginCommentEditing({
+    required Offset anchorWorld,
+    required String? targetId,
+    required CommentTargetType targetType,
+    String? sourceObjectId,
+    String? targetObjectId,
+    List<Offset>? renderedPath,
+  }) {
+    final zoom = _canvasBloc.state.viewportZoom;
+    final textEditingController = TextEditingController();
+    final focusNode = FocusNode();
+    OverlayEntry? overlayEntry;
+
+    setState(() => _isEditingText = true);
+
+    bool closed = false;
+    void submitAndClose() {
+      if (!mounted || closed) return;
+      closed = true;
+      final text = textEditingController.text.trim();
+      setState(() => _isEditingText = false);
+
+      if (text.isNotEmpty) {
+        _canvasBloc.add(
+          CommentAdded(
+            EntityComment(
+              id: const Uuid().v4(),
+              targetId: targetId,
+              targetType: targetType,
+              text: text,
+              anchorWorld: anchorWorld,
+              createdAt: DateTime.now(),
+              sourceObjectId: sourceObjectId,
+              targetObjectId: targetObjectId,
+              renderedPath: renderedPath,
+            ),
+          ),
+        );
+      }
+      overlayEntry?.remove();
+    }
+
+    overlayEntry = OverlayEntry(
+      builder: (context) {
+        final editorBox =
+            kNodeEditorWidgetKey.currentContext!.findRenderObject() as RenderBox;
+        final editorSize = editorBox.size;
+        final editorGlobalOffset = editorBox.localToGlobal(Offset.zero);
+
+        final screenX =
+            (anchorWorld.dx + offset.dx) * zoom + editorSize.width / 2;
+        final screenY =
+            (anchorWorld.dy + offset.dy) * zoom + editorSize.height / 2;
+        final globalPosition =
+            Offset(screenX, screenY) + editorGlobalOffset;
+
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    submitAndClose();
+                  });
+                },
+              ),
+            ),
+            Positioned(
+              left: globalPosition.dx + 12,
+              top: globalPosition.dy - 12,
+              child: Material(
+                color: Colors.transparent,
+                child: DefaultTextEditingShortcuts(
+                  child: Container(
+                    width: 220,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF8C4),
+                      borderRadius: BorderRadius.circular(6),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x33000000),
+                          blurRadius: 6,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    // Enter submits, Shift+Enter inserts a newline, Escape
+                    // cancels. Handled here because a multi-line TextField
+                    // doesn't fire onSubmitted on Enter.
+                    child: Focus(
+                      onKeyEvent: (node, event) {
+                        if (event is! KeyDownEvent) {
+                          return KeyEventResult.ignored;
+                        }
+                        if (event.logicalKey == LogicalKeyboardKey.escape) {
+                          textEditingController.clear();
+                          submitAndClose();
+                          return KeyEventResult.handled;
+                        }
+                        if (event.logicalKey == LogicalKeyboardKey.enter &&
+                            !HardwareKeyboard.instance.isShiftPressed) {
+                          submitAndClose();
+                          return KeyEventResult.handled;
+                        }
+                        return KeyEventResult.ignored;
+                      },
+                      child: TextField(
+                        key: const ValueKey('comment_input'),
+                        controller: textEditingController,
+                        focusNode: focusNode,
+                        style: const TextStyle(
+                            fontSize: 13, color: Colors.black87),
+                        maxLines: null,
+                        minLines: 1,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.zero,
+                          isDense: true,
+                          hintText: 'Comment on this…  (Enter to save)',
+                          hintStyle: TextStyle(color: Colors.black38),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    Overlay.of(context).insert(overlayEntry);
+  }
+
+  /// Opens a popup anchored near a comment pin showing its text, with actions
+  /// to toggle resolved or delete the comment.
+  void _openCommentPopup(EntityComment comment, Offset globalAnchor) {
+    OverlayEntry? overlayEntry;
+    void close() => overlayEntry?.remove();
+
+    overlayEntry = OverlayEntry(
+      builder: (context) {
+        return Stack(
+          children: [
+            // Tap-away scrim to dismiss.
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: close,
+              ),
+            ),
+            Positioned(
+              left: globalAnchor.dx + 12,
+              top: globalAnchor.dy + 12,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  width: 240,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF8C4),
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x33000000),
+                        blurRadius: 8,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        comment.text,
+                        style: const TextStyle(
+                            fontSize: 13, color: Colors.black87),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.black54,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              minimumSize: Size.zero,
+                              tapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: () {
+                              _canvasBloc
+                                  .add(CommentResolvedToggled(comment.id));
+                              close();
+                            },
+                            child: Text(
+                                comment.resolved ? 'Reopen' : 'Resolve'),
+                          ),
+                          const SizedBox(width: 4),
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.red.shade700,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              minimumSize: Size.zero,
+                              tapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: () {
+                              _canvasBloc.add(CommentRemoved(comment.id));
+                              close();
+                            },
+                            child: const Text('Delete'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    Overlay.of(context).insert(overlayEntry);
+  }
+
   // Shape text editing state
   DrawingObject? _editingShapeObject;
   TextEditingController? _shapeTextController;
@@ -2335,6 +2982,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                         nodeIds: selectionState.selectedNodeIds,
                         drawingObjectIds: selectionState.selectedDrawingObjectIds,
                       )),
+                    // Tidy: layered auto-layout to minimize edge crossings.
+                    const SingleActivator(LogicalKeyboardKey.keyL,
+                        meta: true, shift: true): _applyAutoLayout,
+                    const SingleActivator(LogicalKeyboardKey.keyL,
+                        control: true, shift: true): _applyAutoLayout,
                     const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () async {
                       await ClipboardService.copySelection(
                         allNodes: canvasState.nodes,

@@ -1274,3 +1274,132 @@ class ObjectAttachment extends Equatable {
     );
   }
 }
+
+/// What kind of entity a [EntityComment] is attached to.
+enum CommentTargetType { arrow, line, shape, node, canvas }
+
+/// A review comment attached to a specific edge (arrow/line), node/shape, or a
+/// bare point on the canvas.
+///
+/// Comments let a human point at a particular entity ("I can't drag this
+/// connector") and have that feedback resolved to an unambiguous entity id and
+/// type, so an agent can act on it without guessing which thing was meant. For
+/// arrows we also capture the source/target connections and the polyline that
+/// was actually drawn, which is exactly what drag/routing feedback needs.
+class EntityComment extends Equatable {
+  /// Stable id for this comment.
+  final String id;
+
+  /// The id of the entity this comment is attached to, or null for a comment
+  /// dropped on empty canvas.
+  final String? targetId;
+
+  /// The kind of entity [targetId] refers to.
+  final CommentTargetType targetType;
+
+  /// The human-written comment text.
+  final String text;
+
+  /// World-space anchor where the comment pin sits (the click point).
+  final Offset anchorWorld;
+
+  /// When the comment was created.
+  final DateTime createdAt;
+
+  /// Whether the comment has been addressed/resolved.
+  final bool resolved;
+
+  /// For arrow targets: id of the object/node the arrow starts from, if any.
+  final String? sourceObjectId;
+
+  /// For arrow targets: id of the object/node the arrow ends at, if any.
+  final String? targetObjectId;
+
+  /// For arrow targets: the polyline actually drawn on screen at comment time.
+  /// Captured so routing/drag feedback references the real geometry.
+  final List<Offset>? renderedPath;
+
+  const EntityComment({
+    required this.id,
+    required this.targetId,
+    required this.targetType,
+    required this.text,
+    required this.anchorWorld,
+    required this.createdAt,
+    this.resolved = false,
+    this.sourceObjectId,
+    this.targetObjectId,
+    this.renderedPath,
+  });
+
+  EntityComment copyWith({
+    String? text,
+    bool? resolved,
+  }) {
+    return EntityComment(
+      id: id,
+      targetId: targetId,
+      targetType: targetType,
+      text: text ?? this.text,
+      anchorWorld: anchorWorld,
+      createdAt: createdAt,
+      resolved: resolved ?? this.resolved,
+      sourceObjectId: sourceObjectId,
+      targetObjectId: targetObjectId,
+      renderedPath: renderedPath,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'targetId': targetId,
+    'targetType': targetType.name,
+    'text': text,
+    'anchorWorld': [anchorWorld.dx, anchorWorld.dy],
+    'createdAt': createdAt.toIso8601String(),
+    'resolved': resolved,
+    if (sourceObjectId != null) 'sourceObjectId': sourceObjectId,
+    if (targetObjectId != null) 'targetObjectId': targetObjectId,
+    if (renderedPath != null)
+      'renderedPath': renderedPath!.map((p) => [p.dx, p.dy]).toList(),
+  };
+
+  factory EntityComment.fromJson(Map<String, dynamic> json) {
+    return EntityComment(
+      id: json['id'] as String,
+      targetId: json['targetId'] as String?,
+      targetType: CommentTargetType.values.firstWhere(
+        (t) => t.name == json['targetType'],
+        orElse: () => CommentTargetType.canvas,
+      ),
+      text: json['text'] as String,
+      anchorWorld: Offset(
+        (json['anchorWorld'][0] as num).toDouble(),
+        (json['anchorWorld'][1] as num).toDouble(),
+      ),
+      createdAt:
+          DateTime.tryParse(json['createdAt'] as String? ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      resolved: json['resolved'] as bool? ?? false,
+      sourceObjectId: json['sourceObjectId'] as String?,
+      targetObjectId: json['targetObjectId'] as String?,
+      renderedPath: (json['renderedPath'] as List?)
+          ?.map((p) => Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()))
+          .toList(),
+    );
+  }
+
+  @override
+  List<Object?> get props => [
+    id,
+    targetId,
+    targetType,
+    text,
+    anchorWorld,
+    createdAt,
+    resolved,
+    sourceObjectId,
+    targetObjectId,
+    renderedPath,
+  ];
+}
