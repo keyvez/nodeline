@@ -98,6 +98,10 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         drawingObjects: Map<String, DrawingObject>.from(state.drawingObjects),
         viewportOffset: state.viewportOffset,
         viewportZoom: state.viewportZoom,
+        comments: Map<String, EntityComment>.from(state.comments),
+        showGrid: state.showGrid,
+        defaultFontFamily: state.defaultFontFamily,
+        defaultFontSize: state.defaultFontSize,
       );
 
       final newUndoStack = List<HistoryEntry>.from(state.undoStack)
@@ -115,6 +119,10 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         drawingObjects: Map<String, DrawingObject>.from(state.drawingObjects),
         viewportOffset: state.viewportOffset,
         viewportZoom: state.viewportZoom,
+        comments: Map<String, EntityComment>.from(state.comments),
+        showGrid: state.showGrid,
+        defaultFontFamily: state.defaultFontFamily,
+        defaultFontSize: state.defaultFontSize,
       );
       emit(
         newState.copyWith(
@@ -140,6 +148,10 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       drawingObjects: Map<String, DrawingObject>.from(currentState.drawingObjects),
       viewportOffset: currentState.viewportOffset,
       viewportZoom: currentState.viewportZoom,
+      comments: Map<String, EntityComment>.from(currentState.comments),
+      showGrid: currentState.showGrid,
+      defaultFontFamily: currentState.defaultFontFamily,
+      defaultFontSize: currentState.defaultFontSize,
     );
     _preOperationSnapshot = null;
 
@@ -463,13 +475,24 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       drawingObjects: Map<String, DrawingObject>.from(state.drawingObjects),
       viewportOffset: state.viewportOffset,
       viewportZoom: state.viewportZoom,
+      comments: Map<String, EntityComment>.from(state.comments),
+      showGrid: state.showGrid,
+      defaultFontFamily: state.defaultFontFamily,
+      defaultFontSize: state.defaultFontSize,
     );
 
     final newRedoStack = List<HistoryEntry>.from(state.redoStack)
       ..add((currentStateForRedo, lastEvent));
 
     emit(
-      previousState.copyWith(undoStack: newUndoStack, redoStack: newRedoStack, showGrid: state.showGrid, comments: state.comments),
+      previousState.copyWith(
+        undoStack: newUndoStack,
+        redoStack: newRedoStack,
+        showGrid: state.showGrid,
+        comments: state.comments,
+        defaultFontFamily: previousState.defaultFontFamily,
+        defaultFontSize: previousState.defaultFontSize,
+      ),
     );
   }
 
@@ -484,12 +507,23 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       drawingObjects: Map<String, DrawingObject>.from(state.drawingObjects),
       viewportOffset: state.viewportOffset,
       viewportZoom: state.viewportZoom,
+      comments: Map<String, EntityComment>.from(state.comments),
+      showGrid: state.showGrid,
+      defaultFontFamily: state.defaultFontFamily,
+      defaultFontSize: state.defaultFontSize,
     );
 
     final newUndoStack = List<HistoryEntry>.from(state.undoStack)
       ..add((currentStateForUndo, nextEvent));
 
-    emit(nextState.copyWith(undoStack: newUndoStack, redoStack: newRedoStack, showGrid: state.showGrid, comments: state.comments));
+    emit(nextState.copyWith(
+      undoStack: newUndoStack,
+      redoStack: newRedoStack,
+      showGrid: state.showGrid,
+      comments: state.comments,
+      defaultFontFamily: nextState.defaultFontFamily,
+      defaultFontSize: nextState.defaultFontSize,
+    ));
   }
 
   void _onNewProjectCreated(
@@ -575,6 +609,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         'offset': [state.viewportOffset.dx, state.viewportOffset.dy],
         'zoom': state.viewportZoom,
       },
+      'defaultFontFamily': state.defaultFontFamily,
+      'defaultFontSize': state.defaultFontSize,
       'nodes': state.nodes.values.map((node) => node.toJson()).toList(),
       'drawingObjects': state.drawingObjects.values
           .map((obj) => obj.toJson())
@@ -599,33 +635,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       final nodes = {for (var node in nodesList) node.id: node};
 
       final drawingObjectsList = (event.data['drawingObjects'] as List)
-          .map((json) {
-            // This logic can be moved to a factory in DrawingObject
-            switch (json['type']) {
-              case 'rectangle':
-                return RectangleObject.fromJson(json);
-              case 'circle':
-                return CircleObject.fromJson(json);
-              case 'diamond':
-                return DiamondObject.fromJson(json);
-              case 'parallelogram':
-                return ParallelogramObject.fromJson(json);
-              case 'fork_join':
-                return ForkJoinObject.fromJson(json);
-              case 'arrow':
-                return ArrowObject.fromJson(json);
-              case 'line':
-                return LineObject.fromJson(json);
-              case 'pencil_stroke':
-                return PencilStrokeObject.fromJson(json);
-              case 'figure':
-                return FigureObject.fromJson(json);
-              case 'text':
-                return TextObject.fromJson(json);
-              default:
-                return null;
-            }
-          })
+          .map((json) => drawingObjectFromJson(json as Map<String, dynamic>))
           .whereType<DrawingObject>()
           .toList();
       final drawingObjects = {for (var obj in drawingObjectsList) obj.id: obj};
@@ -643,6 +653,10 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           nodes: nodes,
           drawingObjects: drawingObjects,
           comments: comments,
+          defaultFontFamily: event.data['defaultFontFamily'] as String? ??
+              kEditorDefaultFontFamily,
+          defaultFontSize: (event.data['defaultFontSize'] as num?)?.toDouble() ??
+              kEditorDefaultFontSize,
         ),
       );
     } catch (e, s) {
@@ -662,18 +676,45 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     final clipboardData = await Clipboard.getData('text/plain');
     if (clipboardData == null || clipboardData.text == null) return;
 
-    final newNodes = Map<String, NodeInstance>.from(state.nodes);
+    // Prefer drawing-object payloads (the diagram's shapes/connectors); fall
+    // back to the node-editor clipboard.
+    final pastedObjects = ClipboardService.prepareDrawingObjectsPaste(
+      clipboardData.text!,
+      event.pastePosition,
+    );
+    if (pastedObjects != null) {
+      _pushToUndoStack(event, emit, state);
+      final newDrawingObjects =
+          Map<String, DrawingObject>.from(state.drawingObjects);
+      for (final obj in pastedObjects) {
+        newDrawingObjects[obj.id] = obj;
+      }
+      emit(state.copyWith(drawingObjects: newDrawingObjects));
+      _lastPastedDrawingObjectIds = pastedObjects.map((o) => o.id).toSet();
+      return;
+    }
+
     final pasted = ClipboardService.preparePaste(
       clipboardData.text!,
       event.pastePosition,
     );
     if (pasted != null) {
       _pushToUndoStack(event, emit, state);
+      final newNodes = Map<String, NodeInstance>.from(state.nodes);
       for (var node in pasted) {
         newNodes[node.id] = node;
       }
       emit(state.copyWith(nodes: newNodes));
     }
+  }
+
+  /// IDs of the most recently pasted drawing objects, for the data layer to
+  /// select them after a paste (mirrors [consumeLastDuplicatedIds]).
+  Set<String> _lastPastedDrawingObjectIds = {};
+  Set<String> consumeLastPastedDrawingObjectIds() {
+    final ids = _lastPastedDrawingObjectIds;
+    _lastPastedDrawingObjectIds = {};
+    return ids;
   }
 
   void _onSelectionCopied(SelectionCopied e, Emitter<CanvasState> emit) {}
@@ -1094,7 +1135,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       obj is RectangleObject ||
       obj is CircleObject ||
       obj is DiamondObject ||
-      obj is ParallelogramObject;
+      obj is ParallelogramObject ||
+      obj is TextObject;
 
   /// Reads the current per-shape [TextStyle] for a font-bearing shape, or null.
   static TextStyle? _shapeTextStyle(DrawingObject obj) {
@@ -1102,6 +1144,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     if (obj is CircleObject) return obj.textStyle;
     if (obj is DiamondObject) return obj.textStyle;
     if (obj is ParallelogramObject) return obj.textStyle;
+    if (obj is TextObject) return obj.style;
     return null;
   }
 
@@ -1111,6 +1154,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     if (obj is CircleObject) return obj.fontCustomized;
     if (obj is DiamondObject) return obj.fontCustomized;
     if (obj is ParallelogramObject) return obj.fontCustomized;
+    // A text box owns its font on [style], so it's effectively always customized.
+    if (obj is TextObject) return true;
     return false;
   }
 
@@ -1149,10 +1194,16 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         color: current?.color,
       );
 
-      updatedObjects[id] = (obj as dynamic).copyWith(
-        textStyle: newStyle,
-        fontCustomized: true,
-      ) as DrawingObject;
+      if (obj is TextObject) {
+        // TextObject carries its font on [style] (no fontCustomized flag); the
+        // font control edits it directly.
+        updatedObjects[id] = obj.copyWith(style: newStyle);
+      } else {
+        updatedObjects[id] = (obj as dynamic).copyWith(
+          textStyle: newStyle,
+          fontCustomized: true,
+        ) as DrawingObject;
+      }
     }
 
     _emitWithHistory(
@@ -1169,6 +1220,8 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     for (final id in event.selectedIds) {
       final obj = updatedObjects[id];
       if (obj == null || !_hasFont(obj)) continue;
+      // A text box has no global-default fallback, so there's nothing to reset.
+      if (obj is TextObject) continue;
 
       // Preserve any explicit text color but drop the family/size override and
       // clear the customized flag so the shape follows the global default.

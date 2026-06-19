@@ -24,6 +24,21 @@ const String kEditorDefaultFontFamily = 'Courier';
 /// The font size applied to shape text when nothing else has been chosen.
 const double kEditorDefaultFontSize = 16.0;
 
+/// Sane bounds for a font size. Guards against corrupt persisted values — an
+/// earlier resize bug could blow a font size up to ~1e31, which poisons text
+/// layout. Out-of-range or non-finite sizes are clamped on deserialization.
+const double kMinFontSize = 1.0;
+const double kMaxFontSize = 2000.0;
+
+/// Clamps a deserialized font size into [kMinFontSize, kMaxFontSize], returning
+/// null when no usable value was stored (so callers can fall back to a default).
+double? _sanitizeFontSize(num? raw) {
+  if (raw == null) return null;
+  final v = raw.toDouble();
+  if (!v.isFinite) return null;
+  return v.clamp(kMinFontSize, kMaxFontSize);
+}
+
 /// The color used for shape text. Font customization controls family/size only;
 /// color continues to come from the existing color pickers.
 const Color kDefaultTextColor = Colors.white;
@@ -67,7 +82,7 @@ TextStyle? _textStyleFromJson(Object? raw) {
   final ts = raw as Map<String, dynamic>;
   return TextStyle(
     fontFamily: ts['fontFamily'] as String?,
-    fontSize: (ts['fontSize'] as num?)?.toDouble(),
+    fontSize: _sanitizeFontSize(ts['fontSize'] as num?),
     color: ts['color'] != null ? Color(ts['color'] as int) : null,
   );
 }
@@ -1184,7 +1199,11 @@ class TextObject extends DrawingObject {
     'type': 'text',
     'rect': _rect.toJson(),
     'text': text,
-    'style': {'fontSize': style.fontSize, 'color': style.color?.value},
+    'style': {
+      'fontFamily': style.fontFamily,
+      'fontSize': style.fontSize,
+      'color': style.color?.value,
+    },
     'isSelected': isSelected,
     'angle': angle,
     'creationZoom': creationZoom,
@@ -1197,7 +1216,9 @@ class TextObject extends DrawingObject {
       rect: JSONRect.fromJson(json['rect']),
       text: json['text'] ?? 'Text',
       style: TextStyle(
-        fontSize: styleJson?['fontSize'] as double? ?? 16,
+        fontFamily: styleJson?['fontFamily'] as String?,
+        fontSize: _sanitizeFontSize(styleJson?['fontSize'] as num?) ??
+            kEditorDefaultFontSize,
         color: styleJson?['color'] != null
             ? Color(styleJson!['color'] as int)
             : Colors.white,
@@ -1274,6 +1295,38 @@ class SvgObject extends DrawingObject {
       angle: angle ?? this.angle,
       creationZoom: creationZoom ?? this.creationZoom,
     );
+  }
+}
+
+/// Reconstructs a [DrawingObject] from its serialized [json] using the `type`
+/// discriminator written by each subclass's `toJson`. Returns null for unknown
+/// or non-round-trippable types (e.g. `svg`, whose runtime PictureInfo isn't
+/// serialized). Mirrors the type switch used when loading a project so copy/
+/// paste and load stay in sync.
+DrawingObject? drawingObjectFromJson(Map<String, dynamic> json) {
+  switch (json['type']) {
+    case 'rectangle':
+      return RectangleObject.fromJson(json);
+    case 'circle':
+      return CircleObject.fromJson(json);
+    case 'diamond':
+      return DiamondObject.fromJson(json);
+    case 'parallelogram':
+      return ParallelogramObject.fromJson(json);
+    case 'fork_join':
+      return ForkJoinObject.fromJson(json);
+    case 'arrow':
+      return ArrowObject.fromJson(json);
+    case 'line':
+      return LineObject.fromJson(json);
+    case 'pencil_stroke':
+      return PencilStrokeObject.fromJson(json);
+    case 'figure':
+      return FigureObject.fromJson(json);
+    case 'text':
+      return TextObject.fromJson(json);
+    default:
+      return null;
   }
 }
 

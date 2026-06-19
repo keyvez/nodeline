@@ -176,7 +176,7 @@ class _MiniMapPainter extends CustomPainter {
       } else if (obj is CircleObject) {
         _drawShapeEllipse(canvas, rectToMiniMap(obj.rect));
       } else if (obj is TextObject) {
-        _drawTextIndicator(canvas, rectToMiniMap(obj.rect));
+        _drawTextIndicator(canvas, rectToMiniMap(_textVisualRect(obj)));
       } else if (obj is ArrowObject) {
         final arrow = obj;
         final resolvedStart = _resolveAttachment(arrow.startAttachment, arrow.start);
@@ -252,12 +252,45 @@ class _MiniMapPainter extends CustomPainter {
     double maxX = double.negativeInfinity;
     double maxY = double.negativeInfinity;
 
+    void include(Offset p) {
+      minX = min(minX, p.dx);
+      minY = min(minY, p.dy);
+      maxX = max(maxX, p.dx);
+      maxY = max(maxY, p.dy);
+    }
+
     for (final obj in drawingObjects.values) {
-      final r = obj.rect;
-      minX = min(minX, r.left);
-      minY = min(minY, r.top);
-      maxX = max(maxX, r.right);
-      maxY = max(maxY, r.bottom);
+      // Arrows/lines: use the resolved on-screen geometry, not the raw rect.
+      // A connector's persisted start/end can be stale (an endpoint left
+      // behind when a connected box moved), so obj.rect can extend far from
+      // where the connector is actually drawn — which would balloon the
+      // minimap bounds and shrink the real diagram to a dot. Mirror the same
+      // renderedPath/resolved-attachment geometry used to draw it below.
+      if (obj is ArrowObject) {
+        final rendered = obj.renderedPath;
+        if (rendered != null && rendered.length >= 2) {
+          for (final p in rendered) {
+            include(p);
+          }
+        } else {
+          include(_resolveAttachment(obj.startAttachment, obj.start));
+          include(_resolveAttachment(obj.endAttachment, obj.end));
+          if (obj.waypoints != null) {
+            for (final wp in obj.waypoints!) {
+              include(wp);
+            }
+          }
+        }
+        continue;
+      }
+      if (obj is LineObject) {
+        include(_resolveAttachment(obj.startAttachment, obj.start));
+        include(_resolveAttachment(obj.endAttachment, obj.end));
+        continue;
+      }
+      final r = obj is TextObject ? _textVisualRect(obj) : obj.rect;
+      include(r.topLeft);
+      include(r.bottomRight);
     }
 
     if (minX > maxX) return Rect.zero;
@@ -304,6 +337,24 @@ class _MiniMapPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.5;
     canvas.drawOval(visibleRect, borderPaint);
+  }
+
+  /// The rect the text actually occupies on the canvas. A [TextObject]'s [rect]
+  /// only bounds the layout width; the painted glyphs (especially large fonts)
+  /// can overflow it vertically and horizontally. The main canvas paints the
+  /// text from [rect].topLeft using [layoutPainter], so the visible extent is
+  /// the union of the rect and the laid-out painter size. Using this keeps big
+  /// text from collapsing to a dot — and from being dropped out of the
+  /// minimap's overall bounds.
+  Rect _textVisualRect(TextObject obj) {
+    final painter = obj.layoutPainter();
+    final painted = Rect.fromLTWH(
+      obj.rect.left,
+      obj.rect.top,
+      painter.width,
+      painter.height,
+    );
+    return obj.rect.expandToInclude(painted);
   }
 
   void _drawTextIndicator(Canvas canvas, Rect miniRect) {

@@ -192,6 +192,14 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     _autoLayoutReqSub = _canvasBloc.tidyRequests.listen((_) {
       if (mounted) _applyAutoLayout();
     });
+    // Rebuild when keyboard focus moves so the canvas shortcut bindings can be
+    // suppressed while a text input (incl. external overlays like the flan
+    // annotation box) is focused — letting it receive Cmd/Ctrl+V/C/X natively.
+    FocusManager.instance.addListener(_onFocusChanged);
+  }
+
+  void _onFocusChanged() {
+    if (mounted) setState(() {});
   }
 
   StreamSubscription<void>? _autoLayoutReqSub;
@@ -291,20 +299,33 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     }
     if (obj != null) {
       final rect = obj.rect;
+      String? label;
+      if (obj is RectangleObject) {
+        label = obj.text;
+      } else if (obj is CircleObject) {
+        label = obj.text;
+      } else if (obj is DiamondObject) {
+        label = obj.text;
+      } else if (obj is TextObject) {
+        label = obj.text;
+      }
       return {
         'id': id,
         'kind': 'shape',
         'type': obj.runtimeType.toString(),
+        if (label != null) 'label': label,
         'rect': [rect.left, rect.top, rect.width, rect.height],
       };
     }
     final node = _canvasBloc.state.nodes[id];
     if (node != null) {
+      final nb = getNodeBoundsInWorld(node);
       return {
         'id': id,
         'kind': 'node',
         'heading': node.heading,
         'value': node.value,
+        if (nb != null) 'rect': [nb.left, nb.top, nb.width, nb.height],
       };
     }
     return {'id': id, 'kind': 'unknown'};
@@ -325,6 +346,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   void dispose() {
     GestureBinding.instance.pointerRouter.removeGlobalRoute(_globalPointerRoute);
     _autoLayoutReqSub?.cancel();
+    FocusManager.instance.removeListener(_onFocusChanged);
     _canvasFocusNode.dispose();
     _kineticTimer?.cancel();
     _shapeTextController?.dispose();
@@ -650,6 +672,71 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     }
 
     return false;
+  }
+
+  /// True when a text input currently holds the keyboard focus — including
+  /// inputs we don't own (e.g. the flan annotation overlay, dialogs, the
+  /// Mermaid/Text-to-Diagram fields). When one is focused the canvas must NOT
+  /// claim Cmd/Ctrl+V (and C/X) as shortcuts, or it swallows the paste before
+  /// the field receives it. `_isEditingText`/`_editingShapeObject` only cover
+  /// our own editors, so this catches everything else.
+  bool get _textInputHasFocus {
+    final focus = FocusManager.instance.primaryFocus;
+    final ctx = focus?.context;
+    if (ctx == null) return false;
+    return ctx.widget is EditableText ||
+        ctx.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
+  /// Copies the current selection to the clipboard. Prefers the diagram's
+  /// drawing objects (shapes/connectors/text); falls back to the node-editor
+  /// clipboard when only nodes are selected. Returns true if anything was
+  /// copied.
+  Future<bool> _copySelection(
+      CanvasState canvasState, SelectionState selectionState) async {
+    final selectedDrawing = selectionState.selectedDrawingObjectIds
+        .map((id) => canvasState.drawingObjects[id])
+        .whereType<DrawingObject>()
+        .toList();
+    if (selectedDrawing.isNotEmpty) {
+      final copied = await ClipboardService.copyDrawingObjects(selectedDrawing);
+      return copied != null;
+    }
+    final copied = await ClipboardService.copySelection(
+      allNodes: canvasState.nodes,
+      selectedNodeIds: selectionState.selectedNodeIds,
+    );
+    return copied != null;
+  }
+
+  /// Pastes clipboard contents at the current cursor position and selects any
+  /// newly pasted drawing objects.
+  void _pasteAtCursor(CanvasState canvasState) {
+    final worldPos = screenToWorld(
+          _lastFocalPoint,
+          canvasState.viewportOffset,
+          canvasState.viewportZoom,
+        ) ??
+        Offset.zero;
+    _canvasBloc.add(SelectionPasted(pastePosition: worldPos));
+    // The paste resolves asynchronously (it awaits a clipboard read), so the
+    // pasted IDs aren't available this frame. Poll a few times for them, then
+    // select the new objects so they can be moved/styled immediately.
+    _selectPastedObjectsWhenReady(8);
+  }
+
+  void _selectPastedObjectsWhenReady(int attemptsLeft) {
+    final pastedIds = _canvasBloc.consumeLastPastedDrawingObjectIds();
+    if (pastedIds.isNotEmpty) {
+      if (mounted) {
+        _selectionBloc.add(SelectionReplaced(drawingObjectIds: pastedIds));
+      }
+      return;
+    }
+    if (attemptsLeft <= 0 || !mounted) return;
+    Future.delayed(const Duration(milliseconds: 16), () {
+      if (mounted) _selectPastedObjectsWhenReady(attemptsLeft - 1);
+    });
   }
 
   void _onPointerDown(PointerDownEvent event) {
@@ -1013,7 +1100,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     // so that double-tapping near an edge where an arrow overlaps still
     // enters text editing for the shape underneath.
     for (final obj in objects.toList().reversed) {
-      if (obj is TextObject && obj.rect.inflate(hitPadding).contains(worldPos)) {
+      if (obj is TextObject &&
+          _textHitRect(obj).inflate(hitPadding).contains(worldPos)) {
         _beginTextEditing(existingObject: obj);
         return;
       }
@@ -1260,8 +1348,16 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         List<Offset>? waypoints;
         if (pathType == LinkPathType.orthogonal) {
           final obstacles = _collectObstacles(excludeId: objectId);
-          final startObjRect = handle == Handle.arrowStart ? null : _getAttachedObjectRect(object.startAttachment);
-          final endObjRect = handle == Handle.arrowEnd ? null : _getAttachedObjectRect(object.endAttachment);
+          // The dragged endpoint will attach to whatever it's hovering on drop,
+          // so route the preview against that target's rect (not null) — this
+          // is what the final render does, so the preview matches the drop.
+          final draggedEndRect = _getSnapPointObjectRect(_hoveredSnapPoint);
+          final startObjRect = handle == Handle.arrowStart
+              ? draggedEndRect
+              : _getAttachedObjectRect(object.startAttachment);
+          final endObjRect = handle == Handle.arrowEnd
+              ? draggedEndRect
+              : _getAttachedObjectRect(object.endAttachment);
           waypoints = OrthogonalRouter.route(
             start: tempStart,
             end: tempEnd,
@@ -1270,6 +1366,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
             endObjectRect: endObjRect,
             devicePixelRatio: MediaQuery.of(context).devicePixelRatio,
             zoom: _canvasBloc.state.viewportZoom,
+            existingSegments: _collectRoutedSegments(excludeId: objectId),
           );
         }
 
@@ -1413,14 +1510,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       dynamic updatedObject;
       if (object is TextObject) {
         if (newRect.shortestSide < 10.0) return;
-        // Scale font proportionally with the rect height.
-        final originalHeight = _originalResizeRect!.height;
-        final scale = originalHeight > 0 ? newRect.height / originalHeight : 1.0;
-        final newFontSize = (object.style.fontSize ?? 16) * scale;
-        updatedObject = object.copyWith(
-          rect: newRect,
-          style: object.style.copyWith(fontSize: newFontSize),
-        );
+        // Resizing the box only changes the rect; the font size is governed by
+        // the font size setting, not the box dimensions.
+        updatedObject = object.copyWith(rect: newRect);
       } else {
         updatedObject = (object as dynamic).copyWith(rect: newRect);
       }
@@ -1456,6 +1548,23 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     return obstacles;
   }
 
+  /// The rect a [TextObject] actually occupies on screen. Its [rect] only bounds
+  /// the layout width; large text overflows it, so hit-testing against the bare
+  /// rect makes big text unselectable. The canvas paints from [rect].topLeft via
+  /// [layoutPainter], so the clickable extent is the union of the rect and the
+  /// laid-out painter size.
+  Rect _textHitRect(TextObject obj) {
+    final painter = obj.layoutPainter();
+    return obj.rect.expandToInclude(
+      Rect.fromLTWH(
+        obj.rect.left,
+        obj.rect.top,
+        painter.width,
+        painter.height,
+      ),
+    );
+  }
+
   Rect? _getAttachedObjectRect(ObjectAttachment? attachment) {
     if (attachment == null) return null;
     final canvasState = _canvasBloc.state;
@@ -1463,6 +1572,33 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     final targetObject = canvasState.drawingObjects[attachment.objectId];
     if (targetNode != null) return getNodeBoundsInWorld(targetNode);
     return targetObject?.rect;
+  }
+
+  /// World rect of the object a hovered snap point sits on, or null if none.
+  /// Used so a drag preview routes against the same target rect the endpoint
+  /// will attach to on drop.
+  Rect? _getSnapPointObjectRect(SnapPoint? snapPoint) {
+    if (snapPoint == null) return null;
+    final canvasState = _canvasBloc.state;
+    final targetNode = canvasState.nodes[snapPoint.objectId];
+    if (targetNode != null) return getNodeBoundsInWorld(targetNode);
+    return canvasState.drawingObjects[snapPoint.objectId]?.rect;
+  }
+
+  /// Segments of every other arrow/line's currently-rendered path, so a drag
+  /// preview routes around them exactly as the final render does.
+  List<(Offset, Offset)> _collectRoutedSegments({String? excludeId}) {
+    final segments = <(Offset, Offset)>[];
+    for (final obj in _canvasBloc.state.drawingObjects.values) {
+      if (obj.id == excludeId) continue;
+      if (obj is! ArrowObject) continue;
+      final path = obj.renderedPath;
+      if (path == null || path.length < 2) continue;
+      for (int i = 0; i < path.length - 1; i++) {
+        segments.add((path[i], path[i + 1]));
+      }
+    }
+    return segments;
   }
 
   void _handleObjectDrawing(Offset worldPos, double pressure) {
@@ -2088,7 +2224,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           closestConnectionId = obj.id;
           closestConnectionIndex = i;
         }
-      } else if (obj.rect.inflate(hitPadding).contains(worldPos)) {
+      } else if ((obj is TextObject ? _textHitRect(obj) : obj.rect)
+          .inflate(hitPadding)
+          .contains(worldPos)) {
         // A solid shape body contains the point. Prefer it over a connection
         // only if the shape is above the closest connection in z-order;
         // otherwise the connection (which sits on top) keeps priority.
@@ -2204,11 +2342,50 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     }
 
     for (final obj in _canvasBloc.state.drawingObjects.values) {
-      if (area.overlaps(obj.rect)) {
+      final hitRect = obj is TextObject ? _textHitRect(obj) : _renderedBounds(obj);
+      if (area.overlaps(hitRect)) {
         drawingObjectIds.add(obj.id);
       }
     }
     return (nodeIds, drawingObjectIds);
+  }
+
+  /// The bounds of an object as it is actually drawn on screen. For arrows and
+  /// lines this resolves attachments and prefers the polyline the render object
+  /// drew this frame (`renderedPath`), because an arrow's persisted
+  /// `start`/`end` can be stale (e.g. an endpoint left behind when a connected
+  /// box moved). Using the raw `rect` there makes a marquee far from the visible
+  /// arrow still select it — and balloons the minimap bounds. Everything else
+  /// falls back to `obj.rect`.
+  Rect _renderedBounds(DrawingObject obj) {
+    if (obj is ArrowObject || obj is LineObject) {
+      final rendered = obj is ArrowObject ? obj.renderedPath : null;
+      final points = <Offset>[];
+      if (rendered != null && rendered.length >= 2) {
+        points.addAll(rendered);
+      } else {
+        final (start, end) = _getDynamicEndpoints(obj);
+        points.add(start);
+        points.add(end);
+        if (obj is ArrowObject && obj.waypoints != null) {
+          points.addAll(obj.waypoints!);
+        }
+        final mid = obj is ArrowObject
+            ? obj.midPoint
+            : (obj as LineObject).midPoint;
+        if (mid != null) points.add(mid);
+      }
+      double minX = points.first.dx, minY = points.first.dy;
+      double maxX = points.first.dx, maxY = points.first.dy;
+      for (final p in points) {
+        minX = min(minX, p.dx);
+        minY = min(minY, p.dy);
+        maxX = max(maxX, p.dx);
+        maxY = max(maxY, p.dy);
+      }
+      return Rect.fromLTRB(minX, minY, maxX, maxY);
+    }
+    return obj.rect;
   }
 
   /// Detects which shape (Rectangle, Circle, Diamond) the pointer is over
@@ -2505,6 +2682,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       // a gesture is pending causes "used after disposed" assertions.
       // They will be garbage-collected once all references are released.
       overlayEntry?.remove();
+      // Return keyboard focus to the canvas so single-key tool shortcuts
+      // (V, R, O, …) work again. Without this the dismissed TextField's focus
+      // node lingers as primaryFocus, which keeps the canvas shortcut bindings
+      // suppressed (a text input "has focus") and makes those keys ding.
+      _canvasFocusNode.requestFocus();
     }
 
     overlayEntry = OverlayEntry(
@@ -2549,20 +2731,40 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                 color: Colors.transparent,
                 child: DefaultTextEditingShortcuts(
                   child: IntrinsicWidth(
-                    child: TextField(
-                      controller: textEditingController,
-                      focusNode: focusNode,
-                      style: object.style.copyWith(
-                        fontSize: object.style.fontSize! * zoom,
+                    // Enter submits, Shift+Enter inserts a newline, Escape
+                    // cancels. Handled here because a multi-line TextField
+                    // doesn't fire onSubmitted on Enter.
+                    child: Focus(
+                      onKeyEvent: (node, event) {
+                        if (event is! KeyDownEvent) {
+                          return KeyEventResult.ignored;
+                        }
+                        if (event.logicalKey == LogicalKeyboardKey.escape) {
+                          _submitAndClose();
+                          return KeyEventResult.handled;
+                        }
+                        if (event.logicalKey == LogicalKeyboardKey.enter &&
+                            !HardwareKeyboard.instance.isShiftPressed) {
+                          _submitAndClose();
+                          return KeyEventResult.handled;
+                        }
+                        return KeyEventResult.ignored;
+                      },
+                      child: TextField(
+                        controller: textEditingController,
+                        focusNode: focusNode,
+                        style: object.style.copyWith(
+                          fontSize: object.style.fontSize! * zoom,
+                        ),
+                        maxLines: null,
+                        minLines: 1,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.zero,
+                          isDense: true,
+                        ),
                       ),
-                      maxLines: 1,
-                      autofocus: true,
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.zero,
-                        isDense: true,
-                      ),
-                      onSubmitted: (_) => _submitAndClose(),
                     ),
                   ),
                 ),
@@ -2618,6 +2820,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         );
       }
       overlayEntry?.remove();
+      // Return focus to the canvas so single-key shortcuts work again.
+      _canvasFocusNode.requestFocus();
     }
 
     overlayEntry = OverlayEntry(
@@ -2907,6 +3111,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     // _beginShapeTextEditing replaces them or the widget is disposed.
     // This avoids "used after disposed" errors when gesture callbacks
     // fire on the TextField after we've scheduled its removal.
+    // Return focus to the canvas so single-key shortcuts work again (see note
+    // in the text-tool _submitAndClose).
+    _canvasFocusNode.requestFocus();
   }
 
   /// Called when the canvas widget size changes (e.g. window resize).
@@ -2979,7 +3186,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                 );
 
                 return CallbackShortcuts(
-                  bindings: (_editingShapeObject != null || _isEditingText) ? {} : {
+                  bindings: (_editingShapeObject != null ||
+                          _isEditingText ||
+                          _textInputHasFocus)
+                      ? const {}
+                      : {
                     const SingleActivator(LogicalKeyboardKey.delete): () =>
                       _canvasBloc.add(ObjectsRemoved(
                         nodeIds: selectionState.selectedNodeIds,
@@ -2996,39 +3207,27 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                     const SingleActivator(LogicalKeyboardKey.keyL,
                         control: true, shift: true): _applyAutoLayout,
                     const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () async {
-                      await ClipboardService.copySelection(
-                        allNodes: canvasState.nodes,
-                        selectedNodeIds: selectionState.selectedNodeIds,
-                      );
+                      if (_textInputHasFocus) return;
+                      await _copySelection(canvasState, selectionState);
                     },
                     const SingleActivator(LogicalKeyboardKey.keyC, control: true): () async {
-                      await ClipboardService.copySelection(
-                        allNodes: canvasState.nodes,
-                        selectedNodeIds: selectionState.selectedNodeIds,
-                      );
+                      if (_textInputHasFocus) return;
+                      await _copySelection(canvasState, selectionState);
                     },
                     const SingleActivator(LogicalKeyboardKey.keyV, meta: true): () {
-                      final worldPos = screenToWorld(
-                        _lastFocalPoint,
-                        canvasState.viewportOffset,
-                        canvasState.viewportZoom,
-                      ) ?? Offset.zero;
-                      _canvasBloc.add(SelectionPasted(pastePosition: worldPos));
+                      // A focused text input (incl. external overlays like the
+                      // flan annotation box) must get the paste itself.
+                      if (_textInputHasFocus) return;
+                      _pasteAtCursor(canvasState);
                     },
                     const SingleActivator(LogicalKeyboardKey.keyV, control: true): () {
-                      final worldPos = screenToWorld(
-                        _lastFocalPoint,
-                        canvasState.viewportOffset,
-                        canvasState.viewportZoom,
-                      ) ?? Offset.zero;
-                      _canvasBloc.add(SelectionPasted(pastePosition: worldPos));
+                      if (_textInputHasFocus) return;
+                      _pasteAtCursor(canvasState);
                     },
                     const SingleActivator(LogicalKeyboardKey.keyX, meta: true): () async {
-                      final copied = await ClipboardService.copySelection(
-                        allNodes: canvasState.nodes,
-                        selectedNodeIds: selectionState.selectedNodeIds,
-                      );
-                      if (copied != null) {
+                      if (_textInputHasFocus) return;
+                      final copied = await _copySelection(canvasState, selectionState);
+                      if (copied) {
                         _canvasBloc.add(ObjectsRemoved(
                           nodeIds: selectionState.selectedNodeIds,
                           drawingObjectIds: selectionState.selectedDrawingObjectIds,
@@ -3036,11 +3235,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                       }
                     },
                     const SingleActivator(LogicalKeyboardKey.keyX, control: true): () async {
-                      final copied = await ClipboardService.copySelection(
-                        allNodes: canvasState.nodes,
-                        selectedNodeIds: selectionState.selectedNodeIds,
-                      );
-                      if (copied != null) {
+                      if (_textInputHasFocus) return;
+                      final copied = await _copySelection(canvasState, selectionState);
+                      if (copied) {
                         _canvasBloc.add(ObjectsRemoved(
                           nodeIds: selectionState.selectedNodeIds,
                           drawingObjectIds: selectionState.selectedDrawingObjectIds,
@@ -3419,7 +3616,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                       textAlign: TextAlign.center,
                       textAlignVertical: TextAlignVertical.center,
                       style: _shapeTextStyle.copyWith(
-                        fontSize: _shapeTextStyle.fontSize! * zoom,
+                        fontSize: (_shapeTextStyle.fontSize ?? 16) * zoom,
                       ),
                       maxLines: null,
                       autofocus: true,

@@ -814,18 +814,20 @@ class FlowDrawEditorRenderBox extends RenderBox
             _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle, obj.fontCustomized);
           }
         } else if (obj is RectangleObject) {
-          final dpr = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-          final objCornerRadius = obj.borderRadius > 0 ? obj.borderRadius : 10.0 * dpr / zoom;
-          final rrect =
-          RRect.fromRectAndRadius(obj.rect, Radius.circular(objCornerRadius));
+          // Apple-style rounded superellipse (squircle) corners. Radius is a
+          // fixed world-space value (no devicePixelRatio scaling) so the look is
+          // consistent across displays and zoom levels.
+          final objCornerRadius =
+              obj.borderRadius > 0 ? obj.borderRadius : 12.0 / zoom;
+          final squircle = _squircleFor(obj.rect, objCornerRadius);
           final rectFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
           final rectStroke = obj.strokeColor != null ? (Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = objectPaint.strokeWidth) : objectPaint;
-          canvas.drawRRect(rrect, rectFill);
+          canvas.drawRSuperellipse(squircle, rectFill);
           if (obj.lineStyle == LineStyle.solid) {
-            canvas.drawRRect(rrect, rectStroke);
+            canvas.drawRSuperellipse(squircle, rectStroke);
           } else {
-            final rrectPath = Path()..addRRect(rrect);
-            _paintStyledPath(canvas, rrectPath, rectStroke, obj.lineStyle, seed: obj.id.hashCode);
+            final squirclePath = Path()..addRSuperellipse(squircle);
+            _paintStyledPath(canvas, squirclePath, rectStroke, obj.lineStyle, seed: obj.id.hashCode);
           }
           if (obj.text != null && obj.text!.isNotEmpty && !obj.isEditing) {
             _paintShapeText(canvas, obj.rect, obj.text!, obj.textStyle, obj.fontCustomized);
@@ -1991,6 +1993,14 @@ class FlowDrawEditorRenderBox extends RenderBox
   }
 
   /// Builds the orthogonal path without drawing it.
+  /// Builds an Apple-style rounded-superellipse (squircle) for [rect] with the
+  /// given corner [radius], clamped so it never exceeds half the smaller side
+  /// (an over-large radius produces a degenerate/invalid superellipse).
+  static RSuperellipse _squircleFor(Rect rect, double radius) {
+    final r = min(radius, min(rect.width, rect.height) / 2);
+    return RSuperellipse.fromRectAndRadius(rect, Radius.circular(max(0, r)));
+  }
+
   Path _buildOrthogonalPath(Offset start, Offset end, {List<Offset>? waypoints}) {
     final allPoints = [start, ...?waypoints, end];
 
@@ -2009,8 +2019,8 @@ class FlowDrawEditorRenderBox extends RenderBox
       return path;
     }
 
-    final dprForRadius = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-    final double cornerRadius = 30.0 * dprForRadius / zoom;
+    // Fixed world-space radius (see _paintOrthogonalPath for why dpr is gone).
+    final double cornerRadius = 12.0 / zoom;
     final Path path = Path();
     path.moveTo(allPoints[0].dx, allPoints[0].dy);
 
@@ -2035,14 +2045,38 @@ class FlowDrawEditorRenderBox extends RenderBox
         continue;
       }
 
-      final arcStart = Offset(curr.dx - dirIn.dx * r, curr.dy - dirIn.dy * r);
-      final arcEnd = Offset(curr.dx + dirOut.dx * r, curr.dy + dirOut.dy * r);
-      path.lineTo(arcStart.dx, arcStart.dy);
-      path.arcToPoint(arcEnd, radius: Radius.circular(r), clockwise: cross > 0);
+      _addSquircleCorner(path, curr, r, dirIn, dirOut);
     }
 
     path.lineTo(allPoints.last.dx, allPoints.last.dy);
     return path;
+  }
+
+  /// Appends a continuous "squircle" corner to [path] at vertex [corner] where
+  /// the line turns from direction [dirIn] to [dirOut]. Instead of a constant-
+  /// radius circular arc, this uses a cubic Bézier whose control points sit at
+  /// the corner vertex, giving the flatter-then-rounder curvature of an Apple
+  /// rounded-superellipse — matching the squircle node corners. [r] is the
+  /// (already-clamped) corner radius; the curve spans 1.1·r out along each
+  /// segment so the smoothing reads as continuous rather than a tight arc.
+  static void _addSquircleCorner(Path path, Offset corner, double r,
+      Offset dirIn, Offset dirOut) {
+    // Tangent points one radius out along each segment. r is already clamped to
+    // half the shorter adjacent segment by the caller, so this never overshoots
+    // into a neighbouring corner. The squircle character comes from the cubic's
+    // control-point bias, not from over-extending the tangents.
+    final ext = r;
+    final start = Offset(corner.dx - dirIn.dx * ext, corner.dy - dirIn.dy * ext);
+    final end = Offset(corner.dx + dirOut.dx * ext, corner.dy + dirOut.dy * ext);
+    path.lineTo(start.dx, start.dy);
+    // Control points biased toward the corner vertex (k≈0.83) approximate the
+    // superellipse profile better than the circular k=0.5523.
+    const k = 0.83;
+    final c1 = Offset(start.dx + (corner.dx - start.dx) * k,
+        start.dy + (corner.dy - start.dy) * k);
+    final c2 = Offset(end.dx + (corner.dx - end.dx) * k,
+        end.dy + (corner.dy - end.dy) * k);
+    path.cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, end.dx, end.dy);
   }
 
   void _paintOrthogonalPath(
@@ -2071,9 +2105,13 @@ class FlowDrawEditorRenderBox extends RenderBox
       return;
     }
 
-    // Multi-segment path with rounded corners
-    final dprForRadius = WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
-    final double cornerRadius = 30.0 * dprForRadius / zoom;
+    // Multi-segment path with rounded corners. Radius is a fixed world-space
+    // value (NOT scaled by devicePixelRatio — that made corners twice as round
+    // on Retina as on a 1x display, and the oversized bulge made two nearby
+    // bends bow into each other and enclose a lens/eye artifact where routes
+    // cross). It's still clamped per-corner to half the shorter adjacent
+    // segment below, so tight corners stay tight.
+    final double cornerRadius = 12.0 / zoom;
     final Path path = Path();
     path.moveTo(allPoints[0].dx, allPoints[0].dy);
 
@@ -2105,33 +2143,15 @@ class FlowDrawEditorRenderBox extends RenderBox
         (next.dy - curr.dy) / segNext,
       );
 
-      // Check if points are collinear (no actual turn) — skip arc
+      // Check if points are collinear (no actual turn) — skip the corner
       final cross = dirIn.dx * dirOut.dy - dirIn.dy * dirOut.dx;
       if (cross.abs() < 0.01) {
         path.lineTo(curr.dx, curr.dy);
         continue;
       }
 
-      // Points where the arc starts/ends
-      final arcStart = Offset(
-        curr.dx - dirIn.dx * r,
-        curr.dy - dirIn.dy * r,
-      );
-      final arcEnd = Offset(
-        curr.dx + dirOut.dx * r,
-        curr.dy + dirOut.dy * r,
-      );
-
-      // Draw line to arc start
-      path.lineTo(arcStart.dx, arcStart.dy);
-
-      final clockwise = cross > 0;
-
-      path.arcToPoint(
-        arcEnd,
-        radius: Radius.circular(r),
-        clockwise: clockwise,
-      );
+      // Squircle (continuous) corner matching the rounded-superellipse nodes.
+      _addSquircleCorner(path, curr, r, dirIn, dirOut);
     }
 
     // Final segment to end
