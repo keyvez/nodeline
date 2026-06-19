@@ -670,44 +670,75 @@ class FlowDrawEditorRenderBox extends RenderBox
       return minI; // 0=left,1=right,2=top,3=bottom
     }
 
-    Offset _sideRelative(int side, double t) {
-      final s = 0.15 + t * 0.70;
+    // The free coordinate along a side (0..1): dx for top/bottom, dy for
+    // left/right. This is the position the user dropped at.
+    double _alongSide(int side, Offset rel) =>
+        (side == 2 || side == 3) ? rel.dx : rel.dy;
+
+    // Build a relativePosition on [side] at raw along-side coordinate [t]
+    // (no compression — keeps the endpoint exactly where computed).
+    Offset _sideRelativeRaw(int side, double t) {
       switch (side) {
-        case 0: return Offset(0.0, s);
-        case 1: return Offset(1.0, s);
-        case 2: return Offset(s, 0.0);
-        case 3: return Offset(s, 1.0);
-        default: return Offset(0.5, 0.5);
+        case 0: return Offset(0.0, t); // left
+        case 1: return Offset(1.0, t); // right
+        case 2: return Offset(t, 0.0); // top
+        case 3: return Offset(t, 1.0); // bottom
+        default: return const Offset(0.5, 0.5);
       }
     }
 
-    // Collect endpoints: key='objectId:side' -> list of (arrowId, 'start'|'end')
-    final sideGroups = <String, List<(String, String)>>{};
+    // Collect endpoints per (objectId, side), keeping each one's stored
+    // along-side position so we can RESPECT where the user placed it.
+    final sideGroups = <String, List<(String end, double t)>>{};
+    void addEndpoint(String arrowId, String which, ObjectAttachment att) {
+      if (_attachedRect(att) == null) return;
+      final side = _sideOf(att.relativePosition);
+      final t = _alongSide(side, att.relativePosition);
+      sideGroups
+          .putIfAbsent('${att.objectId}:$side', () => [])
+          .add(('$arrowId:$which', t));
+    }
+
     for (final obj in drawingObjects.values) {
       if (obj is! ArrowObject) continue;
-      final sa = obj.startAttachment;
-      final ea = obj.endAttachment;
-      if (sa != null && _attachedRect(sa) != null) {
-        final side = _sideOf(sa.relativePosition);
-        sideGroups.putIfAbsent('${sa.objectId}:$side', () => []).add((obj.id, 'start'));
+      if (obj.startAttachment != null) {
+        addEndpoint(obj.id, 'start', obj.startAttachment!);
       }
-      if (ea != null && _attachedRect(ea) != null) {
-        final side = _sideOf(ea.relativePosition);
-        sideGroups.putIfAbsent('${ea.objectId}:$side', () => []).add((obj.id, 'end'));
+      if (obj.endAttachment != null) {
+        addEndpoint(obj.id, 'end', obj.endAttachment!);
       }
     }
 
-    // For groups with 2+ arrows on same side, spread them evenly.
+    // Respect dropped positions; only nudge endpoints that genuinely OVERLAP.
+    // Sort each side's endpoints by their stored position, then walk left→right
+    // pushing any that are closer than [minGap] just far enough apart. Endpoints
+    // with enough room keep exactly where the user put them.
+    const double minGap = 0.12; // min spacing along a side (fraction)
     for (final entry in sideGroups.entries) {
-      final parts = entry.key.split(':');
-      final side = int.parse(parts.last);
-      final members = entry.value;
+      final side = int.parse(entry.key.split(':').last);
+      final members = [...entry.value]..sort((a, b) => a.$2.compareTo(b.$2));
       if (members.length < 2) continue;
-      final n = members.length;
-      for (int j = 0; j < n; j++) {
-        final t = n == 1 ? 0.5 : j / (n - 1).toDouble();
-        final rel = _sideRelative(side, t);
-        relOverrides['${members[j].$1}:${members[j].$2}'] = rel;
+
+      final adjusted = <double>[];
+      var prev = double.negativeInfinity;
+      for (final m in members) {
+        var t = m.$2;
+        if (t < prev + minGap) t = prev + minGap; // overlapping → push along
+        adjusted.add(t);
+        prev = t;
+      }
+      // If pushing ran past the end, shift the whole run back to fit in [0,1].
+      final overflow = adjusted.last - 1.0;
+      if (overflow > 0) {
+        for (var i = 0; i < adjusted.length; i++) {
+          adjusted[i] = (adjusted[i] - overflow).clamp(0.0, 1.0);
+        }
+      }
+      // Only emit overrides for endpoints we actually moved.
+      for (var i = 0; i < members.length; i++) {
+        if ((adjusted[i] - members[i].$2).abs() > 1e-4) {
+          relOverrides[members[i].$1] = _sideRelativeRaw(side, adjusted[i]);
+        }
       }
     }
 
