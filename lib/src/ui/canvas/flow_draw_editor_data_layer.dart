@@ -3657,38 +3657,43 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                 color: Colors.transparent,
                 // Scale the whole editor by zoom so the controller's per-run
                 // styles (in world-unit font sizes) render at the correct
-                // on-screen size without having to pre-multiply each run.
+                // on-screen size without having to pre-multiply each run. The
+                // scaled content is sized to the node's exact world rect (no
+                // Center shrink) so the editable area fills the visible box.
                 child: Transform.scale(
                   scale: zoom,
                   alignment: Alignment.center,
-                  child: Center(
-                    child: SizedBox(
-                      width: shapeObject.rect.width,
-                      child: Focus(
-                        onKeyEvent: (node, event) {
-                          if (event is KeyDownEvent &&
-                              event.logicalKey == LogicalKeyboardKey.enter &&
-                              !HardwareKeyboard.instance.isShiftPressed &&
-                              !HardwareKeyboard.instance.isAltPressed) {
-                            _finishShapeTextEditing();
-                            return KeyEventResult.handled;
-                          }
-                          return KeyEventResult.ignored;
-                        },
-                        child: TextField(
-                          key: const ValueKey('shape_text_editor'),
-                          controller: _shapeTextController,
-                          focusNode: _shapeTextFocusNode,
-                          textAlign: TextAlign.center,
-                          textAlignVertical: TextAlignVertical.center,
-                          style: _shapeTextStyle,
-                          maxLines: null,
-                          autofocus: true,
-                          decoration: const InputDecoration(
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 4),
-                            isDense: true,
-                          ),
+                  child: SizedBox(
+                    width: shapeObject.rect.width,
+                    height: shapeObject.rect.height,
+                    child: Focus(
+                      onKeyEvent: (node, event) {
+                        if (event is KeyDownEvent &&
+                            event.logicalKey == LogicalKeyboardKey.enter &&
+                            !HardwareKeyboard.instance.isShiftPressed &&
+                            !HardwareKeyboard.instance.isAltPressed) {
+                          _finishShapeTextEditing();
+                          return KeyEventResult.handled;
+                        }
+                        return KeyEventResult.ignored;
+                      },
+                      child: TextField(
+                        key: const ValueKey('shape_text_editor'),
+                        controller: _shapeTextController,
+                        focusNode: _shapeTextFocusNode,
+                        textAlign: TextAlign.center,
+                        textAlignVertical: TextAlignVertical.center,
+                        style: _shapeTextStyle,
+                        // Fill the node vertically so the editable/selection
+                        // area matches the visible box edge-to-edge.
+                        expands: true,
+                        maxLines: null,
+                        minLines: null,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.zero,
+                          isDense: true,
                         ),
                       ),
                     ),
