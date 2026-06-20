@@ -2324,19 +2324,46 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   /// with relative position. A rough guide stroke rarely lands exactly on a
   /// box, so this picks the CLOSEST shape within a generous radius (and always
   /// wins when the point is inside one) rather than demanding a tight hit.
+  ///
+  /// Ranking prefers the *innermost* shape: when an endpoint lands inside a
+  /// frame ([FigureObject]) that contains a node, the node wins — otherwise the
+  /// edge would attach to the frame instead of the node inside it. Containers
+  /// are only chosen when nothing smaller is in range.
   SnapPoint? _snapTargetAt(Offset worldPos) {
     final canvasState = _canvasBloc.state;
     // Generous: the endpoints of a sketched path land near, not on, the nodes.
     final tolerance = 80.0 / canvasState.viewportZoom;
     SnapPoint? best;
     double bestDist = double.infinity;
+    double bestArea = double.infinity;
+    bool bestIsContainer = true;
 
-    void consider(String objectId, Rect rect) {
+    void consider(String objectId, Rect rect, {bool isContainer = false}) {
       final inside = rect.contains(worldPos);
       final border = getClosestPointOnRectBorder(worldPos, rect);
       final dist = inside ? 0.0 : (worldPos - border).distance;
-      if (dist > tolerance || dist > bestDist) return;
+      if (dist > tolerance) return;
+      final area = rect.width * rect.height;
+      // Preference order: a non-container beats a container; then nearer wins;
+      // then (when effectively tied on distance, e.g. both contain the point at
+      // dist 0) the smaller/innermost shape wins.
+      const distTie = 0.5;
+      final betterClass = !isContainer && bestIsContainer;
+      final worseClass = isContainer && !bestIsContainer;
+      bool better;
+      if (betterClass) {
+        better = true;
+      } else if (worseClass) {
+        better = false;
+      } else if ((dist - bestDist).abs() <= distTie) {
+        better = area < bestArea;
+      } else {
+        better = dist < bestDist;
+      }
+      if (!better) return;
       bestDist = dist;
+      bestArea = area;
+      bestIsContainer = isContainer;
       best = (
         objectId: objectId,
         worldPosition: border,
@@ -2348,11 +2375,12 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     }
 
     for (final obj in canvasState.drawingObjects.values) {
-      if (obj is RectangleObject ||
+      if (obj is FigureObject) {
+        consider(obj.id, obj.rect, isContainer: true);
+      } else if (obj is RectangleObject ||
           obj is CircleObject ||
           obj is DiamondObject ||
           obj is ParallelogramObject ||
-          obj is FigureObject ||
           obj is SvgObject) {
         consider(obj.id, obj.rect);
       }
