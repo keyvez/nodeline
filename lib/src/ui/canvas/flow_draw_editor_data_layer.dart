@@ -2198,11 +2198,13 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   /// [_currentPencilPoints]) into a routing guide. Returns true if it was
   /// consumed (so the caller should NOT create a freehand stroke).
   ///
-  /// Two outcomes:
-  ///  • Both endpoints sit on/near a shape → create a new orthogonal arrow
-  ///    between them, biased by the simplified stroke.
-  ///  • Endpoints miss shapes but exactly one arrow is selected → re-route that
-  ///    arrow with the stroke as its guide.
+  /// Two outcomes, in priority order:
+  ///  • Exactly one arrow is selected → re-route THAT arrow with the stroke as
+  ///    its guide. Selecting an edge is an explicit "change this one" signal, so
+  ///    it wins even when the stroke's ends happen to land on shapes (otherwise
+  ///    tracing an existing edge would spawn a duplicate).
+  ///  • Otherwise, if both endpoints sit on/near two distinct shapes → create a
+  ///    new orthogonal arrow between them, biased by the simplified stroke.
   bool _tryConsumeStrokeAsGuide(String newId) {
     final raw = _currentPencilPoints
         .map((p) => Offset(p.x, p.y))
@@ -2212,10 +2214,23 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     final guide = _simplifyStroke(raw, _strokeSimplifyToleranceWorld());
     if (guide.length < 2) return false;
 
+    // Case 1: re-route the single selected arrow (takes priority).
+    final selectedIds = _selectionBloc.state.selectedDrawingObjectIds;
+    if (selectedIds.length == 1) {
+      final sel = _canvasBloc.state.drawingObjects[selectedIds.first];
+      if (sel is ArrowObject) {
+        final rerouted = sel.copyWith(
+          pathType: LinkPathType.orthogonal,
+          routeGuide: guide,
+        );
+        _canvasBloc.add(DrawingObjectUpdated(rerouted));
+        return true;
+      }
+    }
+
+    // Case 2: stroke spans two distinct shapes → new guided arrow.
     final startSnap = _snapTargetAt(raw.first);
     final endSnap = _snapTargetAt(raw.last);
-
-    // Case 1: stroke spans two distinct shapes → new guided arrow.
     if (startSnap != null &&
         endSnap != null &&
         startSnap.objectId != endSnap.objectId) {
@@ -2241,20 +2256,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         drawingObjectIds: {arrow.id},
       ));
       return true;
-    }
-
-    // Case 2: re-route the single selected arrow.
-    final selectedIds = _selectionBloc.state.selectedDrawingObjectIds;
-    if (selectedIds.length == 1) {
-      final sel = _canvasBloc.state.drawingObjects[selectedIds.first];
-      if (sel is ArrowObject) {
-        final rerouted = sel.copyWith(
-          pathType: LinkPathType.orthogonal,
-          routeGuide: guide,
-        );
-        _canvasBloc.add(DrawingObjectUpdated(rerouted));
-        return true;
-      }
     }
 
     return false;
