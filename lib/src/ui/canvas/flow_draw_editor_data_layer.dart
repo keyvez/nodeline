@@ -2352,16 +2352,50 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
   /// Applies [guide] to [arrow] as its route guide and re-selects it, so an
   /// immediately-following guide stroke stays in the "re-route selected" case.
+  ///
+  /// Also re-anchors the endpoints to the side of each node the guide actually
+  /// leaves/enters from. A guide that exits the left of the source but keeps a
+  /// right-side attachment would have to double back across the node (which the
+  /// router rejects), so the ports must follow the stroke.
   void _rerouteArrow(ArrowObject arrow, List<Offset> guide) {
+    final startAtt = _attachmentTowardGuide(arrow.startAttachment, guide.first);
+    final endAtt = _attachmentTowardGuide(arrow.endAttachment, guide.last);
     final rerouted = arrow.copyWith(
       pathType: LinkPathType.orthogonal,
       routeGuide: guide,
+      startAttachment: startAtt ?? arrow.startAttachment,
+      endAttachment: endAtt ?? arrow.endAttachment,
     );
     _canvasBloc.add(DrawingObjectUpdated(rerouted));
     _selectionBloc.add(SelectionReplaced(
       nodeIds: const {},
       drawingObjectIds: {arrow.id},
     ));
+  }
+
+  /// Recomputes [attachment] so its relative position sits on the node border
+  /// nearest [guidePoint] — i.e. the port faces the direction the guide leaves
+  /// or enters. Returns null if the attachment or its rect can't be resolved
+  /// (the caller keeps the original).
+  ObjectAttachment? _attachmentTowardGuide(
+      ObjectAttachment? attachment, Offset guidePoint) {
+    if (attachment == null) return null;
+    final id = attachment.objectId;
+    final node = _canvasBloc.state.nodes[id];
+    final rect = node != null
+        ? getNodeBoundsInWorld(node)
+        : _canvasBloc.state.drawingObjects[id]?.rect;
+    if (rect == null) return null;
+    final border = getClosestPointOnRectBorder(guidePoint, rect);
+    return ObjectAttachment(
+      objectId: id,
+      relativePosition: Offset(
+        ((border.dx - rect.left) / rect.width.clamp(0.001, double.infinity))
+            .clamp(0.0, 1.0),
+        ((border.dy - rect.top) / rect.height.clamp(0.001, double.infinity))
+            .clamp(0.0, 1.0),
+      ),
+    );
   }
 
   /// Simplification tolerance in world units, scaled so the felt tolerance is
