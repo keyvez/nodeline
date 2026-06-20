@@ -689,17 +689,15 @@ class OrthogonalRouter {
   /// coincident points so it reads as a tidy orthogonal route.
   static List<Offset>? _guideToOrthogonalPath(
       Offset start, Offset end, List<Offset> guide, List<Rect> obstacles) {
-    // Smooth-then-trace: keep only the guide's INTERIOR vertices as the corridor
-    // (its first/last points are just the approach into each node, which the
-    // stub/assemble machinery handles). Then clamp those interior anchors into
-    // the route's span along the connection axis so a big overshoot loop becomes
-    // a bend at the span edge instead of a wild straight drop into the node.
+    // Trace-then-smooth: follow the guide faithfully. Use the guide's INTERIOR
+    // vertices as the corridor (first/last are the node approach, handled by the
+    // stub machinery) but keep ALL of them — no aggressive pre-trimming. Clamp
+    // only extreme along-axis overshoot so a vertex looping far past an endpoint
+    // becomes a bend at the span edge instead of a long straight drop into the
+    // node; the perpendicular bow is preserved.
     final interior = guide.length > 2 ? guide.sublist(1, guide.length - 1) : const <Offset>[];
     final clamped = _clampAnchorsToSpan(start, end, interior);
-    if (clamped.isEmpty) {
-      // Nothing meaningful left after smoothing — let A* (guide-biased) handle it.
-      return null;
-    }
+    if (clamped.isEmpty) return null;
 
     final anchors = <Offset>[start, ...clamped, end];
 
@@ -792,10 +790,10 @@ class OrthogonalRouter {
     return cleaned.sublist(1, cleaned.length - 1);
   }
 
-  // Jogs shorter than this (world units) are stroke noise, not intended bends.
-  // Kept small so it only removes true noise — a larger value erased real
-  // structural bends and degenerated the guide to a (blocked) straight line.
-  static const double minJog = 8.0;
+  // Light post-trace smoothing: merge perpendicular jogs shorter than this so
+  // the faithfully-traced path reads clean (removes stair-stepping) without
+  // erasing genuine structural bends, which are much longer.
+  static const double minJog = 20.0;
 
   /// Flattens short perpendicular jogs. An interior point [i] whose two adjacent
   /// segments are both short and run on opposite axes (a little step out and
@@ -863,7 +861,19 @@ class OrthogonalRouter {
         return [m1, m2, b];
       }
     }
-    return null;
+    // Last resort: full visibility-graph A* from a to b around the obstacles.
+    // Handles long descents into a node through stacked boxes that the simple
+    // two-bend offset search can't clear.
+    final cands = _generateCandidates(a, b, obstacles, obstacles);
+    final inner = _astar(a, b, cands, obstacles);
+    if (inner.isEmpty) {
+      // A* found nothing usable unless a/b are already axis-aligned & clear.
+      if ((a.dx - b.dx).abs() < 0.5 || (a.dy - b.dy).abs() < 0.5) {
+        return _segmentHitsAny(a, b, obstacles) ? null : [b];
+      }
+      return null;
+    }
+    return [...inner, b];
   }
 
   /// Clamps each anchor's projection onto the [start]→[end] axis into [0,1]
