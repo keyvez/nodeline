@@ -2284,6 +2284,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   /// Applies [guide] to [arrow] as its route guide and re-selects it, so an
   /// immediately-following guide stroke stays in the "re-route selected" case.
   void _rerouteArrow(ArrowObject arrow, List<Offset> guide) {
+    debugPrint('[guide] reroute arrow=${arrow.id} '
+        'pathType ${arrow.pathType}->orthogonal guidePts=${guide.length} '
+        'guide=$guide');
     final rerouted = arrow.copyWith(
       pathType: LinkPathType.orthogonal,
       routeGuide: guide,

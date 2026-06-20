@@ -82,6 +82,12 @@ class OrthogonalRouter {
     // Inner obstacles: actual shapes with tiny inflation so the path doesn't
     // pass through objects but stubs can still exit cleanly.
     final innerInflated = relevant.map((r) => r.inflate(2.0)).toList();
+    // Same set MINUS the source/target rects. A guide stroke legitimately starts
+    // on the source border and ends on the target border, so validating its
+    // staircase against the full set (which includes those two rects) would
+    // always reject it. The "others" list lets the guide touch its own endpoints
+    // while still avoiding every other shape.
+    final innerInflatedOthers = List<Rect>.of(innerInflated);
     if (startObjectRect != null) innerInflated.add(startObjectRect.inflate(2.0));
     if (endObjectRect != null) innerInflated.add(endObjectRect.inflate(2.0));
 
@@ -165,6 +171,14 @@ class OrthogonalRouter {
     // around it. A 2-point guide is just start→end and adds nothing.
     final hasShapingGuide =
         guide.length >= 3 && _guideDeviates(guide, routeStart, routeEnd);
+    assert(() {
+      if (guide.isNotEmpty) {
+        debugPrint('[router] guidePts=${guide.length} '
+            'shaping=$hasShapingGuide routeStart=$routeStart routeEnd=$routeEnd '
+            'deviates=${guide.length >= 3 ? _guideDeviates(guide, routeStart, routeEnd) : false}');
+      }
+      return true;
+    }());
 
     // ── Phase 2: Fast paths ─────────────────────────────────────────────
     if (!hasShapingGuide) {
@@ -186,7 +200,9 @@ class OrthogonalRouter {
     }
 
     // ── Phase 3: U-turn detection ───────────────────────────────────────
-    if (exitStub != null && _isUTurn(start, exitStub, end)) {
+    // Skipped when a shaping guide is present so the user's stroke isn't
+    // overridden by the reflexive U-turn special case.
+    if (!hasShapingGuide && exitStub != null && _isUTurn(start, exitStub, end)) {
       final inner = _buildUTurnWaypoints(
           routeStart, routeEnd, exitStub - start, startObjectRect, endObjectRect);
       return _assemble(start, exitStub, inner, entryStub, end, innerInflated);
@@ -199,8 +215,14 @@ class OrthogonalRouter {
     // stroke" behaviour. Otherwise fall through to A* (still guide-biased), so
     // the route stays valid even when the stroke cuts a corner too tight.
     if (hasShapingGuide) {
-      final staircase =
-          _guideToOrthogonalPath(routeStart, routeEnd, guide, innerInflated);
+      // Validate the staircase against everything EXCEPT the source/target rects
+      // (the guide's endpoints sit on those borders by construction).
+      final staircase = _guideToOrthogonalPath(
+          routeStart, routeEnd, guide, innerInflatedOthers);
+      assert(() {
+        debugPrint('[router] staircase=${staircase == null ? "null(fell back)" : staircase.toString()}');
+        return true;
+      }());
       if (staircase != null) {
         return _assemble(
             start, exitStub, staircase, entryStub, end, innerInflated);
