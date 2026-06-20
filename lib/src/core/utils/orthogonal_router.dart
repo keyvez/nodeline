@@ -689,12 +689,17 @@ class OrthogonalRouter {
   /// coincident points so it reads as a tidy orthogonal route.
   static List<Offset>? _guideToOrthogonalPath(
       Offset start, Offset end, List<Offset> guide, List<Rect> obstacles) {
-    // Anchors trace the stroke: the route's start, EVERY guide vertex (the
-    // stroke's own shape, including its first/last points which usually sit off
-    // the exact endpoints), then the route's end. Using the full guide — not
-    // just its interior — keeps the staircase tracking the drawn sweep instead
-    // of jumping diagonally from the endpoint to a far interior vertex.
-    final anchors = <Offset>[start, ...guide, end];
+    // A rough stroke often overshoots the node it heads into (it ends past the
+    // target, or starts before the source). Those out-of-span vertices force the
+    // final/first leg to double back across the node, which the obstacle check
+    // rejects. Trim guide vertices that fall outside the start↔end span along
+    // the route's dominant axis before tracing.
+    final trimmed = _trimGuideToSpan(start, end, guide);
+
+    // Anchors trace the stroke: the route's start, EVERY (trimmed) guide vertex,
+    // then the route's end. Using the trimmed guide keeps the staircase tracking
+    // the drawn sweep without doubling back past the endpoints.
+    final anchors = <Offset>[start, ...trimmed, end];
 
     final path = <Offset>[start];
     int skipped = 0;
@@ -763,6 +768,27 @@ class OrthogonalRouter {
     // Return interior waypoints only (drop start & end to match A* output).
     if (cleaned.length <= 2) return const [];
     return cleaned.sublist(1, cleaned.length - 1);
+  }
+
+  /// Drops guide vertices that overshoot the [start]↔[end] span, i.e. whose
+  /// projection onto the start→end axis lies outside [0,1] (with a small margin).
+  /// A rough stroke that ends past the target node would otherwise force the
+  /// final leg to double back across it. The perpendicular component (the bow of
+  /// the stroke) is preserved — only longitudinal overshoot is trimmed.
+  static List<Offset> _trimGuideToSpan(
+      Offset start, Offset end, List<Offset> guide) {
+    final axis = end - start;
+    final lenSq = axis.dx * axis.dx + axis.dy * axis.dy;
+    if (lenSq < 1e-6) return guide;
+    // Allow vertices slightly beyond the endpoints so a stroke that lands just
+    // shy of / just past a node border still contributes its shape.
+    const margin = 0.06;
+    final kept = <Offset>[];
+    for (final g in guide) {
+      final t = ((g.dx - start.dx) * axis.dx + (g.dy - start.dy) * axis.dy) / lenSq;
+      if (t >= -margin && t <= 1 + margin) kept.add(g);
+    }
+    return kept;
   }
 
   /// True when the [guide] bows away from the straight [start]→[end] line by
