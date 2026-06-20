@@ -2208,14 +2208,13 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   /// [_currentPencilPoints]) into a routing guide. Returns true if it was
   /// consumed (so the caller should NOT create a freehand stroke).
   ///
-  /// Outcomes, in priority order:
-  ///  • Exactly one arrow is selected → re-route THAT arrow. Selecting an edge
-  ///    is an explicit "change this one" signal.
-  ///  • Else if an arrow already connects the two shapes under the stroke's ends
-  ///    (in either direction) → re-route that existing edge. Keeps the gesture
-  ///    idempotent: drawing again between the same nodes updates the same edge
-  ///    rather than spawning a duplicate, even when nothing is selected.
-  ///  • Else if the ends sit on two distinct shapes → create a new guided arrow.
+  /// Outcomes, in priority order — selection means edit, no selection means
+  /// create:
+  ///  • Exactly one arrow is selected → re-route THAT arrow with the stroke as
+  ///    its guide. This is the only way to change an existing edge.
+  ///  • Otherwise, if the stroke's ends sit on two distinct shapes → create a
+  ///    NEW guided arrow between them, even if an edge already connects them
+  ///    (draw a parallel edge along the new path).
   bool _tryConsumeStrokeAsGuide(String newId) {
     final raw = _currentPencilPoints
         .map((p) => Offset(p.x, p.y))
@@ -2225,7 +2224,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     final guide = _simplifyStroke(raw, _strokeSimplifyToleranceWorld());
     if (guide.length < 2) return false;
 
-    // Case 1: re-route the single selected arrow (takes priority).
+    // Case 1: re-route the single selected arrow (the only edit path).
     final selectedIds = _selectionBloc.state.selectedDrawingObjectIds;
     if (selectedIds.length == 1) {
       final sel = _canvasBloc.state.drawingObjects[selectedIds.first];
@@ -2238,19 +2237,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     final startSnap = _snapTargetAt(raw.first);
     final endSnap = _snapTargetAt(raw.last);
 
-    // Case 2: an edge already joins these two shapes → re-route it instead of
-    // creating a duplicate (selection-independent).
-    if (startSnap != null && endSnap != null &&
-        startSnap.objectId != endSnap.objectId) {
-      final existing =
-          _arrowBetween(startSnap.objectId, endSnap.objectId);
-      if (existing != null) {
-        _rerouteArrow(existing, guide);
-        return true;
-      }
-    }
-
-    // Case 3: stroke spans two distinct shapes → new guided arrow.
+    // Case 2: stroke spans two distinct shapes → new guided arrow (creates a
+    // parallel edge even if the pair is already connected).
     if (startSnap != null &&
         endSnap != null &&
         startSnap.objectId != endSnap.objectId) {
@@ -2284,9 +2272,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   /// Applies [guide] to [arrow] as its route guide and re-selects it, so an
   /// immediately-following guide stroke stays in the "re-route selected" case.
   void _rerouteArrow(ArrowObject arrow, List<Offset> guide) {
-    debugPrint('[guide] reroute arrow=${arrow.id} '
-        'pathType ${arrow.pathType}->orthogonal guidePts=${guide.length} '
-        'guide=$guide');
     final rerouted = arrow.copyWith(
       pathType: LinkPathType.orthogonal,
       routeGuide: guide,
@@ -2296,23 +2281,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       nodeIds: const {},
       drawingObjectIds: {arrow.id},
     ));
-  }
-
-  /// Returns the first arrow whose two attachments connect [objectIdA] and
-  /// [objectIdB] (in either direction), or null if none exists. Used to keep the
-  /// guide gesture idempotent between the same pair of shapes.
-  ArrowObject? _arrowBetween(String objectIdA, String objectIdB) {
-    for (final obj in _canvasBloc.state.drawingObjects.values) {
-      if (obj is! ArrowObject) continue;
-      final a = obj.startAttachment?.objectId;
-      final b = obj.endAttachment?.objectId;
-      if (a == null || b == null) continue;
-      if ((a == objectIdA && b == objectIdB) ||
-          (a == objectIdB && b == objectIdA)) {
-        return obj;
-      }
-    }
-    return null;
   }
 
   /// Simplification tolerance in world units, scaled so the felt tolerance is
