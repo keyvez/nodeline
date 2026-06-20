@@ -107,14 +107,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   Rect _selectionArea = Rect.zero;
   Offset _drawingStart = Offset.zero;
   List<PointVector> _currentPencilPoints = [];
-  /// True when the current pencil stroke was started with Alt/Option held — the
-  /// stroke is treated as a routing guide rather than freehand ink. Captured at
-  /// pointer-down because the user may release Alt before lifting the pen.
-  bool _pencilGuideMode = false;
-  /// True when the guide stroke was started with Shift+Alt — apply heavier
-  /// smoothing (a larger simplification tolerance) so the route reads as a few
-  /// clean bends instead of tracking every wobble. Captured at pointer-down.
-  bool _pencilSmoothMode = false;
   TempDrawingObject? _tempDrawingObject;
   Rect? _originalResizeRect;
   SnapPoint? _hoveredSnapPoint;
@@ -836,34 +828,24 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       }
     }
 
-    // Alt + pencil is a route-guide stroke: the user is deliberately drawing
-    // over a selected edge/shape, so the stroke must win over resize/rotation/
-    // endpoint handles (which otherwise sit under the start of the stroke and
-    // hijack it into a drag). Skip all handle interception in that mode.
-    final isGuidePencilStroke = tool == EditorTool.pencil &&
-        HardwareKeyboard.instance.isAltPressed &&
-        event.buttons == kPrimaryMouseButton;
-
-    if (!isGuidePencilStroke) {
-      // Update hovered handle from tap position before checking —
-      // on touch devices there are no hover events, so the handle
-      // state can be stale from a previous interaction.
-      _updateHoveredHandle(event.position);
-      // Check resize/rotation handles for any tool when something is selected,
-      // so objects can always be resized/rotated regardless of active tool.
-      if (_hoveredHandle.handle == Handle.rotate) {
-        _beginRotation(worldPos);
-        return;
-      }
-      if (_hoveredHandle.handle != Handle.none) {
-        _isResizing = _hoveredHandle;
-        _originalResizeRect =
-            _canvasBloc.state.drawingObjects[_isResizing.objectId]?.rect;
-        return;
-      }
+    // Update hovered handle from tap position before checking —
+    // on touch devices there are no hover events, so the handle
+    // state can be stale from a previous interaction.
+    _updateHoveredHandle(event.position);
+    // Check resize/rotation handles for any tool when something is selected,
+    // so objects can always be resized/rotated regardless of active tool.
+    if (_hoveredHandle.handle == Handle.rotate) {
+      _beginRotation(worldPos);
+      return;
+    }
+    if (_hoveredHandle.handle != Handle.none) {
+      _isResizing = _hoveredHandle;
+      _originalResizeRect =
+          _canvasBloc.state.drawingObjects[_isResizing.objectId]?.rect;
+      return;
     }
 
-    if (!isGuidePencilStroke && _checkAndHandleQuickAction(worldPos)) {
+    if (_checkAndHandleQuickAction(worldPos)) {
       return;
     }
 
@@ -1372,9 +1354,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
     setState(() {
       if (tool == EditorTool.pencil) {
-        _pencilGuideMode = HardwareKeyboard.instance.isAltPressed;
-        _pencilSmoothMode = _pencilGuideMode &&
-            HardwareKeyboard.instance.isShiftPressed;
         _currentPencilPoints = [
           PointVector(_drawingStart.dx, _drawingStart.dy, event.pressure),
         ];
@@ -1792,10 +1771,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     final tool = _tempDrawingObject!.tool;
     DrawingObject? newObject;
     bool isTapCreated = false;
-    // Set when an Alt-pencil stroke was consumed as a routing guide (it handles
-    // its own bloc dispatch/selection), so the commit block below must not clear
-    // the selection as if nothing was drawn.
-    bool guideConsumed = false;
     final id = const Uuid().v4();
 
     final endPos = _hoveredSnapPoint?.worldPosition ?? _tempDrawingObject!.end;
@@ -1835,14 +1810,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       }
     } else if (tool == EditorTool.pencil) {
       if (_currentPencilPoints.length > 1) {
-        // Alt-held pencil strokes are routing guides, not freehand ink: either
-        // they become a new orthogonal arrow between the shapes under each end,
-        // or (if exactly one arrow is selected and the ends miss shapes) they
-        // re-route that arrow. Anything else falls back to a normal stroke.
-        guideConsumed = _pencilGuideMode && _tryConsumeStrokeAsGuide(id);
-        if (!guideConsumed) {
-          newObject = PencilStrokeObject(id: id, points: _currentPencilPoints, creationZoom: _canvasBloc.state.viewportZoom);
-        }
+        // Guide-routing is disabled (path-shaping proved intractable). Pencil
+        // strokes are always freehand ink again, regardless of Alt.
+        newObject = PencilStrokeObject(id: id, points: _currentPencilPoints, creationZoom: _canvasBloc.state.viewportZoom);
       }
     } else {
       final snappedStart = snapOffset(_drawingStart);
@@ -1923,7 +1893,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         ));
         _toolBloc.add(const ToolSelected(EditorTool.arrow));
       }
-    } else if (!guideConsumed) {
+    } else {
       _selectionBloc.add(SelectionCleared());
     }
 
@@ -1936,8 +1906,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       _isDrawing = false;
       _tempDrawingObject = null;
       _currentPencilPoints = [];
-      _pencilGuideMode = false;
-      _pencilSmoothMode = false;
       _startSnapPoint = null;
       _hoveredSnapPoint = null;
     });
@@ -2255,272 +2223,6 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     return null;
   }
 
-  /// Attempts to turn the just-finished Alt-pencil stroke (in
-  /// [_currentPencilPoints]) into a routing guide. Returns true if it was
-  /// consumed (so the caller should NOT create a freehand stroke).
-  ///
-  /// Outcomes, in priority order — selection means edit, no selection means
-  /// create:
-  ///  • Exactly one arrow is selected → re-route THAT arrow with the stroke as
-  ///    its guide. This is the only way to change an existing edge.
-  ///  • Otherwise, if the stroke's ends sit on two distinct shapes → create a
-  ///    NEW guided arrow between them, even if an edge already connects them
-  ///    (draw a parallel edge along the new path).
-  bool _tryConsumeStrokeAsGuide(String newId) {
-    final raw = _currentPencilPoints
-        .map((p) => Offset(p.x, p.y))
-        .toList(growable: false);
-    if (raw.length < 2) return false;
-
-    // Shift+Alt smooths harder: a much larger simplification tolerance collapses
-    // the stroke to a few clean bends.
-    final tol = _strokeSimplifyToleranceWorld() * (_pencilSmoothMode ? 4.0 : 1.0);
-    final guide = _simplifyStroke(raw, tol);
-    if (guide.length < 2) return false;
-
-    // Case 1: re-route the single selected arrow (the only edit path).
-    final selectedIds = _selectionBloc.state.selectedDrawingObjectIds;
-    if (selectedIds.length == 1) {
-      final sel = _canvasBloc.state.drawingObjects[selectedIds.first];
-      if (sel is ArrowObject) {
-        debugPrint('[guide] CASE1 reroute selected arrow=${sel.id} guidePts=${guide.length}');
-        _rerouteArrow(sel, guide);
-        return true;
-      }
-    }
-
-    final startSnap = _snapTargetAt(raw.first);
-    final endSnap = _snapTargetAt(raw.last);
-    debugPrint('[guide] no-selection path: startSnap=${startSnap?.objectId ?? "none"} '
-        'endSnap=${endSnap?.objectId ?? "none"} guidePts=${guide.length}');
-
-    // Case 2: stroke spans two distinct shapes → new guided arrow (creates a
-    // parallel edge even if the pair is already connected).
-    if (startSnap != null &&
-        endSnap != null &&
-        startSnap.objectId != endSnap.objectId) {
-      // Inherit the visual style of an existing edge between the same pair, so a
-      // parallel edge matches its sibling instead of resetting to defaults.
-      final sibling =
-          _existingArrowBetween(startSnap.objectId, endSnap.objectId);
-      final arrow = ArrowObject(
-        id: newId,
-        start: startSnap.worldPosition,
-        end: endSnap.worldPosition,
-        // Always orthogonal so the guide actually shapes the path; inherit the
-        // sibling's line style (dashed/solid/colour) but NOT its label.
-        pathType: LinkPathType.orthogonal,
-        startAttachment: ObjectAttachment(
-          objectId: startSnap.objectId,
-          relativePosition: startSnap.relativePosition,
-        ),
-        endAttachment: ObjectAttachment(
-          objectId: endSnap.objectId,
-          relativePosition: endSnap.relativePosition,
-        ),
-        routeGuide: guide,
-        lineStyle: sibling?.lineStyle ?? _toolBloc.state.lineStyle,
-        creationZoom: _canvasBloc.state.viewportZoom,
-      );
-      _canvasBloc.add(DrawingObjectAdded(arrow));
-      _selectionBloc.add(SelectionReplaced(
-        nodeIds: const {},
-        drawingObjectIds: {arrow.id},
-      ));
-      return true;
-    }
-
-    return false;
-  }
-
-  /// Returns an existing arrow connecting [objectIdA] and [objectIdB] (either
-  /// direction), or null. Used only to inherit a parallel edge's visual style —
-  /// it does NOT re-route (a new guided edge is still created).
-  ArrowObject? _existingArrowBetween(String objectIdA, String objectIdB) {
-    for (final obj in _canvasBloc.state.drawingObjects.values) {
-      if (obj is! ArrowObject) continue;
-      final a = obj.startAttachment?.objectId;
-      final b = obj.endAttachment?.objectId;
-      if (a == null || b == null) continue;
-      if ((a == objectIdA && b == objectIdB) ||
-          (a == objectIdB && b == objectIdA)) {
-        return obj;
-      }
-    }
-    return null;
-  }
-
-  /// Applies [guide] to [arrow] as its route guide and re-selects it, so an
-  /// immediately-following guide stroke stays in the "re-route selected" case.
-  ///
-  /// Also re-anchors the endpoints to the side of each node the guide actually
-  /// leaves/enters from. A guide that exits the left of the source but keeps a
-  /// right-side attachment would have to double back across the node (which the
-  /// router rejects), so the ports must follow the stroke.
-  void _rerouteArrow(ArrowObject arrow, List<Offset> guide) {
-    final startAtt = _attachmentTowardGuide(arrow.startAttachment, guide.first);
-    final endAtt = _attachmentTowardGuide(arrow.endAttachment, guide.last);
-    final rerouted = arrow.copyWith(
-      pathType: LinkPathType.orthogonal,
-      routeGuide: guide,
-      startAttachment: startAtt ?? arrow.startAttachment,
-      endAttachment: endAtt ?? arrow.endAttachment,
-    );
-    _canvasBloc.add(DrawingObjectUpdated(rerouted));
-    _selectionBloc.add(SelectionReplaced(
-      nodeIds: const {},
-      drawingObjectIds: {arrow.id},
-    ));
-  }
-
-  /// Recomputes [attachment] so its relative position sits on the node border
-  /// nearest [guidePoint] — i.e. the port faces the direction the guide leaves
-  /// or enters. Returns null if the attachment or its rect can't be resolved
-  /// (the caller keeps the original).
-  ObjectAttachment? _attachmentTowardGuide(
-      ObjectAttachment? attachment, Offset guidePoint) {
-    if (attachment == null) return null;
-    final id = attachment.objectId;
-    final node = _canvasBloc.state.nodes[id];
-    final rect = node != null
-        ? getNodeBoundsInWorld(node)
-        : _canvasBloc.state.drawingObjects[id]?.rect;
-    if (rect == null) return null;
-    final border = getClosestPointOnRectBorder(guidePoint, rect);
-    return ObjectAttachment(
-      objectId: id,
-      relativePosition: Offset(
-        ((border.dx - rect.left) / rect.width.clamp(0.001, double.infinity))
-            .clamp(0.0, 1.0),
-        ((border.dy - rect.top) / rect.height.clamp(0.001, double.infinity))
-            .clamp(0.0, 1.0),
-      ),
-    );
-  }
-
-  /// Simplification tolerance in world units, scaled so the felt tolerance is
-  /// constant on screen regardless of zoom.
-  // Light by default: follow the drawn line faithfully, removing only fine
-  // wobble. Heavier smoothing is applied after tracing (and Shift+Alt boosts
-  // this tolerance for an intentionally loose guide).
-  double _strokeSimplifyToleranceWorld() => 16.0 / _canvasBloc.state.viewportZoom;
-
-  /// Finds the shape (drawing object or node) nearest to [worldPos] for the
-  /// purpose of anchoring a guide stroke's endpoint, returning a snap target
-  /// with relative position. A rough guide stroke rarely lands exactly on a
-  /// box, so this picks the CLOSEST shape within a generous radius (and always
-  /// wins when the point is inside one) rather than demanding a tight hit.
-  ///
-  /// Ranking prefers the *innermost* shape: when an endpoint lands inside a
-  /// frame ([FigureObject]) that contains a node, the node wins — otherwise the
-  /// edge would attach to the frame instead of the node inside it. Containers
-  /// are only chosen when nothing smaller is in range.
-  SnapPoint? _snapTargetAt(Offset worldPos) {
-    final canvasState = _canvasBloc.state;
-    // Generous: the endpoints of a sketched path land near, not on, the nodes.
-    final tolerance = 80.0 / canvasState.viewportZoom;
-    SnapPoint? best;
-    double bestDist = double.infinity;
-    double bestArea = double.infinity;
-    bool bestIsContainer = true;
-
-    void consider(String objectId, Rect rect, {bool isContainer = false}) {
-      final inside = rect.contains(worldPos);
-      final border = getClosestPointOnRectBorder(worldPos, rect);
-      final dist = inside ? 0.0 : (worldPos - border).distance;
-      if (dist > tolerance) return;
-      final area = rect.width * rect.height;
-      // Preference order: a non-container beats a container; then nearer wins;
-      // then (when effectively tied on distance, e.g. both contain the point at
-      // dist 0) the smaller/innermost shape wins.
-      const distTie = 0.5;
-      final betterClass = !isContainer && bestIsContainer;
-      final worseClass = isContainer && !bestIsContainer;
-      bool better;
-      if (betterClass) {
-        better = true;
-      } else if (worseClass) {
-        better = false;
-      } else if ((dist - bestDist).abs() <= distTie) {
-        better = area < bestArea;
-      } else {
-        better = dist < bestDist;
-      }
-      if (!better) return;
-      bestDist = dist;
-      bestArea = area;
-      bestIsContainer = isContainer;
-      best = (
-        objectId: objectId,
-        worldPosition: border,
-        relativePosition: Offset(
-          (border.dx - rect.left) / rect.width.clamp(0.001, double.infinity),
-          (border.dy - rect.top) / rect.height.clamp(0.001, double.infinity),
-        ),
-      );
-    }
-
-    for (final obj in canvasState.drawingObjects.values) {
-      if (obj is FigureObject) {
-        consider(obj.id, obj.rect, isContainer: true);
-      } else if (obj is RectangleObject ||
-          obj is CircleObject ||
-          obj is DiamondObject ||
-          obj is ParallelogramObject ||
-          obj is SvgObject) {
-        consider(obj.id, obj.rect);
-      }
-    }
-    for (final node in canvasState.nodes.values) {
-      final bounds = getNodeBoundsInWorld(node);
-      if (bounds != null) consider(node.id, bounds);
-    }
-    return best;
-  }
-
-  /// Ramer–Douglas–Peucker polyline simplification. Reduces a dense freehand
-  /// stroke to its key inflection points so the router gets a handful of
-  /// attractors rather than hundreds of nearly-coincident ones.
-  List<Offset> _simplifyStroke(List<Offset> points, double tolerance) {
-    if (points.length < 3) return List.of(points);
-    final keep = List<bool>.filled(points.length, false);
-    keep[0] = true;
-    keep[points.length - 1] = true;
-    final stack = <(int, int)>[(0, points.length - 1)];
-    while (stack.isNotEmpty) {
-      final (first, last) = stack.removeLast();
-      double maxDist = 0.0;
-      int index = -1;
-      for (int i = first + 1; i < last; i++) {
-        final d = _perpDistance(points[i], points[first], points[last]);
-        if (d > maxDist) {
-          maxDist = d;
-          index = i;
-        }
-      }
-      if (maxDist > tolerance && index != -1) {
-        keep[index] = true;
-        stack.add((first, index));
-        stack.add((index, last));
-      }
-    }
-    final out = <Offset>[];
-    for (int i = 0; i < points.length; i++) {
-      if (keep[i]) out.add(points[i]);
-    }
-    return out;
-  }
-
-  double _perpDistance(Offset p, Offset a, Offset b) {
-    final dx = b.dx - a.dx;
-    final dy = b.dy - a.dy;
-    final lenSq = dx * dx + dy * dy;
-    if (lenSq < 1e-9) return (p - a).distance;
-    var t = ((p.dx - a.dx) * dx + (p.dy - a.dy) * dy) / lenSq;
-    t = t.clamp(0.0, 1.0);
-    final proj = Offset(a.dx + dx * t, a.dy + dy * t);
-    return (p - proj).distance;
-  }
 
   String? _findHitObject(Offset worldPos) {
     final canvasState = _canvasBloc.state;

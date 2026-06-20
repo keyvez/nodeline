@@ -620,13 +620,6 @@ class FlowDrawEditorRenderBox extends RenderBox
     final eo = relOverrides['${o.id}:end'];
     if (so != null) sb.write('<s${q(so.dx)},${q(so.dy)}');
     if (eo != null) sb.write('<e${q(eo.dx)},${q(eo.dy)}');
-    final guide = o.routeGuide;
-    if (guide != null && guide.isNotEmpty) {
-      sb.write('|g');
-      for (final p in guide) {
-        sb..write(q(p.dx))..write(',')..write(q(p.dy))..write(';');
-      }
-    }
     sb..write('#')..write(obstacleSetKey);
     return sb.toString();
   }
@@ -1068,18 +1061,11 @@ class FlowDrawEditorRenderBox extends RenderBox
               PaintProfiler.enabled ? _profStopwatch.elapsedMicroseconds : 0;
           final startAttachId = obj.startAttachment?.objectId;
           final endAttachId = obj.endAttachment?.objectId;
-          // When this edge follows a user-drawn guide, frames (FigureObjects)
-          // are NOT treated as obstacles: a frame is an organisational container,
-          // and a guide that arcs across one is the user explicitly saying "route
-          // here". Without this the big frame rects block the guide and it falls
-          // back to default routing.
-          final bool hasGuide = obj.routeGuide != null && obj.routeGuide!.isNotEmpty;
           final obstacles = <Rect>[];
           for (final o in canvasState.drawingObjects.values) {
             if (o.id == obj.id) continue;
             if (o.id == startAttachId || o.id == endAttachId) continue;
             if (o is ArrowObject || o is LineObject || o is PencilStrokeObject) continue;
-            if (hasGuide && o is FigureObject) continue;
             obstacles.add(o.rect);
           }
           for (final node in canvasState.nodes.values) {
@@ -1112,7 +1098,6 @@ class FlowDrawEditorRenderBox extends RenderBox
             devicePixelRatio: dpr,
             zoom: canvasState.viewportZoom,
             existingSegments: routedSegments,
-            guide: obj.routeGuide ?? const [],
           );
           if (PaintProfiler.enabled) {
             _profRoutingUs +=

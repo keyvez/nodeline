@@ -23,20 +23,6 @@ class OrthogonalRouter {
   // through another connector, but won't make extreme detours just to dodge a
   // single unavoidable crossing.
   static const double _crossingPenalty = 30.0;
-  // ── Guide bias (soft attraction to a user-drawn freehand stroke) ──────────
-  // A guide point only influences edges whose midpoint falls within this radius
-  // (world units) of the point — beyond it the stroke is ignored entirely.
-  static const double _guideRadius = 90.0;
-  // Reward (negative cost) an edge earns per unit length for hugging the guide.
-  // A guide is an explicit user instruction, so this is sized to outweigh the
-  // extra distance of a deliberate detour. It can NEVER route through an
-  // obstacle — obstacle-blocked edges simply don't exist in the graph — it only
-  // makes the router prefer the corridor the stroke traces.
-  static const double _guideReward = 1.4;
-  // When a corner (bend) lands near the guide, the stroke is telling us to turn
-  // there, so the usual bend penalty is largely waived. Without this the router
-  // refuses the extra corners a curvy guide implies.
-  static const double _guideBendDiscount = 0.85;
 
   /// Routes an orthogonal path from [start] to [end], avoiding [obstacles].
   ///
@@ -47,11 +33,6 @@ class OrthogonalRouter {
   /// [existingSegments] is an optional list of (a, b) pairs representing
   /// already-routed paths that this route should try to avoid overlapping.
   ///
-  /// [guide] is an optional polyline (e.g. a simplified freehand stroke) that
-  /// softly attracts the route toward its shape. It never overrides obstacle
-  /// avoidance or right-angle cleanliness — points along it merely become
-  /// candidate corners and edges that hug it cost a little less.
-  ///
   /// [devicePixelRatio] and [zoom] are kept for API compatibility but ignored.
   static List<Offset> route({
     required Offset start,
@@ -60,7 +41,6 @@ class OrthogonalRouter {
     Rect? startObjectRect,
     Rect? endObjectRect,
     List<(Offset, Offset)> existingSegments = const [],
-    List<Offset> guide = const [],
     double devicePixelRatio = 1.0,
     double zoom = 1.0,
   }) {
@@ -82,12 +62,6 @@ class OrthogonalRouter {
     // Inner obstacles: actual shapes with tiny inflation so the path doesn't
     // pass through objects but stubs can still exit cleanly.
     final innerInflated = relevant.map((r) => r.inflate(2.0)).toList();
-    // Same set MINUS the source/target rects. A guide stroke legitimately starts
-    // on the source border and ends on the target border, so validating its
-    // staircase against the full set (which includes those two rects) would
-    // always reject it. The "others" list lets the guide touch its own endpoints
-    // while still avoiding every other shape.
-    final innerInflatedOthers = List<Rect>.of(innerInflated);
     if (startObjectRect != null) innerInflated.add(startObjectRect.inflate(2.0));
     if (endObjectRect != null) innerInflated.add(endObjectRect.inflate(2.0));
 
@@ -165,86 +139,39 @@ class OrthogonalRouter {
     final routeStart = exitStub ?? start;
     final routeEnd = entryStub ?? end;
 
-    // A guide with an interior inflection means the user deliberately drew a
-    // path that the trivial straight/L route would ignore — skip the fast paths
-    // so the A* phase (which honours the guide) gets a chance to shape the route
-    // around it. A 2-point guide is just start→end and adds nothing.
-    final hasShapingGuide =
-        guide.length >= 3 && _guideDeviates(guide, routeStart, routeEnd);
-    assert(() {
-      if (guide.isNotEmpty) {
-        debugPrint('[router] guidePts=${guide.length} '
-            'shaping=$hasShapingGuide routeStart=$routeStart routeEnd=$routeEnd '
-            'deviates=${guide.length >= 3 ? _guideDeviates(guide, routeStart, routeEnd) : false}');
-      }
-      return true;
-    }());
-
     // ── Phase 2: Fast paths ─────────────────────────────────────────────
-    if (!hasShapingGuide) {
-      // Straight line (only if no existing-segment overlap either).
-      if (_isAxisAligned(routeStart, routeEnd) &&
-          !_segmentHitsAny(routeStart, routeEnd, innerInflated) &&
-          _overlapLength(routeStart, routeEnd, existingSegments) < 1.0) {
-        return _assemble(start, exitStub, const [], entryStub, end, innerInflated);
-      }
+    // Straight line (only if no existing-segment overlap either).
+    if (_isAxisAligned(routeStart, routeEnd) &&
+        !_segmentHitsAny(routeStart, routeEnd, innerInflated) &&
+        _overlapLength(routeStart, routeEnd, existingSegments) < 1.0) {
+      return _assemble(start, exitStub, const [], entryStub, end, innerInflated);
+    }
 
-      // L-corner — pick the option with less existing-segment overlap.
-      final lCorner = _findClearLCorner(routeStart, routeEnd, innerInflated,
-          exitDir: exitStub != null ? routeStart - start : null,
-          existingSegments: existingSegments);
-      if (lCorner != null) {
-        final inner = lCorner == routeStart ? const <Offset>[] : [lCorner];
-        return _assemble(start, exitStub, inner, entryStub, end, innerInflated);
-      }
+    // L-corner — pick the option with less existing-segment overlap.
+    final lCorner = _findClearLCorner(routeStart, routeEnd, innerInflated,
+        exitDir: exitStub != null ? routeStart - start : null,
+        existingSegments: existingSegments);
+    if (lCorner != null) {
+      final inner = lCorner == routeStart ? const <Offset>[] : [lCorner];
+      return _assemble(start, exitStub, inner, entryStub, end, innerInflated);
     }
 
     // ── Phase 3: U-turn detection ───────────────────────────────────────
-    // Skipped when a shaping guide is present so the user's stroke isn't
-    // overridden by the reflexive U-turn special case.
-    if (!hasShapingGuide && exitStub != null && _isUTurn(start, exitStub, end)) {
+    if (exitStub != null && _isUTurn(start, exitStub, end)) {
       final inner = _buildUTurnWaypoints(
           routeStart, routeEnd, exitStub - start, startObjectRect, endObjectRect);
       return _assemble(start, exitStub, inner, entryStub, end, innerInflated);
     }
 
-    // ── Phase 3.5: Guide-following ──────────────────────────────────────
-    // When the user drew a shaping stroke, convert it into an axis-aligned
-    // staircase between the route endpoints. If that staircase clears all
-    // obstacles, follow it directly — this is the deterministic "trace my
-    // stroke" behaviour. Otherwise fall through to A* (still guide-biased), so
-    // the route stays valid even when the stroke cuts a corner too tight.
-    if (hasShapingGuide) {
-      // Validate the staircase against everything EXCEPT the source/target rects
-      // (the guide's endpoints sit on those borders by construction).
-      final staircase = _guideToOrthogonalPath(
-          routeStart, routeEnd, guide, innerInflatedOthers);
-      assert(() {
-        debugPrint('[router] staircase=${staircase == null ? "null(fell back)" : staircase.toString()}');
-        return true;
-      }());
-      if (staircase != null) {
-        return _assemble(
-            start, exitStub, staircase, entryStub, end, innerInflated);
-      }
-    }
-
     // ── Phase 4: Visibility graph + A* ──────────────────────────────────
     final candidates =
         _generateCandidates(routeStart, routeEnd, inflated, innerInflated);
-    // Fold guide vertices (and their axis-projections) into the candidate set so
-    // A* can actually route through the stroke's neighbourhood; drop any that
-    // land inside an obstacle.
-    if (guide.length >= 2) {
-      _addGuideCandidates(guide, routeStart, routeEnd, candidates, innerInflated);
-    }
     final astarPath = _astar(
       routeStart,
       routeEnd,
       candidates,
       innerInflated,
       existingSegments: existingSegments,
-      guide: guide,
     );
 
     return _assemble(start, exitStub, astarPath, entryStub, end, innerInflated);
@@ -629,301 +556,6 @@ class OrthogonalRouter {
     return candidates.toList();
   }
 
-  /// Adds candidate corners derived from a [guide] polyline so the A* graph has
-  /// vertices in the stroke's neighbourhood to route through. For each guide
-  /// vertex we add the vertex itself plus its axis-projections onto the
-  /// start/end lines (these stay reachable by axis-aligned edges). Anything
-  /// inside an obstacle is discarded.
-  static void _addGuideCandidates(List<Offset> guide, Offset start, Offset end,
-      List<Offset> candidates, List<Rect> collisionRects) {
-    bool blocked(Offset p) => collisionRects.any((r) =>
-        p.dx > r.left && p.dx < r.right && p.dy > r.top && p.dy < r.bottom);
-    final extra = <Offset>{};
-    for (final g in guide) {
-      extra.add(g);
-      // Axis projections give the graph right-angle stepping stones onto the
-      // guide vertex from the start/end rails.
-      extra.add(Offset(g.dx, start.dy));
-      extra.add(Offset(g.dx, end.dy));
-      extra.add(Offset(start.dx, g.dy));
-      extra.add(Offset(end.dx, g.dy));
-    }
-    for (final p in extra) {
-      if (!blocked(p)) candidates.add(p);
-    }
-  }
-
-  /// Soft reward (negative cost) for an edge a→b that runs near the [guide].
-  /// Sampled at a few points along the edge; the closer the samples sit to the
-  /// guide polyline, the larger the reward, scaled by edge length and capped so
-  /// it can never dominate a bend/crossing penalty.
-  static double _guideBonus(Offset a, Offset b, List<Offset> guide) {
-    if (guide.length < 2) return 0.0;
-    const samples = 4;
-    double nearFrac = 0.0;
-    for (int s = 0; s <= samples; s++) {
-      final t = s / samples;
-      final p = Offset(a.dx + (b.dx - a.dx) * t, a.dy + (b.dy - a.dy) * t);
-      double best = double.infinity;
-      for (int i = 0; i < guide.length - 1; i++) {
-        final d = _pointSegmentDistance(p, guide[i], guide[i + 1]);
-        if (d < best) best = d;
-      }
-      if (best < _guideRadius) {
-        // Linear falloff: full credit at the stroke, zero at the radius.
-        nearFrac += (1.0 - best / _guideRadius);
-      }
-    }
-    nearFrac /= (samples + 1);
-    final len = (a.dx - b.dx).abs() + (a.dy - b.dy).abs();
-    return nearFrac * len * _guideReward;
-  }
-
-  /// Converts a freehand [guide] into an axis-aligned staircase between
-  /// [start] and [end], or null if the result would pass through an obstacle.
-  ///
-  /// The guide's interior vertices become the corridor the path threads
-  /// through. Between each pair of successive anchor points we drop an L-corner;
-  /// the corner orientation is chosen to follow the stroke's local sweep (turn
-  /// along the dominant axis first). The output is cleaned of collinear and
-  /// coincident points so it reads as a tidy orthogonal route.
-  static List<Offset>? _guideToOrthogonalPath(
-      Offset start, Offset end, List<Offset> guide, List<Rect> obstacles) {
-    // Trace-then-smooth: follow the guide faithfully. Use the guide's INTERIOR
-    // vertices as the corridor (first/last are the node approach, handled by the
-    // stub machinery) but keep ALL of them — no aggressive pre-trimming. Clamp
-    // only extreme along-axis overshoot so a vertex looping far past an endpoint
-    // becomes a bend at the span edge instead of a long straight drop into the
-    // node; the perpendicular bow is preserved.
-    final interior = guide.length > 2 ? guide.sublist(1, guide.length - 1) : const <Offset>[];
-    final clamped = _clampAnchorsToSpan(start, end, interior);
-    if (clamped.isEmpty) return null;
-
-    final anchors = <Offset>[start, ...clamped, end];
-
-    final path = <Offset>[start];
-    int skipped = 0;
-    for (int i = 0; i < anchors.length - 1; i++) {
-      final a = path.last;
-      final isMandatory = i == anchors.length - 2;
-      final b = anchors[i + 1];
-      if ((a.dx - b.dx).abs() < 0.5 || (a.dy - b.dy).abs() < 0.5) {
-        if (_segmentHitsAny(a, b, obstacles)) {
-          if (isMandatory) {
-            // Final approach blocked on a straight leg: insert a perpendicular
-            // detour through a clear lane rather than giving up the whole guide.
-            final detoured = _detourTo(a, b, obstacles);
-            if (detoured == null) {
-              assert(() {
-                debugPrint('[router] staircase: end leg $a->$b blocked (no detour)');
-                return true;
-              }());
-              return null;
-            }
-            for (final p in detoured) {
-              path.add(p);
-            }
-            continue;
-          }
-          skipped++;
-          continue;
-        }
-        path.add(b);
-        continue;
-      }
-      // Two L-corner options; prefer the one whose first leg follows the
-      // stroke's dominant local direction, so the staircase tracks the sweep.
-      final horizFirst = Offset(b.dx, a.dy);
-      final vertFirst = Offset(a.dx, b.dy);
-      final dx = (b.dx - a.dx).abs();
-      final dy = (b.dy - a.dy).abs();
-      final preferred = dx >= dy ? horizFirst : vertFirst;
-      final fallback = dx >= dy ? vertFirst : horizFirst;
-      Offset? corner;
-      if (!_segmentHitsAny(a, preferred, obstacles) &&
-          !_segmentHitsAny(preferred, b, obstacles)) {
-        corner = preferred;
-      } else if (!_segmentHitsAny(a, fallback, obstacles) &&
-          !_segmentHitsAny(fallback, b, obstacles)) {
-        corner = fallback;
-      }
-      if (corner == null) {
-        if (isMandatory) {
-          final detoured = _detourTo(a, b, obstacles);
-          if (detoured == null) {
-            assert(() {
-              debugPrint('[router] staircase: end leg $a->$b blocked (no detour)');
-              return true;
-            }());
-            return null;
-          }
-          for (final p in detoured) {
-            path.add(p);
-          }
-          continue;
-        }
-        skipped++;
-        continue;
-      }
-      path.add(corner);
-      path.add(b);
-    }
-
-    // Drop tiny perpendicular jogs (a short segment between two longer parallel
-    // ones, e.g. a 9px step from stroke noise) so the route reads clean, THEN
-    // remove exact collinear points.
-    var cleaned = _removeShortJogs(path, minJog);
-    cleaned = _removeCollinear(cleaned);
-    if (cleaned.length < 2) return const [];
-    // Validate every segment once more after cleanup.
-    for (int i = 0; i < cleaned.length - 1; i++) {
-      if (_segmentHitsAny(cleaned[i], cleaned[i + 1], obstacles)) return null;
-    }
-    assert(() {
-      if (skipped > 0) {
-        debugPrint('[router] staircase skipped $skipped guide vertices');
-      }
-      return true;
-    }());
-    // Return interior waypoints only (drop start & end to match A* output).
-    if (cleaned.length <= 2) return const [];
-    return cleaned.sublist(1, cleaned.length - 1);
-  }
-
-  // Light post-trace smoothing: merge perpendicular jogs shorter than this so
-  // the faithfully-traced path reads clean (removes stair-stepping) without
-  // erasing genuine structural bends, which are much longer.
-  static const double minJog = 20.0;
-
-  /// Flattens short perpendicular jogs. An interior point [i] whose two adjacent
-  /// segments are both short and run on opposite axes (a little step out and
-  /// back) is collapsed by snapping the step away, so the route runs straight
-  /// through instead of jogging a few pixels. Endpoints are never moved.
-  /// Repeated until stable.
-  static List<Offset> _removeShortJogs(List<Offset> path, double minLen) {
-    if (path.length < 4) return path;
-    var pts = List<Offset>.of(path);
-    bool changed = true;
-    while (changed) {
-      changed = false;
-      // Find a short interior segment (i..i+1) where both ends are interior
-      // points; align the two surrounding long segments by removing the jog.
-      for (int i = 1; i < pts.length - 2; i++) {
-        final a = pts[i];
-        final b = pts[i + 1];
-        if ((a - b).distance >= minLen) continue;
-        // Snap the LATER point onto the earlier one's axis so the segment before
-        // `a` extends straight through. This converts "long | short-jog | long"
-        // into a single corner.
-        final before = pts[i - 1];
-        final stepIsHorizontal = (a.dy - b.dy).abs() < 0.5; // jog runs in X
-        // Only collapse when `before→a` runs the OTHER axis (a genuine jog),
-        // otherwise we'd distort a real staircase tread.
-        final beforeIsHorizontal = (before.dy - a.dy).abs() < 0.5;
-        if (stepIsHorizontal == beforeIsHorizontal) continue;
-        if (stepIsHorizontal) {
-          pts[i] = Offset(b.dx, a.dy); // pull `a` across to b's column
-        } else {
-          pts[i] = Offset(a.dx, b.dy); // pull `a` down to b's row
-        }
-        pts = _removeCollinear(pts);
-        changed = true;
-        break;
-      }
-    }
-    return pts;
-  }
-
-  /// Finds an orthogonal detour from [a] to [b] (returning the intermediate
-  /// points, ending at [b]) when the direct L-corners are both blocked. Tries
-  /// routing out to a series of offsets perpendicular to the a→b axis until a
-  /// clear two-bend path is found. Returns null if none works.
-  static List<Offset>? _detourTo(Offset a, Offset b, List<Rect> obstacles) {
-    // Search a range of perpendicular offsets on both sides. The detour shape is
-    // a→m1→m2→b where m1/m2 share a coordinate offset out of the blocked lane.
-    const steps = [60.0, 120.0, 200.0, 320.0, 480.0, -60.0, -120.0, -200.0, -320.0, -480.0];
-    final dx = (b.dx - a.dx).abs();
-    final dy = (b.dy - a.dy).abs();
-    final horizontalDominant = dx >= dy;
-    for (final off in steps) {
-      Offset m1, m2;
-      if (horizontalDominant) {
-        // Step vertically out of the lane, run across, step back in.
-        m1 = Offset(a.dx, a.dy + off);
-        m2 = Offset(b.dx, a.dy + off);
-      } else {
-        m1 = Offset(a.dx + off, a.dy);
-        m2 = Offset(a.dx + off, b.dy);
-      }
-      if (!_segmentHitsAny(a, m1, obstacles) &&
-          !_segmentHitsAny(m1, m2, obstacles) &&
-          !_segmentHitsAny(m2, b, obstacles)) {
-        return [m1, m2, b];
-      }
-    }
-    // Last resort: full visibility-graph A* from a to b around the obstacles.
-    // Handles long descents into a node through stacked boxes that the simple
-    // two-bend offset search can't clear.
-    final cands = _generateCandidates(a, b, obstacles, obstacles);
-    final inner = _astar(a, b, cands, obstacles);
-    if (inner.isEmpty) {
-      // A* found nothing usable unless a/b are already axis-aligned & clear.
-      if ((a.dx - b.dx).abs() < 0.5 || (a.dy - b.dy).abs() < 0.5) {
-        return _segmentHitsAny(a, b, obstacles) ? null : [b];
-      }
-      return null;
-    }
-    return [...inner, b];
-  }
-
-  /// Clamps each anchor's projection onto the [start]→[end] axis into [0,1]
-  /// (keeping its perpendicular offset), so a stroke that loops well past an
-  /// endpoint along the connection direction becomes a bend at the span edge
-  /// rather than a long straight overshoot into the node. The perpendicular
-  /// component — the bow of the arc the user actually drew — is preserved.
-  static List<Offset> _clampAnchorsToSpan(
-      Offset start, Offset end, List<Offset> anchors) {
-    final axis = end - start;
-    final lenSq = axis.dx * axis.dx + axis.dy * axis.dy;
-    if (lenSq < 1e-6) return anchors;
-    final out = <Offset>[];
-    for (final g in anchors) {
-      final t = ((g.dx - start.dx) * axis.dx + (g.dy - start.dy) * axis.dy) / lenSq;
-      final tc = t.clamp(0.0, 1.0);
-      if (tc == t) {
-        out.add(g);
-      } else {
-        // Shift the anchor back along the axis to the clamped projection,
-        // preserving its perpendicular displacement.
-        final shift = axis * (tc - t);
-        out.add(g + shift);
-      }
-    }
-    return out;
-  }
-
-  /// True when the [guide] bows away from the straight [start]→[end] line by
-  /// more than a small threshold — i.e. the user actually drew a detour worth
-  /// honouring rather than retracing the direct route.
-  static bool _guideDeviates(List<Offset> guide, Offset start, Offset end) {
-    const minDeviation = 18.0;
-    for (final g in guide) {
-      if (_pointSegmentDistance(g, start, end) > minDeviation) return true;
-    }
-    return false;
-  }
-
-  static double _pointSegmentDistance(Offset p, Offset a, Offset b) {
-    final dx = b.dx - a.dx;
-    final dy = b.dy - a.dy;
-    final lenSq = dx * dx + dy * dy;
-    if (lenSq < 1e-9) return (p - a).distance;
-    var t = ((p.dx - a.dx) * dx + (p.dy - a.dy) * dy) / lenSq;
-    t = t.clamp(0.0, 1.0);
-    final proj = Offset(a.dx + dx * t, a.dy + dy * t);
-    return (p - proj).distance;
-  }
-
   /// A* with state = (node index, incoming direction).
   /// Cost = Manhattan distance + [_bendPenalty] per direction change
   ///       + [_overlapPenalty] × overlap length with existing segments.
@@ -933,7 +565,6 @@ class OrthogonalRouter {
     List<Offset> candidates,
     List<Rect> obstacles, {
     List<(Offset, Offset)> existingSegments = const [],
-    List<Offset> guide = const [],
   }) {
     final points = [start, ...candidates, end];
     final n = points.length;
@@ -956,15 +587,9 @@ class OrthogonalRouter {
             final crossings = existingSegments.isEmpty
                 ? 0
                 : _crossingCount(a, b, existingSegments);
-            // Soft attraction toward a user-drawn guide stroke. Subtracted from
-            // the edge cost but clamped so the edge can never go cheaper than a
-            // small fraction of its raw length — keeps A*'s weights non-negative
-            // and stops the bias from manufacturing detours.
-            final bonus = guide.length < 2 ? 0.0 : _guideBonus(a, b, guide);
-            final cost = max(
-              dist * 0.25,
-              dist + overlap * _overlapPenalty + crossings * _crossingPenalty - bonus,
-            );
+            final cost = dist +
+                overlap * _overlapPenalty +
+                crossings * _crossingPenalty;
             adj[i].add((j, cost));
             adj[j].add((i, cost));
           }
@@ -976,22 +601,6 @@ class OrthogonalRouter {
     int direction(Offset a, Offset b) {
       if ((a.dy - b.dy).abs() < 0.5) return 1;
       return 2;
-    }
-
-    // Precompute how close each node sits to the guide (0 = on it, 1 = at/beyond
-    // the radius). Used to waive the bend penalty for corners the stroke implies.
-    final guideNearness = List<double>.filled(n, 0.0);
-    if (guide.length >= 2) {
-      for (int i = 0; i < n; i++) {
-        double best = double.infinity;
-        for (int g = 0; g < guide.length - 1; g++) {
-          final d = _pointSegmentDistance(points[i], guide[g], guide[g + 1]);
-          if (d < best) best = d;
-        }
-        if (best < _guideRadius) {
-          guideNearness[i] = 1.0 - best / _guideRadius;
-        }
-      }
     }
 
     final dist = List.generate(n, (_) => List.filled(3, double.infinity));
@@ -1021,12 +630,7 @@ class OrthogonalRouter {
 
       for (final (v, edgeCost) in adj[u]) {
         final vDir = direction(points[u], points[v]);
-        var bendCost = (uDir != 0 && uDir != vDir) ? _bendPenalty : 0.0;
-        // A bend that lands on the guide is one the user asked for — waive most
-        // of its penalty so curvy strokes actually shape the route.
-        if (bendCost > 0 && guideNearness[u] > 0) {
-          bendCost *= (1.0 - _guideBendDiscount * guideNearness[u]);
-        }
+        final bendCost = (uDir != 0 && uDir != vDir) ? _bendPenalty : 0.0;
         final newCost = cost + edgeCost + bendCost;
         if (newCost < dist[v][vDir]) {
           dist[v][vDir] = newCost;
