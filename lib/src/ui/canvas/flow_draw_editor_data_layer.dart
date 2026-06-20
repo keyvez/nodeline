@@ -832,24 +832,34 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       }
     }
 
-    // Update hovered handle from tap position before checking —
-    // on touch devices there are no hover events, so the handle
-    // state can be stale from a previous interaction.
-    _updateHoveredHandle(event.position);
-    // Check resize/rotation handles for any tool when something is selected,
-    // so objects can always be resized/rotated regardless of active tool.
-    if (_hoveredHandle.handle == Handle.rotate) {
-      _beginRotation(worldPos);
-      return;
-    }
-    if (_hoveredHandle.handle != Handle.none) {
-      _isResizing = _hoveredHandle;
-      _originalResizeRect =
-          _canvasBloc.state.drawingObjects[_isResizing.objectId]?.rect;
-      return;
+    // Alt + pencil is a route-guide stroke: the user is deliberately drawing
+    // over a selected edge/shape, so the stroke must win over resize/rotation/
+    // endpoint handles (which otherwise sit under the start of the stroke and
+    // hijack it into a drag). Skip all handle interception in that mode.
+    final isGuidePencilStroke = tool == EditorTool.pencil &&
+        HardwareKeyboard.instance.isAltPressed &&
+        event.buttons == kPrimaryMouseButton;
+
+    if (!isGuidePencilStroke) {
+      // Update hovered handle from tap position before checking —
+      // on touch devices there are no hover events, so the handle
+      // state can be stale from a previous interaction.
+      _updateHoveredHandle(event.position);
+      // Check resize/rotation handles for any tool when something is selected,
+      // so objects can always be resized/rotated regardless of active tool.
+      if (_hoveredHandle.handle == Handle.rotate) {
+        _beginRotation(worldPos);
+        return;
+      }
+      if (_hoveredHandle.handle != Handle.none) {
+        _isResizing = _hoveredHandle;
+        _originalResizeRect =
+            _canvasBloc.state.drawingObjects[_isResizing.objectId]?.rect;
+        return;
+      }
     }
 
-    if (_checkAndHandleQuickAction(worldPos)) {
+    if (!isGuidePencilStroke && _checkAndHandleQuickAction(worldPos)) {
       return;
     }
 
