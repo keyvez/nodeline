@@ -2208,13 +2208,14 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   /// [_currentPencilPoints]) into a routing guide. Returns true if it was
   /// consumed (so the caller should NOT create a freehand stroke).
   ///
-  /// Two outcomes, in priority order:
-  ///  • Exactly one arrow is selected → re-route THAT arrow with the stroke as
-  ///    its guide. Selecting an edge is an explicit "change this one" signal, so
-  ///    it wins even when the stroke's ends happen to land on shapes (otherwise
-  ///    tracing an existing edge would spawn a duplicate).
-  ///  • Otherwise, if both endpoints sit on/near two distinct shapes → create a
-  ///    new orthogonal arrow between them, biased by the simplified stroke.
+  /// Outcomes, in priority order:
+  ///  • Exactly one arrow is selected → re-route THAT arrow. Selecting an edge
+  ///    is an explicit "change this one" signal.
+  ///  • Else if an arrow already connects the two shapes under the stroke's ends
+  ///    (in either direction) → re-route that existing edge. Keeps the gesture
+  ///    idempotent: drawing again between the same nodes updates the same edge
+  ///    rather than spawning a duplicate, even when nothing is selected.
+  ///  • Else if the ends sit on two distinct shapes → create a new guided arrow.
   bool _tryConsumeStrokeAsGuide(String newId) {
     final raw = _currentPencilPoints
         .map((p) => Offset(p.x, p.y))
@@ -2229,18 +2230,27 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     if (selectedIds.length == 1) {
       final sel = _canvasBloc.state.drawingObjects[selectedIds.first];
       if (sel is ArrowObject) {
-        final rerouted = sel.copyWith(
-          pathType: LinkPathType.orthogonal,
-          routeGuide: guide,
-        );
-        _canvasBloc.add(DrawingObjectUpdated(rerouted));
+        _rerouteArrow(sel, guide);
         return true;
       }
     }
 
-    // Case 2: stroke spans two distinct shapes → new guided arrow.
     final startSnap = _snapTargetAt(raw.first);
     final endSnap = _snapTargetAt(raw.last);
+
+    // Case 2: an edge already joins these two shapes → re-route it instead of
+    // creating a duplicate (selection-independent).
+    if (startSnap != null && endSnap != null &&
+        startSnap.objectId != endSnap.objectId) {
+      final existing =
+          _arrowBetween(startSnap.objectId, endSnap.objectId);
+      if (existing != null) {
+        _rerouteArrow(existing, guide);
+        return true;
+      }
+    }
+
+    // Case 3: stroke spans two distinct shapes → new guided arrow.
     if (startSnap != null &&
         endSnap != null &&
         startSnap.objectId != endSnap.objectId) {
@@ -2269,6 +2279,37 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     }
 
     return false;
+  }
+
+  /// Applies [guide] to [arrow] as its route guide and re-selects it, so an
+  /// immediately-following guide stroke stays in the "re-route selected" case.
+  void _rerouteArrow(ArrowObject arrow, List<Offset> guide) {
+    final rerouted = arrow.copyWith(
+      pathType: LinkPathType.orthogonal,
+      routeGuide: guide,
+    );
+    _canvasBloc.add(DrawingObjectUpdated(rerouted));
+    _selectionBloc.add(SelectionReplaced(
+      nodeIds: const {},
+      drawingObjectIds: {arrow.id},
+    ));
+  }
+
+  /// Returns the first arrow whose two attachments connect [objectIdA] and
+  /// [objectIdB] (in either direction), or null if none exists. Used to keep the
+  /// guide gesture idempotent between the same pair of shapes.
+  ArrowObject? _arrowBetween(String objectIdA, String objectIdB) {
+    for (final obj in _canvasBloc.state.drawingObjects.values) {
+      if (obj is! ArrowObject) continue;
+      final a = obj.startAttachment?.objectId;
+      final b = obj.endAttachment?.objectId;
+      if (a == null || b == null) continue;
+      if ((a == objectIdA && b == objectIdB) ||
+          (a == objectIdB && b == objectIdA)) {
+        return obj;
+      }
+    }
+    return null;
   }
 
   /// Simplification tolerance in world units, scaled so the felt tolerance is
