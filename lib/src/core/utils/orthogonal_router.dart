@@ -689,20 +689,28 @@ class OrthogonalRouter {
   /// coincident points so it reads as a tidy orthogonal route.
   static List<Offset>? _guideToOrthogonalPath(
       Offset start, Offset end, List<Offset> guide, List<Rect> obstacles) {
-    // Anchors = start, the guide's interior vertices, end. We rely on the caller
-    // having already simplified the stroke, so the interior count is small.
-    final anchors = <Offset>[start];
-    for (int i = 1; i < guide.length - 1; i++) {
-      anchors.add(guide[i]);
-    }
-    anchors.add(end);
+    // Anchors trace the stroke: the route's start, EVERY guide vertex (the
+    // stroke's own shape, including its first/last points which usually sit off
+    // the exact endpoints), then the route's end. Using the full guide — not
+    // just its interior — keeps the staircase tracking the drawn sweep instead
+    // of jumping diagonally from the endpoint to a far interior vertex.
+    final anchors = <Offset>[start, ...guide, end];
 
     final path = <Offset>[start];
+    int skipped = 0;
     for (int i = 0; i < anchors.length - 1; i++) {
       final a = path.last;
+      // The final anchor (end) is mandatory; interior guide vertices may be
+      // skipped if they can't be reached cleanly, so one tight corner doesn't
+      // throw away the whole guide.
+      final isMandatory = i == anchors.length - 2;
       final b = anchors[i + 1];
       if ((a.dx - b.dx).abs() < 0.5 || (a.dy - b.dy).abs() < 0.5) {
-        // Already axis-aligned to the next anchor — no corner needed.
+        if (_segmentHitsAny(a, b, obstacles)) {
+          if (isMandatory) return null;
+          skipped++;
+          continue;
+        }
         path.add(b);
         continue;
       }
@@ -722,19 +730,36 @@ class OrthogonalRouter {
           !_segmentHitsAny(fallback, b, obstacles)) {
         corner = fallback;
       }
-      if (corner == null) return null; // can't honour the guide cleanly here.
+      if (corner == null) {
+        // Can't reach this anchor cleanly. Skip it (if interior) and try to
+        // reach the next one from where we are, so a single tight vertex
+        // doesn't abort the whole guide.
+        if (isMandatory) {
+          assert(() {
+            debugPrint('[router] staircase: end leg $a->$b blocked, falling back');
+            return true;
+          }());
+          return null;
+        }
+        skipped++;
+        continue;
+      }
       path.add(corner);
       path.add(b);
     }
 
-    // Final leg into `end` must itself be axis-aligned; if the last anchor was
-    // `end` it already is, otherwise the loop above handled it.
     final cleaned = _removeCollinear(path);
     if (cleaned.length < 2) return const [];
     // Validate every segment once more after cleanup.
     for (int i = 0; i < cleaned.length - 1; i++) {
       if (_segmentHitsAny(cleaned[i], cleaned[i + 1], obstacles)) return null;
     }
+    assert(() {
+      if (skipped > 0) {
+        debugPrint('[router] staircase skipped $skipped guide vertices');
+      }
+      return true;
+    }());
     // Return interior waypoints only (drop start & end to match A* output).
     if (cleaned.length <= 2) return const [];
     return cleaned.sublist(1, cleaned.length - 1);
