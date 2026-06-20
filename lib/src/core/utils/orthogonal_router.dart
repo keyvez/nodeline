@@ -775,7 +775,9 @@ class OrthogonalRouter {
   }
 
   // Jogs shorter than this (world units) are stroke noise, not intended bends.
-  static const double minJog = 24.0;
+  // Kept small so it only removes true noise — a larger value erased real
+  // structural bends and degenerated the guide to a (blocked) straight line.
+  static const double minJog = 8.0;
 
   /// Flattens short perpendicular jogs. An interior point [i] whose two adjacent
   /// segments are both short and run on opposite axes (a little step out and
