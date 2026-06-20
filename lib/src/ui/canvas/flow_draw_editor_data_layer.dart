@@ -10,6 +10,7 @@ import 'package:flow_draw/src/core/node_editor/clipboard.dart';
 import 'package:flow_draw/src/core/utils/json_extensions.dart';
 import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
 import 'package:flow_draw/src/core/utils/layered_layout.dart';
+import 'package:flow_draw/src/core/utils/path_layout.dart';
 import 'package:flow_draw/src/core/utils/snap_utils.dart';
 import 'package:flow_draw/src/core/utils/renderbox.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
@@ -108,6 +109,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   Offset _drawingStart = Offset.zero;
   List<PointVector> _currentPencilPoints = [];
   TempDrawingObject? _tempDrawingObject;
+  // True when the current draw stroke is an Alt-held "lay nodes along this
+  // guide" gesture rather than a real object. Captured at pointer-down because
+  // Alt may be released by the time the stroke finalizes. See
+  // _maybeLayoutSelectionAlongGuide.
+  bool _drawingAsLayoutGuide = false;
   Rect? _originalResizeRect;
   SnapPoint? _hoveredSnapPoint;
   SnapPoint? _startSnapPoint;
@@ -1347,6 +1353,13 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     _drawingStart = _hoveredSnapPoint?.worldPosition ?? worldPos;
     _startSnapPoint = _hoveredSnapPoint;
 
+    // Arm "lay selected nodes along this guide" if Alt is held while drawing a
+    // supported guide shape and there are selected boxes to arrange. The drawn
+    // stroke is consumed as a guide and never committed as an object.
+    _drawingAsLayoutGuide = HardwareKeyboard.instance.isAltPressed &&
+        _isLayoutGuideTool(tool) &&
+        _hasLayoutGuideSelection();
+
     if (tool == EditorTool.text) {
       _beginTextEditing(at: _drawingStart);
       return;
@@ -1765,10 +1778,184 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     });
   }
 
+  // ---- Lay-along-guide feature ----------------------------------------
+  // Alt-drawing a pencil stroke / shape outline / line over a node selection
+  // distributes the selected boxes along that guide instead of committing the
+  // stroke as a real object.
+
+  /// Tools whose stroke can act as a layout guide.
+  bool _isLayoutGuideTool(EditorTool tool) {
+    switch (tool) {
+      case EditorTool.pencil:
+      case EditorTool.circle:
+      case EditorTool.square:
+      case EditorTool.diamond:
+      case EditorTool.parallelogram:
+      case EditorTool.line:
+      case EditorTool.arrowTopRight:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /// True if there is at least one selected box (node or shape) that can be
+  /// arranged. Edges/lines/pencil objects are not boxes and are ignored.
+  bool _hasLayoutGuideSelection() {
+    final sel = _selectionBloc.state;
+    if (sel.selectedNodeIds.isNotEmpty) return true;
+    for (final id in sel.selectedDrawingObjectIds) {
+      if (_layoutBoxRect(id) != null) return true;
+    }
+    return false;
+  }
+
+  /// World-space rect of a selected box (node or shape drawing object), or null
+  /// if [id] is not an arrangeable box.
+  Rect? _layoutBoxRect(String id) {
+    final node = _canvasBloc.state.nodes[id];
+    if (node != null) {
+      return getNodeBoundsInWorld(node) ??
+          Rect.fromLTWH(node.offset.dx, node.offset.dy, 120, 48);
+    }
+    final obj = _canvasBloc.state.drawingObjects[id];
+    if (obj == null) return null;
+    if (obj is ArrowObject || obj is LineObject || obj is PencilStrokeObject) {
+      return null;
+    }
+    return obj.rect;
+  }
+
+  /// Flattens the just-drawn guide into a world-space polyline plus a
+  /// closed/open flag. Returns null for a degenerate guide.
+  (List<Offset>, bool)? _buildGuidePolyline(EditorTool tool) {
+    final temp = _tempDrawingObject;
+    if (temp == null) return null;
+
+    if (tool == EditorTool.pencil) {
+      final pts = [
+        for (final p in _currentPencilPoints) Offset(p.x, p.y),
+      ];
+      if (pts.length < 2) return null;
+      return (pts, false);
+    }
+
+    final start = temp.start;
+    final end = _hoveredSnapPoint?.worldPosition ?? temp.end;
+    final rect = Rect.fromPoints(start, end);
+
+    if (tool == EditorTool.line || tool == EditorTool.arrowTopRight) {
+      if ((end - start).distance < 1) return null;
+      return ([start, end], false);
+    }
+
+    if (rect.shortestSide < 1) return null;
+
+    switch (tool) {
+      case EditorTool.circle:
+        // Sample the ellipse perimeter. ~3deg steps keeps it smooth.
+        final c = rect.center;
+        final rx = rect.width / 2;
+        final ry = rect.height / 2;
+        const segments = 120;
+        return ([
+          for (int i = 0; i < segments; i++)
+            Offset(
+              c.dx + rx * cos(2 * pi * i / segments),
+              c.dy + ry * sin(2 * pi * i / segments),
+            ),
+        ], true);
+      case EditorTool.square:
+        return ([
+          rect.topLeft,
+          rect.topRight,
+          rect.bottomRight,
+          rect.bottomLeft,
+        ], true);
+      case EditorTool.diamond:
+        final c = rect.center;
+        return ([
+          Offset(c.dx, rect.top),
+          Offset(rect.right, c.dy),
+          Offset(c.dx, rect.bottom),
+          Offset(rect.left, c.dy),
+        ], true);
+      case EditorTool.parallelogram:
+        // Matches ParallelogramObject's default skewOffset (20.0), clamped so
+        // it never exceeds the rect width.
+        final skew = min(20.0, rect.width / 2);
+        return ([
+          Offset(rect.left + skew, rect.top),
+          Offset(rect.right, rect.top),
+          Offset(rect.right - skew, rect.bottom),
+          Offset(rect.left, rect.bottom),
+        ], true);
+      default:
+        return null;
+    }
+  }
+
+  /// Distributes the currently selected boxes along the drawn guide and emits a
+  /// single undoable [AutoLayoutApplied].
+  void _maybeLayoutSelectionAlongGuide(EditorTool tool) {
+    final guide = _buildGuidePolyline(tool);
+    if (guide == null) return;
+    final (polyline, closed) = guide;
+
+    // Gather selected boxes with their current centres and sizes.
+    final sel = _selectionBloc.state;
+    final ids = sel.selectedNodeIds.union(sel.selectedDrawingObjectIds);
+    final centres = <String, Offset>{};
+    final rects = <String, Rect>{};
+    for (final id in ids) {
+      final r = _layoutBoxRect(id);
+      if (r == null) continue;
+      centres[id] = r.center;
+      rects[id] = r;
+    }
+    if (centres.isEmpty) return;
+
+    final newCentres = PathLayout.distribute(
+      boxes: centres,
+      polyline: polyline,
+      closed: closed,
+    );
+    if (newCentres.isEmpty) return;
+
+    // AutoLayoutApplied takes top-left offsets; convert from centre using each
+    // box's size.
+    final offsets = <String, Offset>{};
+    newCentres.forEach((id, centre) {
+      final r = rects[id]!;
+      offsets[id] = Offset(
+        centre.dx - r.width / 2,
+        centre.dy - r.height / 2,
+      );
+    });
+
+    _canvasBloc.add(AutoLayoutApplied(offsets));
+  }
+
   void _finalizeDrawing() {
     if (_tempDrawingObject == null) return;
 
     final tool = _tempDrawingObject!.tool;
+
+    // Alt-held guide stroke: lay the selected boxes along it instead of
+    // committing a new object. Consume the gesture here.
+    if (_drawingAsLayoutGuide) {
+      _maybeLayoutSelectionAlongGuide(tool);
+      setState(() {
+        _isDrawing = false;
+        _tempDrawingObject = null;
+        _currentPencilPoints = [];
+        _startSnapPoint = null;
+        _hoveredSnapPoint = null;
+        _drawingAsLayoutGuide = false;
+      });
+      return;
+    }
+
     DrawingObject? newObject;
     bool isTapCreated = false;
     final id = const Uuid().v4();
