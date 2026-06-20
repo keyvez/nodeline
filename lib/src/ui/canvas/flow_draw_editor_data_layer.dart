@@ -1130,6 +1130,50 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         return;
       }
     }
+
+    // Double-clicking an edge edits its label. Reuse the connection hit-test so
+    // it matches what a click would select, then prompt for the label text.
+    final hitId = _findHitObject(worldPos);
+    if (hitId != null) {
+      final hit = _canvasBloc.state.drawingObjects[hitId];
+      if (hit is ArrowObject) {
+        _editArrowLabel(hit);
+      }
+    }
+  }
+
+  /// Prompts for [arrow]'s label text and commits the change (empty clears it).
+  Future<void> _editArrowLabel(ArrowObject arrow) async {
+    final controller = TextEditingController(text: arrow.arrowLabel ?? '');
+    final newLabel = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edge label'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Label (leave empty to remove)'),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (newLabel == null) return; // cancelled
+    final trimmed = newLabel.trim();
+    final updated = (trimmed.isEmpty
+        ? arrow.copyWith(clearArrowLabel: true)
+        : arrow.copyWith(arrowLabel: trimmed)) as ArrowObject;
+    _canvasBloc.add(DrawingObjectUpdated(updated));
   }
 
   void _handleRightClick(PointerDownEvent event, Offset worldPos) {

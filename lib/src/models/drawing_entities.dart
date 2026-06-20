@@ -1010,6 +1010,7 @@ class ArrowObject extends DrawingObject {
     List<Offset>? waypoints,
     LineStyle? lineStyle,
     String? arrowLabel,
+    bool clearArrowLabel = false,
     List<Offset>? routeGuide,
     bool clearRouteGuide = false,
   }) {
@@ -1026,7 +1027,7 @@ class ArrowObject extends DrawingObject {
       creationZoom: creationZoom ?? this.creationZoom,
       waypoints: waypoints ?? this.waypoints,
       lineStyle: lineStyle ?? this.lineStyle,
-      arrowLabel: arrowLabel ?? this.arrowLabel,
+      arrowLabel: clearArrowLabel ? null : (arrowLabel ?? this.arrowLabel),
       routeGuide: clearRouteGuide ? null : (routeGuide ?? this.routeGuide),
     );
   }

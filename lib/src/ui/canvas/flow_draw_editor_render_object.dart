@@ -1272,6 +1272,12 @@ class FlowDrawEditorRenderBox extends RenderBox
 
           final textWidth = labelParagraph.longestLine;
           final textHeight = labelParagraph.height;
+          // Re-layout to the text's natural width so the paragraph box and the
+          // background rect share the same left edge. Laying out at the 200px
+          // constraint above leaves a centered glyph run inside a 200px-wide box,
+          // which shifts the text relative to `textWidth` and leaves the bg rect
+          // floating to the side of the label.
+          labelParagraph.layout(ui.ParagraphConstraints(width: textWidth));
           final padding = 4.0 / zoom;
           final bgRect = Rect.fromCenter(
             center: labelCenter,
