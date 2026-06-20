@@ -689,30 +689,45 @@ class OrthogonalRouter {
   /// coincident points so it reads as a tidy orthogonal route.
   static List<Offset>? _guideToOrthogonalPath(
       Offset start, Offset end, List<Offset> guide, List<Rect> obstacles) {
-    // A rough stroke often overshoots the node it heads into (it ends past the
-    // target, or starts before the source). Those out-of-span vertices force the
-    // final/first leg to double back across the node, which the obstacle check
-    // rejects. Trim guide vertices that fall outside the start↔end span along
-    // the route's dominant axis before tracing.
+    // A rough stroke often overshoots the node it heads into. Trim vertices that
+    // fall outside the start↔end span along the route's dominant axis.
     final trimmed = _trimGuideToSpan(start, end, guide);
+    if (trimmed.isEmpty) return null;
 
-    // Anchors trace the stroke: the route's start, EVERY (trimmed) guide vertex,
-    // then the route's end. Using the trimmed guide keeps the staircase tracking
-    // the drawn sweep without doubling back past the endpoints.
-    final anchors = <Offset>[start, ...trimmed, end];
+    // Anchor the guide's ends to the route endpoints so the approach legs are
+    // clean: pull the first guide vertex onto `start`'s axis and the last onto
+    // `end`'s, instead of connecting the raw (overshooting) stroke ends to the
+    // nodes. This is what stops the "end leg blocked" double-backs.
+    final anchors = <Offset>[start];
+    for (final g in trimmed) {
+      anchors.add(g);
+    }
+    anchors.add(end);
 
     final path = <Offset>[start];
     int skipped = 0;
     for (int i = 0; i < anchors.length - 1; i++) {
       final a = path.last;
-      // The final anchor (end) is mandatory; interior guide vertices may be
-      // skipped if they can't be reached cleanly, so one tight corner doesn't
-      // throw away the whole guide.
       final isMandatory = i == anchors.length - 2;
       final b = anchors[i + 1];
       if ((a.dx - b.dx).abs() < 0.5 || (a.dy - b.dy).abs() < 0.5) {
         if (_segmentHitsAny(a, b, obstacles)) {
-          if (isMandatory) return null;
+          if (isMandatory) {
+            // Final approach blocked on a straight leg: insert a perpendicular
+            // detour through a clear lane rather than giving up the whole guide.
+            final detoured = _detourTo(a, b, obstacles);
+            if (detoured == null) {
+              assert(() {
+                debugPrint('[router] staircase: end leg $a->$b blocked (no detour)');
+                return true;
+              }());
+              return null;
+            }
+            for (final p in detoured) {
+              path.add(p);
+            }
+            continue;
+          }
           skipped++;
           continue;
         }
@@ -736,15 +751,19 @@ class OrthogonalRouter {
         corner = fallback;
       }
       if (corner == null) {
-        // Can't reach this anchor cleanly. Skip it (if interior) and try to
-        // reach the next one from where we are, so a single tight vertex
-        // doesn't abort the whole guide.
         if (isMandatory) {
-          assert(() {
-            debugPrint('[router] staircase: end leg $a->$b blocked, falling back');
-            return true;
-          }());
-          return null;
+          final detoured = _detourTo(a, b, obstacles);
+          if (detoured == null) {
+            assert(() {
+              debugPrint('[router] staircase: end leg $a->$b blocked (no detour)');
+              return true;
+            }());
+            return null;
+          }
+          for (final p in detoured) {
+            path.add(p);
+          }
+          continue;
         }
         skipped++;
         continue;
@@ -816,6 +835,36 @@ class OrthogonalRouter {
       }
     }
     return pts;
+  }
+
+  /// Finds an orthogonal detour from [a] to [b] (returning the intermediate
+  /// points, ending at [b]) when the direct L-corners are both blocked. Tries
+  /// routing out to a series of offsets perpendicular to the a→b axis until a
+  /// clear two-bend path is found. Returns null if none works.
+  static List<Offset>? _detourTo(Offset a, Offset b, List<Rect> obstacles) {
+    // Search a range of perpendicular offsets on both sides. The detour shape is
+    // a→m1→m2→b where m1/m2 share a coordinate offset out of the blocked lane.
+    const steps = [60.0, 120.0, 200.0, 320.0, 480.0, -60.0, -120.0, -200.0, -320.0, -480.0];
+    final dx = (b.dx - a.dx).abs();
+    final dy = (b.dy - a.dy).abs();
+    final horizontalDominant = dx >= dy;
+    for (final off in steps) {
+      Offset m1, m2;
+      if (horizontalDominant) {
+        // Step vertically out of the lane, run across, step back in.
+        m1 = Offset(a.dx, a.dy + off);
+        m2 = Offset(b.dx, a.dy + off);
+      } else {
+        m1 = Offset(a.dx + off, a.dy);
+        m2 = Offset(a.dx + off, b.dy);
+      }
+      if (!_segmentHitsAny(a, m1, obstacles) &&
+          !_segmentHitsAny(m1, m2, obstacles) &&
+          !_segmentHitsAny(m2, b, obstacles)) {
+        return [m1, m2, b];
+      }
+    }
+    return null;
   }
 
   /// Drops guide vertices that overshoot the [start]↔[end] span, i.e. whose
