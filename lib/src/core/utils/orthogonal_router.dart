@@ -689,20 +689,19 @@ class OrthogonalRouter {
   /// coincident points so it reads as a tidy orthogonal route.
   static List<Offset>? _guideToOrthogonalPath(
       Offset start, Offset end, List<Offset> guide, List<Rect> obstacles) {
-    // A rough stroke often overshoots the node it heads into. Trim vertices that
-    // fall outside the start↔end span along the route's dominant axis.
-    final trimmed = _trimGuideToSpan(start, end, guide);
-    if (trimmed.isEmpty) return null;
-
-    // Anchor the guide's ends to the route endpoints so the approach legs are
-    // clean: pull the first guide vertex onto `start`'s axis and the last onto
-    // `end`'s, instead of connecting the raw (overshooting) stroke ends to the
-    // nodes. This is what stops the "end leg blocked" double-backs.
-    final anchors = <Offset>[start];
-    for (final g in trimmed) {
-      anchors.add(g);
+    // Smooth-then-trace: keep only the guide's INTERIOR vertices as the corridor
+    // (its first/last points are just the approach into each node, which the
+    // stub/assemble machinery handles). Then clamp those interior anchors into
+    // the route's span along the connection axis so a big overshoot loop becomes
+    // a bend at the span edge instead of a wild straight drop into the node.
+    final interior = guide.length > 2 ? guide.sublist(1, guide.length - 1) : const <Offset>[];
+    final clamped = _clampAnchorsToSpan(start, end, interior);
+    if (clamped.isEmpty) {
+      // Nothing meaningful left after smoothing — let A* (guide-biased) handle it.
+      return null;
     }
-    anchors.add(end);
+
+    final anchors = <Offset>[start, ...clamped, end];
 
     final path = <Offset>[start];
     int skipped = 0;
@@ -867,25 +866,30 @@ class OrthogonalRouter {
     return null;
   }
 
-  /// Drops guide vertices that overshoot the [start]↔[end] span, i.e. whose
-  /// projection onto the start→end axis lies outside [0,1] (with a small margin).
-  /// A rough stroke that ends past the target node would otherwise force the
-  /// final leg to double back across it. The perpendicular component (the bow of
-  /// the stroke) is preserved — only longitudinal overshoot is trimmed.
-  static List<Offset> _trimGuideToSpan(
-      Offset start, Offset end, List<Offset> guide) {
+  /// Clamps each anchor's projection onto the [start]→[end] axis into [0,1]
+  /// (keeping its perpendicular offset), so a stroke that loops well past an
+  /// endpoint along the connection direction becomes a bend at the span edge
+  /// rather than a long straight overshoot into the node. The perpendicular
+  /// component — the bow of the arc the user actually drew — is preserved.
+  static List<Offset> _clampAnchorsToSpan(
+      Offset start, Offset end, List<Offset> anchors) {
     final axis = end - start;
     final lenSq = axis.dx * axis.dx + axis.dy * axis.dy;
-    if (lenSq < 1e-6) return guide;
-    // Allow vertices slightly beyond the endpoints so a stroke that lands just
-    // shy of / just past a node border still contributes its shape.
-    const margin = 0.06;
-    final kept = <Offset>[];
-    for (final g in guide) {
+    if (lenSq < 1e-6) return anchors;
+    final out = <Offset>[];
+    for (final g in anchors) {
       final t = ((g.dx - start.dx) * axis.dx + (g.dy - start.dy) * axis.dy) / lenSq;
-      if (t >= -margin && t <= 1 + margin) kept.add(g);
+      final tc = t.clamp(0.0, 1.0);
+      if (tc == t) {
+        out.add(g);
+      } else {
+        // Shift the anchor back along the axis to the clamped projection,
+        // preserving its perpendicular displacement.
+        final shift = axis * (tc - t);
+        out.add(g + shift);
+      }
     }
-    return kept;
+    return out;
   }
 
   /// True when the [guide] bows away from the straight [start]→[end] line by

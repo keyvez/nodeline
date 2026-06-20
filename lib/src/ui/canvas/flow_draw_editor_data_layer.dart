@@ -2400,7 +2400,10 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
   /// Simplification tolerance in world units, scaled so the felt tolerance is
   /// constant on screen regardless of zoom.
-  double _strokeSimplifyToleranceWorld() => 14.0 / _canvasBloc.state.viewportZoom;
+  // Smooth-by-default: a guide is intent, not ink, so reduce it to a clean
+  // skeleton of a few bends rather than tracking every wobble. Shift+Alt
+  // multiplies this further.
+  double _strokeSimplifyToleranceWorld() => 40.0 / _canvasBloc.state.viewportZoom;
 
   /// Finds the shape (drawing object or node) nearest to [worldPos] for the
   /// purpose of anchoring a guide stroke's endpoint, returning a snap target
