@@ -111,6 +111,10 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   /// stroke is treated as a routing guide rather than freehand ink. Captured at
   /// pointer-down because the user may release Alt before lifting the pen.
   bool _pencilGuideMode = false;
+  /// True when the guide stroke was started with Shift+Alt — apply heavier
+  /// smoothing (a larger simplification tolerance) so the route reads as a few
+  /// clean bends instead of tracking every wobble. Captured at pointer-down.
+  bool _pencilSmoothMode = false;
   TempDrawingObject? _tempDrawingObject;
   Rect? _originalResizeRect;
   SnapPoint? _hoveredSnapPoint;
@@ -1369,6 +1373,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     setState(() {
       if (tool == EditorTool.pencil) {
         _pencilGuideMode = HardwareKeyboard.instance.isAltPressed;
+        _pencilSmoothMode = _pencilGuideMode &&
+            HardwareKeyboard.instance.isShiftPressed;
         _currentPencilPoints = [
           PointVector(_drawingStart.dx, _drawingStart.dy, event.pressure),
         ];
@@ -1931,6 +1937,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       _tempDrawingObject = null;
       _currentPencilPoints = [];
       _pencilGuideMode = false;
+      _pencilSmoothMode = false;
       _startSnapPoint = null;
       _hoveredSnapPoint = null;
     });
@@ -2265,7 +2272,10 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         .toList(growable: false);
     if (raw.length < 2) return false;
 
-    final guide = _simplifyStroke(raw, _strokeSimplifyToleranceWorld());
+    // Shift+Alt smooths harder: a much larger simplification tolerance collapses
+    // the stroke to a few clean bends.
+    final tol = _strokeSimplifyToleranceWorld() * (_pencilSmoothMode ? 4.0 : 1.0);
+    final guide = _simplifyStroke(raw, tol);
     if (guide.length < 2) return false;
 
     // Case 1: re-route the single selected arrow (the only edit path).

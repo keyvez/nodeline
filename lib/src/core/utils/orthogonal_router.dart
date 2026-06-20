@@ -753,7 +753,11 @@ class OrthogonalRouter {
       path.add(b);
     }
 
-    final cleaned = _removeCollinear(path);
+    // Drop tiny perpendicular jogs (a short segment between two longer parallel
+    // ones, e.g. a 9px step from stroke noise) so the route reads clean, THEN
+    // remove exact collinear points.
+    var cleaned = _removeShortJogs(path, minJog);
+    cleaned = _removeCollinear(cleaned);
     if (cleaned.length < 2) return const [];
     // Validate every segment once more after cleanup.
     for (int i = 0; i < cleaned.length - 1; i++) {
@@ -768,6 +772,48 @@ class OrthogonalRouter {
     // Return interior waypoints only (drop start & end to match A* output).
     if (cleaned.length <= 2) return const [];
     return cleaned.sublist(1, cleaned.length - 1);
+  }
+
+  // Jogs shorter than this (world units) are stroke noise, not intended bends.
+  static const double minJog = 24.0;
+
+  /// Flattens short perpendicular jogs. An interior point [i] whose two adjacent
+  /// segments are both short and run on opposite axes (a little step out and
+  /// back) is collapsed by snapping the step away, so the route runs straight
+  /// through instead of jogging a few pixels. Endpoints are never moved.
+  /// Repeated until stable.
+  static List<Offset> _removeShortJogs(List<Offset> path, double minLen) {
+    if (path.length < 4) return path;
+    var pts = List<Offset>.of(path);
+    bool changed = true;
+    while (changed) {
+      changed = false;
+      // Find a short interior segment (i..i+1) where both ends are interior
+      // points; align the two surrounding long segments by removing the jog.
+      for (int i = 1; i < pts.length - 2; i++) {
+        final a = pts[i];
+        final b = pts[i + 1];
+        if ((a - b).distance >= minLen) continue;
+        // Snap the LATER point onto the earlier one's axis so the segment before
+        // `a` extends straight through. This converts "long | short-jog | long"
+        // into a single corner.
+        final before = pts[i - 1];
+        final stepIsHorizontal = (a.dy - b.dy).abs() < 0.5; // jog runs in X
+        // Only collapse when `before→a` runs the OTHER axis (a genuine jog),
+        // otherwise we'd distort a real staircase tread.
+        final beforeIsHorizontal = (before.dy - a.dy).abs() < 0.5;
+        if (stepIsHorizontal == beforeIsHorizontal) continue;
+        if (stepIsHorizontal) {
+          pts[i] = Offset(b.dx, a.dy); // pull `a` across to b's column
+        } else {
+          pts[i] = Offset(a.dx, b.dy); // pull `a` down to b's row
+        }
+        pts = _removeCollinear(pts);
+        changed = true;
+        break;
+      }
+    }
+    return pts;
   }
 
   /// Drops guide vertices that overshoot the [start]↔[end] span, i.e. whose
