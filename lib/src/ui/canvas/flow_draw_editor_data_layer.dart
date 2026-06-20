@@ -2316,13 +2316,15 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   /// constant on screen regardless of zoom.
   double _strokeSimplifyToleranceWorld() => 14.0 / _canvasBloc.state.viewportZoom;
 
-  /// Finds a shape (drawing object or node) whose border the [worldPos] sits on
-  /// or just inside, returning a snap target with relative position. Mirrors the
-  /// snap logic used during arrow drawing but tolerant of an endpoint dropped
-  /// inside the shape body (a rough stroke rarely lands exactly on the border).
+  /// Finds the shape (drawing object or node) nearest to [worldPos] for the
+  /// purpose of anchoring a guide stroke's endpoint, returning a snap target
+  /// with relative position. A rough guide stroke rarely lands exactly on a
+  /// box, so this picks the CLOSEST shape within a generous radius (and always
+  /// wins when the point is inside one) rather than demanding a tight hit.
   SnapPoint? _snapTargetAt(Offset worldPos) {
     final canvasState = _canvasBloc.state;
-    final tolerance = 28.0 / canvasState.viewportZoom;
+    // Generous: the endpoints of a sketched path land near, not on, the nodes.
+    final tolerance = 80.0 / canvasState.viewportZoom;
     SnapPoint? best;
     double bestDist = double.infinity;
 
@@ -2330,7 +2332,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       final inside = rect.contains(worldPos);
       final border = getClosestPointOnRectBorder(worldPos, rect);
       final dist = inside ? 0.0 : (worldPos - border).distance;
-      if (dist > tolerance || dist >= bestDist) return;
+      if (dist > tolerance || dist > bestDist) return;
       bestDist = dist;
       best = (
         objectId: objectId,
