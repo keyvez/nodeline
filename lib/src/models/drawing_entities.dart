@@ -864,6 +864,10 @@ class ArrowObject extends DrawingObject {
   final LineStyle lineStyle;
   /// Optional text label displayed at the midpoint of this arrow.
   final String? arrowLabel;
+  /// Optional simplified freehand stroke (world coords) that softly biases the
+  /// orthogonal router toward this shape. Null = route freely. Only consulted
+  /// for [LinkPathType.orthogonal].
+  final List<Offset>? routeGuide;
 
   /// Transient cache of the polyline actually drawn on screen (edge-snapped
   /// start/end plus routed waypoints), written by the render object each paint.
@@ -885,6 +889,7 @@ class ArrowObject extends DrawingObject {
     this.waypoints,
     this.lineStyle = LineStyle.solid,
     this.arrowLabel,
+    this.routeGuide,
   });
 
   @override
@@ -965,6 +970,8 @@ class ArrowObject extends DrawingObject {
     'creationZoom': creationZoom,
     'lineStyle': lineStyle.name,
     if (arrowLabel != null) 'arrowLabel': arrowLabel,
+    if (routeGuide != null)
+      'routeGuide': routeGuide!.map((o) => o.toJson()).toList(),
   };
 
   factory ArrowObject.fromJson(Map<String, dynamic> json) {
@@ -981,6 +988,11 @@ class ArrowObject extends DrawingObject {
       midPoint: json['midPoint'] != null ? JSONOffset.fromJson((json['midPoint'] as List).cast<double>()) : null,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
       arrowLabel: json['arrowLabel'] as String?,
+      routeGuide: json['routeGuide'] != null
+          ? (json['routeGuide'] as List)
+              .map((o) => JSONOffset.fromJson((o as List).cast<double>()))
+              .toList()
+          : null,
     );
   }
 
@@ -998,6 +1010,8 @@ class ArrowObject extends DrawingObject {
     List<Offset>? waypoints,
     LineStyle? lineStyle,
     String? arrowLabel,
+    List<Offset>? routeGuide,
+    bool clearRouteGuide = false,
   }) {
     return ArrowObject(
       id: id,
@@ -1013,6 +1027,7 @@ class ArrowObject extends DrawingObject {
       waypoints: waypoints ?? this.waypoints,
       lineStyle: lineStyle ?? this.lineStyle,
       arrowLabel: arrowLabel ?? this.arrowLabel,
+      routeGuide: clearRouteGuide ? null : (routeGuide ?? this.routeGuide),
     );
   }
 }

@@ -620,6 +620,13 @@ class FlowDrawEditorRenderBox extends RenderBox
     final eo = relOverrides['${o.id}:end'];
     if (so != null) sb.write('<s${q(so.dx)},${q(so.dy)}');
     if (eo != null) sb.write('<e${q(eo.dx)},${q(eo.dy)}');
+    final guide = o.routeGuide;
+    if (guide != null && guide.isNotEmpty) {
+      sb.write('|g');
+      for (final p in guide) {
+        sb..write(q(p.dx))..write(',')..write(q(p.dy))..write(';');
+      }
+    }
     sb..write('#')..write(obstacleSetKey);
     return sb.toString();
   }
@@ -1098,6 +1105,7 @@ class FlowDrawEditorRenderBox extends RenderBox
             devicePixelRatio: dpr,
             zoom: canvasState.viewportZoom,
             existingSegments: routedSegments,
+            guide: obj.routeGuide ?? const [],
           );
           if (PaintProfiler.enabled) {
             _profRoutingUs +=

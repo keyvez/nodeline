@@ -107,6 +107,10 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   Rect _selectionArea = Rect.zero;
   Offset _drawingStart = Offset.zero;
   List<PointVector> _currentPencilPoints = [];
+  /// True when the current pencil stroke was started with Alt/Option held — the
+  /// stroke is treated as a routing guide rather than freehand ink. Captured at
+  /// pointer-down because the user may release Alt before lifting the pen.
+  bool _pencilGuideMode = false;
   TempDrawingObject? _tempDrawingObject;
   Rect? _originalResizeRect;
   SnapPoint? _hoveredSnapPoint;
@@ -1310,6 +1314,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
     setState(() {
       if (tool == EditorTool.pencil) {
+        _pencilGuideMode = HardwareKeyboard.instance.isAltPressed;
         _currentPencilPoints = [
           PointVector(_drawingStart.dx, _drawingStart.dy, event.pressure),
         ];
@@ -1727,6 +1732,10 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     final tool = _tempDrawingObject!.tool;
     DrawingObject? newObject;
     bool isTapCreated = false;
+    // Set when an Alt-pencil stroke was consumed as a routing guide (it handles
+    // its own bloc dispatch/selection), so the commit block below must not clear
+    // the selection as if nothing was drawn.
+    bool guideConsumed = false;
     final id = const Uuid().v4();
 
     final endPos = _hoveredSnapPoint?.worldPosition ?? _tempDrawingObject!.end;
@@ -1766,7 +1775,14 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       }
     } else if (tool == EditorTool.pencil) {
       if (_currentPencilPoints.length > 1) {
-        newObject = PencilStrokeObject(id: id, points: _currentPencilPoints, creationZoom: _canvasBloc.state.viewportZoom);
+        // Alt-held pencil strokes are routing guides, not freehand ink: either
+        // they become a new orthogonal arrow between the shapes under each end,
+        // or (if exactly one arrow is selected and the ends miss shapes) they
+        // re-route that arrow. Anything else falls back to a normal stroke.
+        guideConsumed = _pencilGuideMode && _tryConsumeStrokeAsGuide(id);
+        if (!guideConsumed) {
+          newObject = PencilStrokeObject(id: id, points: _currentPencilPoints, creationZoom: _canvasBloc.state.viewportZoom);
+        }
       }
     } else {
       final snappedStart = snapOffset(_drawingStart);
@@ -1847,7 +1863,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         ));
         _toolBloc.add(const ToolSelected(EditorTool.arrow));
       }
-    } else {
+    } else if (!guideConsumed) {
       _selectionBloc.add(SelectionCleared());
     }
 
@@ -1860,6 +1876,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       _isDrawing = false;
       _tempDrawingObject = null;
       _currentPencilPoints = [];
+      _pencilGuideMode = false;
       _startSnapPoint = null;
       _hoveredSnapPoint = null;
     });
@@ -2175,6 +2192,163 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       if ((worldPos - pinCenter).distance <= hitRadius) return c;
     }
     return null;
+  }
+
+  /// Attempts to turn the just-finished Alt-pencil stroke (in
+  /// [_currentPencilPoints]) into a routing guide. Returns true if it was
+  /// consumed (so the caller should NOT create a freehand stroke).
+  ///
+  /// Two outcomes:
+  ///  • Both endpoints sit on/near a shape → create a new orthogonal arrow
+  ///    between them, biased by the simplified stroke.
+  ///  • Endpoints miss shapes but exactly one arrow is selected → re-route that
+  ///    arrow with the stroke as its guide.
+  bool _tryConsumeStrokeAsGuide(String newId) {
+    final raw = _currentPencilPoints
+        .map((p) => Offset(p.x, p.y))
+        .toList(growable: false);
+    if (raw.length < 2) return false;
+
+    final guide = _simplifyStroke(raw, _strokeSimplifyToleranceWorld());
+    if (guide.length < 2) return false;
+
+    final startSnap = _snapTargetAt(raw.first);
+    final endSnap = _snapTargetAt(raw.last);
+
+    // Case 1: stroke spans two distinct shapes → new guided arrow.
+    if (startSnap != null &&
+        endSnap != null &&
+        startSnap.objectId != endSnap.objectId) {
+      final arrow = ArrowObject(
+        id: newId,
+        start: startSnap.worldPosition,
+        end: endSnap.worldPosition,
+        pathType: LinkPathType.orthogonal,
+        startAttachment: ObjectAttachment(
+          objectId: startSnap.objectId,
+          relativePosition: startSnap.relativePosition,
+        ),
+        endAttachment: ObjectAttachment(
+          objectId: endSnap.objectId,
+          relativePosition: endSnap.relativePosition,
+        ),
+        routeGuide: guide,
+        creationZoom: _canvasBloc.state.viewportZoom,
+      );
+      _canvasBloc.add(DrawingObjectAdded(arrow));
+      _selectionBloc.add(SelectionReplaced(
+        nodeIds: const {},
+        drawingObjectIds: {arrow.id},
+      ));
+      return true;
+    }
+
+    // Case 2: re-route the single selected arrow.
+    final selectedIds = _selectionBloc.state.selectedDrawingObjectIds;
+    if (selectedIds.length == 1) {
+      final sel = _canvasBloc.state.drawingObjects[selectedIds.first];
+      if (sel is ArrowObject) {
+        final rerouted = sel.copyWith(
+          pathType: LinkPathType.orthogonal,
+          routeGuide: guide,
+        );
+        _canvasBloc.add(DrawingObjectUpdated(rerouted));
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /// Simplification tolerance in world units, scaled so the felt tolerance is
+  /// constant on screen regardless of zoom.
+  double _strokeSimplifyToleranceWorld() => 14.0 / _canvasBloc.state.viewportZoom;
+
+  /// Finds a shape (drawing object or node) whose border the [worldPos] sits on
+  /// or just inside, returning a snap target with relative position. Mirrors the
+  /// snap logic used during arrow drawing but tolerant of an endpoint dropped
+  /// inside the shape body (a rough stroke rarely lands exactly on the border).
+  SnapPoint? _snapTargetAt(Offset worldPos) {
+    final canvasState = _canvasBloc.state;
+    final tolerance = 28.0 / canvasState.viewportZoom;
+    SnapPoint? best;
+    double bestDist = double.infinity;
+
+    void consider(String objectId, Rect rect) {
+      final inside = rect.contains(worldPos);
+      final border = getClosestPointOnRectBorder(worldPos, rect);
+      final dist = inside ? 0.0 : (worldPos - border).distance;
+      if (dist > tolerance || dist >= bestDist) return;
+      bestDist = dist;
+      best = (
+        objectId: objectId,
+        worldPosition: border,
+        relativePosition: Offset(
+          (border.dx - rect.left) / rect.width.clamp(0.001, double.infinity),
+          (border.dy - rect.top) / rect.height.clamp(0.001, double.infinity),
+        ),
+      );
+    }
+
+    for (final obj in canvasState.drawingObjects.values) {
+      if (obj is RectangleObject ||
+          obj is CircleObject ||
+          obj is DiamondObject ||
+          obj is ParallelogramObject ||
+          obj is FigureObject ||
+          obj is SvgObject) {
+        consider(obj.id, obj.rect);
+      }
+    }
+    for (final node in canvasState.nodes.values) {
+      final bounds = getNodeBoundsInWorld(node);
+      if (bounds != null) consider(node.id, bounds);
+    }
+    return best;
+  }
+
+  /// Ramer–Douglas–Peucker polyline simplification. Reduces a dense freehand
+  /// stroke to its key inflection points so the router gets a handful of
+  /// attractors rather than hundreds of nearly-coincident ones.
+  List<Offset> _simplifyStroke(List<Offset> points, double tolerance) {
+    if (points.length < 3) return List.of(points);
+    final keep = List<bool>.filled(points.length, false);
+    keep[0] = true;
+    keep[points.length - 1] = true;
+    final stack = <(int, int)>[(0, points.length - 1)];
+    while (stack.isNotEmpty) {
+      final (first, last) = stack.removeLast();
+      double maxDist = 0.0;
+      int index = -1;
+      for (int i = first + 1; i < last; i++) {
+        final d = _perpDistance(points[i], points[first], points[last]);
+        if (d > maxDist) {
+          maxDist = d;
+          index = i;
+        }
+      }
+      if (maxDist > tolerance && index != -1) {
+        keep[index] = true;
+        stack.add((first, index));
+        stack.add((index, last));
+      }
+    }
+    final out = <Offset>[];
+    for (int i = 0; i < points.length; i++) {
+      if (keep[i]) out.add(points[i]);
+    }
+    return out;
+  }
+
+  double _perpDistance(Offset p, Offset a, Offset b) {
+    final dx = b.dx - a.dx;
+    final dy = b.dy - a.dy;
+    final lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-9) return (p - a).distance;
+    var t = ((p.dx - a.dx) * dx + (p.dy - a.dy) * dy) / lenSq;
+    t = t.clamp(0.0, 1.0);
+    final proj = Offset(a.dx + dx * t, a.dy + dy * t);
+    return (p - proj).distance;
   }
 
   String? _findHitObject(Offset worldPos) {
