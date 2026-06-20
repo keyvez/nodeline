@@ -2273,6 +2273,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     if (selectedIds.length == 1) {
       final sel = _canvasBloc.state.drawingObjects[selectedIds.first];
       if (sel is ArrowObject) {
+        debugPrint('[guide] CASE1 reroute selected arrow=${sel.id} guidePts=${guide.length}');
         _rerouteArrow(sel, guide);
         return true;
       }
@@ -2280,16 +2281,24 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
     final startSnap = _snapTargetAt(raw.first);
     final endSnap = _snapTargetAt(raw.last);
+    debugPrint('[guide] no-selection path: startSnap=${startSnap?.objectId ?? "none"} '
+        'endSnap=${endSnap?.objectId ?? "none"} guidePts=${guide.length}');
 
     // Case 2: stroke spans two distinct shapes → new guided arrow (creates a
     // parallel edge even if the pair is already connected).
     if (startSnap != null &&
         endSnap != null &&
         startSnap.objectId != endSnap.objectId) {
+      // Inherit the visual style of an existing edge between the same pair, so a
+      // parallel edge matches its sibling instead of resetting to defaults.
+      final sibling =
+          _existingArrowBetween(startSnap.objectId, endSnap.objectId);
       final arrow = ArrowObject(
         id: newId,
         start: startSnap.worldPosition,
         end: endSnap.worldPosition,
+        // Always orthogonal so the guide actually shapes the path; inherit the
+        // sibling's line style (dashed/solid/colour) but NOT its label.
         pathType: LinkPathType.orthogonal,
         startAttachment: ObjectAttachment(
           objectId: startSnap.objectId,
@@ -2300,6 +2309,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           relativePosition: endSnap.relativePosition,
         ),
         routeGuide: guide,
+        lineStyle: sibling?.lineStyle ?? _toolBloc.state.lineStyle,
         creationZoom: _canvasBloc.state.viewportZoom,
       );
       _canvasBloc.add(DrawingObjectAdded(arrow));
@@ -2311,6 +2321,23 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     }
 
     return false;
+  }
+
+  /// Returns an existing arrow connecting [objectIdA] and [objectIdB] (either
+  /// direction), or null. Used only to inherit a parallel edge's visual style —
+  /// it does NOT re-route (a new guided edge is still created).
+  ArrowObject? _existingArrowBetween(String objectIdA, String objectIdB) {
+    for (final obj in _canvasBloc.state.drawingObjects.values) {
+      if (obj is! ArrowObject) continue;
+      final a = obj.startAttachment?.objectId;
+      final b = obj.endAttachment?.objectId;
+      if (a == null || b == null) continue;
+      if ((a == objectIdA && b == objectIdB) ||
+          (a == objectIdB && b == objectIdA)) {
+        return obj;
+      }
+    }
+    return null;
   }
 
   /// Applies [guide] to [arrow] as its route guide and re-selects it, so an
