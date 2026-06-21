@@ -172,6 +172,27 @@ final List<ToolSchema> canvasToolSchemas = [
         'Requires a guide shape and nodes to be selected.',
     parameters: {'type': 'object', 'properties': {}},
   ),
+  ToolSchema(
+    name: 'read_drawing',
+    description:
+        'Read a drawn shape/stroke as a guide path: returns its sampled points, '
+        'whether it is closed, and its bounding box. Use to understand a sketch '
+        'the user drew before laying nodes along it or mimicking its shape.',
+    parameters: _object({
+      'id': _string('The id of the drawing/shape to read.'),
+    }, required: ['id']),
+  ),
+  ToolSchema(
+    name: 'apply_style_template',
+    description:
+        'Copy appearance (fill, stroke, line style) from source object(s) onto '
+        'target object(s). Use for "make these look like that" / style transfer. '
+        'Omit targetIds to use the current selection.',
+    parameters: _object({
+      'sourceIds': _array({'type': 'string'}, 'Object id(s) to copy style from.'),
+      'targetIds': _array({'type': 'string'}, 'Object id(s) to apply style to. Omit to use the selection.'),
+    }, required: ['sourceIds']),
+  ),
   const ToolSchema(
     name: 'get_selection',
     description: 'Read the current selection: ids, types, and labels.',

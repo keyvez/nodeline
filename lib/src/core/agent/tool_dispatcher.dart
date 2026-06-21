@@ -4,6 +4,7 @@ import 'package:flow_draw/src/blocs/canvas/canvas_bloc.dart';
 import 'package:flow_draw/src/blocs/selection/selection_bloc.dart';
 import 'package:flow_draw/src/blocs/selection/selection_resolver.dart';
 import 'package:flow_draw/src/core/agent/tool_call.dart';
+import 'package:flow_draw/src/core/utils/guide_geometry.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flow_draw/src/models/styles.dart';
 import 'package:uuid/uuid.dart';
@@ -47,6 +48,8 @@ class ToolDispatcher {
     'distribute',
     'auto_layout',
     'lay_along_guide',
+    'read_drawing',
+    'apply_style_template',
     'get_selection',
     'get_canvas_summary',
   };
@@ -75,6 +78,8 @@ class ToolDispatcher {
         'distribute' => _distribute(call),
         'auto_layout' => _autoLayout(call),
         'lay_along_guide' => _layAlongGuide(call),
+        'read_drawing' => _readDrawing(call),
+        'apply_style_template' => _applyStyleTemplate(call),
         'get_selection' => _getSelection(call),
         'get_canvas_summary' => _getCanvasSummary(call),
         _ => ToolResult.error('Unknown tool: ${call.name}', callId: call.id),
@@ -332,6 +337,119 @@ class ToolDispatcher {
   ToolResult _layAlongGuide(ToolCall c) {
     canvasBloc.add(const LayoutAlongGuideRequested());
     return ToolResult.ok('Requested lay-along-guide', callId: c.id);
+  }
+
+  // --- drawing-as-input / style transfer ----------------------------------
+
+  /// Reads a drawn object as a guide: returns its polyline (sampled world-space
+  /// points), whether it's closed, and its bounding box. Lets the model "see" a
+  /// sketch the user drew so it can lay nodes along it or mimic its shape.
+  ToolResult _readDrawing(ToolCall c) {
+    final id = c.args['id'] as String?;
+    if (id == null) return ToolResult.error('Missing "id"', callId: c.id);
+    final obj = canvasBloc.state.drawingObjects[id];
+    if (obj == null) return ToolResult.error('No object with id $id', callId: c.id);
+
+    final guide = GuideGeometry.polylineOf(obj);
+    if (guide == null) {
+      return ToolResult.error('Object $id is not a usable guide', callId: c.id);
+    }
+    final (poly, closed) = guide;
+    final r = obj.rect;
+    return ToolResult.ok(
+      'Read guide: ${poly.length} points${closed ? ' (closed)' : ''}',
+      callId: c.id,
+      data: {
+        'id': id,
+        'type': _typeName(obj),
+        'closed': closed,
+        'pointCount': poly.length,
+        // Send a downsampled polyline to keep the payload small.
+        'points': _downsample(poly, 48).map((p) => [p.dx, p.dy]).toList(),
+        'bbox': {'x': r.left, 'y': r.top, 'width': r.width, 'height': r.height},
+      },
+    );
+  }
+
+  /// Copies appearance (fill, stroke, line style) from one or more source
+  /// objects onto target objects. The "template" is the first source object that
+  /// carries each attribute. Targets default to the current selection.
+  ToolResult _applyStyleTemplate(ToolCall c) {
+    final sourceIds = ((c.args['sourceIds'] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toSet();
+    if (sourceIds.isEmpty) {
+      return ToolResult.error('No sourceIds', callId: c.id);
+    }
+    final targetIds = _idsFromArgs({'ids': c.args['targetIds']});
+    if (targetIds.isEmpty) {
+      return ToolResult.error('No target ids', callId: c.id);
+    }
+
+    final objs = canvasBloc.state.drawingObjects;
+    Color? fill;
+    Color? stroke;
+    LineStyle? lineStyle;
+    for (final id in sourceIds) {
+      final o = objs[id];
+      if (o == null) continue;
+      fill ??= _readFill(o);
+      stroke ??= _readStroke(o);
+      lineStyle ??= _readLineStyle(o);
+    }
+
+    final applied = <String>[];
+    if (fill != null || stroke != null) {
+      canvasBloc.add(ObjectColorsChanged(targetIds, fillColor: fill, strokeColor: stroke));
+      if (fill != null) applied.add('fill');
+      if (stroke != null) applied.add('stroke');
+    }
+    if (lineStyle != null) {
+      canvasBloc.add(ObjectsLineStyleChanged(targetIds, lineStyle));
+      applied.add('line style');
+    }
+    if (applied.isEmpty) {
+      return ToolResult.error('Source objects carried no copyable style', callId: c.id);
+    }
+    return ToolResult.ok(
+      'Applied ${applied.join(', ')} to ${targetIds.length} object(s)',
+      callId: c.id,
+    );
+  }
+
+  static List<Offset> _downsample(List<Offset> pts, int maxPoints) {
+    if (pts.length <= maxPoints) return pts;
+    final step = pts.length / maxPoints;
+    return [for (var i = 0; i < maxPoints; i++) pts[(i * step).floor()]];
+  }
+
+  static Color? _readFill(DrawingObject o) {
+    if (o is RectangleObject) return o.fillColor;
+    if (o is CircleObject) return o.fillColor;
+    if (o is DiamondObject) return o.fillColor;
+    if (o is ParallelogramObject) return o.fillColor;
+    if (o is ForkJoinObject) return o.fillColor;
+    return null;
+  }
+
+  static Color? _readStroke(DrawingObject o) {
+    if (o is RectangleObject) return o.strokeColor;
+    if (o is CircleObject) return o.strokeColor;
+    if (o is DiamondObject) return o.strokeColor;
+    if (o is ParallelogramObject) return o.strokeColor;
+    if (o is ForkJoinObject) return o.strokeColor;
+    return null;
+  }
+
+  static LineStyle? _readLineStyle(DrawingObject o) {
+    if (o is RectangleObject) return o.lineStyle;
+    if (o is CircleObject) return o.lineStyle;
+    if (o is DiamondObject) return o.lineStyle;
+    if (o is ParallelogramObject) return o.lineStyle;
+    if (o is ForkJoinObject) return o.lineStyle;
+    if (o is ArrowObject) return o.lineStyle;
+    if (o is LineObject) return o.lineStyle;
+    return null;
   }
 
   // --- read tools ---------------------------------------------------------
