@@ -67,6 +67,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   List<String> _savedFileNames = [];
   bool _isWorkflowMode = false;
   bool _showShortcuts = false;
+  bool _showChat = false;
 
   @override
   void initState() {
@@ -562,7 +563,10 @@ start -> outputPhase
               onCanvasStateChanged: (state) {
                 _scheduleAutoSave();
               },
-              child: Stack(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Stack(
                 children: [
                   FlowDrawCanvas(),
                   Align(
@@ -622,6 +626,36 @@ start -> outputPhase
                                     'Workflow',
                                     style: TextStyle(
                                       color: _isWorkflowMode ? Colors.blue : Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Material(
+                          color: _showChat ? Colors.purple.withValues(alpha: 0.3) : Colors.black54,
+                          borderRadius: BorderRadius.circular(8),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: () => setState(() => _showChat = !_showChat),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.auto_awesome,
+                                    color: _showChat ? Colors.purpleAccent : Colors.white70,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Canvas Mode',
+                                    style: TextStyle(
+                                      color: _showChat ? Colors.purpleAccent : Colors.white70,
                                       fontSize: 12,
                                     ),
                                   ),
@@ -706,6 +740,13 @@ start -> outputPhase
                         onClose: () =>
                             setState(() => _showShortcuts = false),
                       ),
+                    ),
+                ],
+              ),
+                  ),
+                  if (_showChat)
+                    CanvasChatPanel(
+                      onClose: () => setState(() => _showChat = false),
                     ),
                 ],
               ),
