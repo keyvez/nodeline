@@ -9,6 +9,7 @@ import 'package:flow_draw/src/core/utils/snap_utils.dart';
 import 'package:flow_draw/src/core/utils/snackbar.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
 import 'package:flow_draw/src/models/entities.dart';
+import 'package:flow_draw/src/models/styles.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
@@ -78,6 +79,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         ObjectsAligned e => _onObjectsAligned(e, emit),
         ObjectsDistributed e => _onObjectsDistributed(e, emit),
         ObjectColorsChanged e => _onObjectColorsChanged(e, emit),
+        ObjectsLineStyleChanged e => _onObjectsLineStyleChanged(e, emit),
         GlobalFontChanged e => _onGlobalFontChanged(e, emit),
         ObjectFontChanged e => _onObjectFontChanged(e, emit),
         ObjectFontReset e => _onObjectFontReset(e, emit),
@@ -1141,6 +1143,38 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           fillColor: event.clearFill ? null : event.fillColor ?? obj.fillColor,
           strokeColor: event.clearStroke ? null : event.strokeColor ?? obj.strokeColor,
         ) as DrawingObject;
+      }
+    }
+
+    _emitWithHistory(
+      state.copyWith(drawingObjects: updatedObjects),
+      event,
+      emit,
+    );
+  }
+
+  void _onObjectsLineStyleChanged(
+      ObjectsLineStyleChanged event, Emitter<CanvasState> emit) {
+    final updatedObjects = Map<String, DrawingObject>.from(state.drawingObjects);
+
+    for (final id in event.selectedIds) {
+      final obj = updatedObjects[id];
+      if (obj == null) continue;
+
+      if (obj is RectangleObject) {
+        updatedObjects[id] = obj.copyWith(lineStyle: event.lineStyle);
+      } else if (obj is CircleObject) {
+        updatedObjects[id] = obj.copyWith(lineStyle: event.lineStyle);
+      } else if (obj is DiamondObject) {
+        updatedObjects[id] = obj.copyWith(lineStyle: event.lineStyle);
+      } else if (obj is ParallelogramObject) {
+        updatedObjects[id] = obj.copyWith(lineStyle: event.lineStyle);
+      } else if (obj is ForkJoinObject) {
+        updatedObjects[id] = obj.copyWith(lineStyle: event.lineStyle);
+      } else if (obj is ArrowObject) {
+        updatedObjects[id] = obj.copyWith(lineStyle: event.lineStyle);
+      } else if (obj is LineObject) {
+        updatedObjects[id] = obj.copyWith(lineStyle: event.lineStyle);
       }
     }
 

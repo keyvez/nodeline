@@ -357,6 +357,25 @@ final class ObjectColorsChanged extends CanvasEvent {
   List<Object> get props => [selectedIds, clearFill, clearStroke];
 }
 
+/// Changes the line (stroke) style of the selected shapes/edges — e.g. turning
+/// a set of arrows dashed, or shape borders dotted. Applies to every object in
+/// [selectedIds] that carries a [LineStyle] (rectangles, circles, diamonds,
+/// parallelograms, fork/join bars, arrows, lines); others are left untouched.
+/// Undoable as one step.
+final class ObjectsLineStyleChanged extends CanvasEvent {
+  final Set<String> selectedIds;
+  final LineStyle lineStyle;
+
+  const ObjectsLineStyleChanged(this.selectedIds, this.lineStyle)
+      : super(isUndoable: true);
+
+  @override
+  String get description => 'Changed line style (${lineStyle.name})';
+
+  @override
+  List<Object> get props => [selectedIds, lineStyle];
+}
+
 /// Changes the global default font for shape text.
 ///
 /// Updates [CanvasState.defaultFontFamily]/[defaultFontSize] and, by extension,
