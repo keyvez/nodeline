@@ -50,7 +50,8 @@ void main() {
     // System instruction + tools + a user content turn are present.
     expect(sentBody!['system_instruction'], isNotNull);
     final tools = sentBody!['tools'] as List;
-    expect((tools.first as Map)['functionDeclarations'], isNotEmpty);
+    final fnDecl = tools.firstWhere((t) => (t as Map).containsKey('functionDeclarations'));
+    expect((fnDecl as Map)['functionDeclarations'], isNotEmpty);
     final contents = sentBody!['contents'] as List;
     expect((contents.first as Map)['role'], 'user');
 
@@ -162,5 +163,120 @@ void main() {
       ),
       throwsA(isA<GeminiException>()),
     );
+  });
+
+  // --- Step 6: web search grounding -------------------------------------
+
+  test('includes googleSearch in tools when web search is enabled', () async {
+    Map<String, dynamic>? sentBody;
+    final mock = MockClient((req) async {
+      sentBody = jsonDecode(req.body) as Map<String, dynamic>;
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {'text': 'ok'}
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    final provider = GeminiProvider(apiKey: 'k', client: mock); // default on
+    await provider.generate(
+      systemPrompt: 's',
+      tools: canvasToolSchemas,
+      history: [AgentMessage.user('top actors')],
+    );
+
+    final tools = sentBody!['tools'] as List;
+    expect(tools.any((t) => (t as Map).containsKey('googleSearch')), true);
+    expect(tools.any((t) => (t as Map).containsKey('functionDeclarations')), true);
+  });
+
+  test('omits googleSearch when web search is disabled', () async {
+    Map<String, dynamic>? sentBody;
+    final mock = MockClient((req) async {
+      sentBody = jsonDecode(req.body) as Map<String, dynamic>;
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {'text': 'ok'}
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    final provider = GeminiProvider(apiKey: 'k', enableWebSearch: false, client: mock);
+    await provider.generate(
+      systemPrompt: 's',
+      tools: canvasToolSchemas,
+      history: [AgentMessage.user('x')],
+    );
+
+    final tools = sentBody!['tools'] as List;
+    expect(tools.any((t) => (t as Map).containsKey('googleSearch')), false);
+    expect(tools.any((t) => (t as Map).containsKey('functionDeclarations')), true);
+  });
+
+  test('parses function calls even when groundingMetadata is present', () async {
+    final mock = MockClient((req) async {
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {
+                    'functionCall': {
+                      'name': 'create_nodes',
+                      'args': {
+                        'nodes': [
+                          {'label': 'Actor 1'}
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              'groundingMetadata': {
+                'webSearchQueries': ['top hollywood actors'],
+                'groundingChunks': [
+                  {
+                    'web': {'uri': 'https://example.com', 'title': 'Example'}
+                  }
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    final provider = GeminiProvider(apiKey: 'k', client: mock);
+    final resp = await provider.generate(
+      systemPrompt: 's',
+      tools: canvasToolSchemas,
+      history: [AgentMessage.user('make nodes for the top actors')],
+    );
+
+    expect(resp.hasToolCalls, true);
+    expect(resp.toolCalls.single.name, 'create_nodes');
   });
 }

@@ -167,6 +167,9 @@ Guidance:
 - A frame is a container; "the nodes in the X frame" = select with frame:"X".
 - For semantic color requests (e.g. "color these emotions by their cultural
   color"), reason about the right colors yourself and pass hex values.
+- When a request needs real-world facts you are unsure of (e.g. "the top 8
+  actors in Hollywood", current data, named lists), use web search to find them
+  first, then create the nodes from the grounded results.
 - Prefer creating from scratch with `create_nodes` then `create_edges`,
   referencing nodes by their labels.
 - Keep going until the request is fully satisfied, then give a one-line summary

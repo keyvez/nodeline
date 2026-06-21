@@ -38,6 +38,7 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
   String? _apiKey;
   bool _loadingKey = true;
   bool _showKeyEntry = false;
+  bool _webSearch = true;
 
   @override
   void initState() {
@@ -79,7 +80,7 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
       selectionBloc: context.read<SelectionBloc>(),
     );
     final agent = CanvasAgent(
-      provider: GeminiProvider(apiKey: _apiKey ?? ''),
+      provider: GeminiProvider(apiKey: _apiKey ?? '', enableWebSearch: _webSearch),
       dispatcher: dispatcher,
     );
     final chat = CanvasChatController(agent: agent)..addListener(_onChatChanged);
@@ -155,6 +156,18 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
               style: TextStyle(
                   color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
           const Spacer(),
+          IconButton(
+            icon: Icon(Icons.travel_explore,
+                size: 16,
+                color: _webSearch ? Colors.purpleAccent : Colors.white38),
+            tooltip: _webSearch ? 'Web search: on' : 'Web search: off',
+            onPressed: () {
+              // Rebuild the agent so the new flag takes effect on the next turn.
+              _chat?.dispose();
+              _chat = null;
+              setState(() => _webSearch = !_webSearch);
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.key, size: 16, color: Colors.white54),
             tooltip: 'API key',

@@ -19,6 +19,12 @@ class GeminiProvider implements LlmProvider {
   final http.Client _client;
   final Duration timeout;
 
+  /// Whether to enable Google Search grounding alongside function calling, so
+  /// the model can look up real facts ("the top 8 actors") before calling canvas
+  /// tools. Supported on Gemini 3+ models in a single request; harmless to leave
+  /// on. Disable for fully offline/deterministic behavior.
+  final bool enableWebSearch;
+
   /// Default model. A rolling alias that tracks the latest Flash-Lite; override
   /// with a pinned id (e.g. "gemini-3.1-flash-lite") if the alias is rejected.
   static const String defaultModel = 'gemini-flash-lite-latest';
@@ -26,6 +32,7 @@ class GeminiProvider implements LlmProvider {
   GeminiProvider({
     required this.apiKey,
     this.model = defaultModel,
+    this.enableWebSearch = true,
     http.Client? client,
     this.timeout = const Duration(seconds: 60),
   }) : _client = client ?? http.Client();
@@ -51,6 +58,7 @@ class GeminiProvider implements LlmProvider {
       },
       'contents': _encodeHistory(history),
       'tools': [
+        if (enableWebSearch) {'googleSearch': <String, dynamic>{}},
         {'functionDeclarations': [for (final t in tools) t.toJson()]}
       ],
     };
