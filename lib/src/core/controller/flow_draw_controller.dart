@@ -178,6 +178,14 @@ class FlowDrawController implements FlowDrawControllerInterface {
     _canvasBloc!.add(RedoRequested());
   }
 
+  /// Restores the canvas to the snapshot stored at [undoIndex] in the undo stack
+  /// (0 = oldest). The current state is pushed first, so the jump is undoable.
+  /// Backs the version-timeline "Restore" action.
+  void restoreTo(int undoIndex) {
+    _assertIsInitialized();
+    _canvasBloc!.add(HistoryRestored(undoIndex));
+  }
+
   // --- Object Manipulation Methods ---
 
   /// Adds a new [NodeInstance] to the canvas.

@@ -51,6 +51,15 @@ class ToolDispatcher {
     'get_canvas_summary',
   };
 
+  /// Opens an agent-turn transaction so all subsequent tool mutations collapse
+  /// into a single undo entry. Pair with [commitTurn].
+  void beginTurn() => canvasBloc.add(const AgentTurnBegan());
+
+  /// Closes the agent-turn transaction, pushing one undo entry labelled with
+  /// [summary]. A no-op turn (nothing changed) pushes nothing.
+  void commitTurn(String summary) =>
+      canvasBloc.add(AgentTurnCommitted(summary));
+
   /// Executes a single tool call. Never throws — failures become error results.
   ToolResult dispatch(ToolCall call) {
     try {

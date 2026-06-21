@@ -101,11 +101,19 @@ class _HistoryPanelState extends State<HistoryPanel> {
                       itemCount: reversedHistory.length,
                       itemBuilder: (context, index) {
                         final (state, event) = reversedHistory[index];
+                        // reversedHistory is newest-first; map back to the real
+                        // undo-stack index for restore.
+                        final undoIndex = _undoHistory.length - 1 - index;
 
                         return Basic(
                           title: Text(event.description),
                           subtitle: Text(
                             'Nodes: ${state.nodes.length}, Objects: ${state.drawingObjects.length}',
+                          ),
+                          trailing: IconButton.ghost(
+                            icon: const Icon(Icons.restore, size: 14),
+                            onPressed: () =>
+                                widget.controller.restoreTo(undoIndex),
                           ),
                         );
                       },

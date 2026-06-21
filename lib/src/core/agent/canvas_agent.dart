@@ -80,6 +80,7 @@ class CanvasAgent {
 
     var round = 0;
     String? lastText;
+    var turnOpen = false;
     try {
       while (round < maxRounds) {
         if (_cancelled) {
@@ -112,6 +113,13 @@ class CanvasAgent {
           return;
         }
 
+        // Open the undo transaction lazily, the first time a tool actually runs,
+        // so pure question-answer turns don't create an empty history entry.
+        if (!turnOpen) {
+          dispatcher.beginTurn();
+          turnOpen = true;
+        }
+
         // Execute every requested tool call, collecting results to feed back.
         final results = <ToolResult>[];
         for (final call in resp.toolCalls) {
@@ -132,6 +140,11 @@ class CanvasAgent {
         error: 'Stopped after $maxRounds rounds',
       );
     } finally {
+      // Commit whatever was applied as one undo entry (no-op if nothing
+      // changed), even on cancel/error mid-turn.
+      if (turnOpen) {
+        dispatcher.commitTurn(lastText ?? 'Canvas Mode edit');
+      }
       _cancelled = false;
     }
   }

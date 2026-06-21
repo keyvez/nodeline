@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flow_draw/src/core/node_editor/clipboard.dart';
 import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
 import 'package:flow_draw/src/core/utils/snap_utils.dart';
@@ -45,6 +46,26 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
   /// and consumed by the corresponding "ended" event.
   CanvasState? _preOperationSnapshot;
 
+  /// True while an agent-turn transaction is open. While set, per-event undo
+  /// pushes are suppressed so the entire turn collapses into one undo entry
+  /// (pushed by [AgentTurnCommitted]).
+  bool _inAgentTurn = false;
+
+  /// Builds a history snapshot of [s] (defaults to the current [state]).
+  CanvasState _snapshot([CanvasState? s]) {
+    final src = s ?? state;
+    return CanvasState.historic(
+      nodes: Map<String, NodeInstance>.from(src.nodes),
+      drawingObjects: Map<String, DrawingObject>.from(src.drawingObjects),
+      viewportOffset: src.viewportOffset,
+      viewportZoom: src.viewportZoom,
+      comments: Map<String, EntityComment>.from(src.comments),
+      showGrid: src.showGrid,
+      defaultFontFamily: src.defaultFontFamily,
+      defaultFontSize: src.defaultFontSize,
+    );
+  }
+
   CanvasBloc() : super(const CanvasState()) {
     on<CanvasEvent>((event, emit) async {
       return (switch (event) {
@@ -65,6 +86,9 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         NodeToggled e => _onNodeToggled(e, emit),
         UndoRequested e => _onUndo(e, emit),
         RedoRequested e => _onRedo(e, emit),
+        AgentTurnBegan e => _onAgentTurnBegan(e, emit),
+        AgentTurnCommitted e => _onAgentTurnCommitted(e, emit),
+        HistoryRestored e => _onHistoryRestored(e, emit),
         ProjectSaved e => _onProjectSaved(e, emit),
         ProjectLoaded e => _onProjectLoaded(e, emit),
         NewProjectCreated e => _onNewProjectCreated(e, emit),
@@ -111,6 +135,16 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     CanvasEvent event,
     Emitter<CanvasState> emit,
   ) {
+    // During an agent turn, suppress per-event undo pushes — the whole turn
+    // becomes one entry on commit. The pre-turn snapshot was captured by
+    // [AgentTurnBegan], so just emit the new state and preserve the stacks.
+    if (_inAgentTurn) {
+      emit(newState.copyWith(
+        undoStack: state.undoStack,
+        redoStack: state.redoStack,
+      ));
+      return;
+    }
     if (event.isUndoable) {
       final historicState = CanvasState.historic(
         nodes: Map<String, NodeInstance>.from(state.nodes),
@@ -158,6 +192,10 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
     CanvasState currentState,
   ) {
     if (!event.isUndoable) return;
+
+    // During an agent turn, don't push per-event entries and don't consume the
+    // pre-turn snapshot — the whole turn becomes one entry on commit.
+    if (_inAgentTurn) return;
 
     // Use the pre-operation snapshot if available (captured before the first
     // non-undoable event like drag/resize/rotation updates). This ensures
@@ -542,6 +580,53 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       comments: state.comments,
       defaultFontFamily: nextState.defaultFontFamily,
       defaultFontSize: nextState.defaultFontSize,
+    ));
+  }
+
+  void _onAgentTurnBegan(AgentTurnBegan event, Emitter<CanvasState> emit) {
+    // Capture the pre-turn snapshot once (reusing the same field the drag/resize
+    // coalescing uses) and open the transaction.
+    _preOperationSnapshot = _snapshot();
+    _inAgentTurn = true;
+  }
+
+  void _onAgentTurnCommitted(
+      AgentTurnCommitted event, Emitter<CanvasState> emit) {
+    _inAgentTurn = false;
+    final pre = _preOperationSnapshot;
+    _preOperationSnapshot = null;
+    if (pre == null) return;
+
+    // No-op turn (nothing changed) → don't pollute history.
+    final unchanged = mapEquals(pre.drawingObjects, state.drawingObjects) &&
+        mapEquals(pre.nodes, state.nodes);
+    if (unchanged) return;
+
+    final newUndoStack = List<HistoryEntry>.from(state.undoStack)
+      ..add((pre, event));
+    if (newUndoStack.length > _maxHistoryStack) {
+      newUndoStack.removeAt(0);
+    }
+    emit(state.copyWith(undoStack: newUndoStack, redoStack: []));
+  }
+
+  void _onHistoryRestored(HistoryRestored event, Emitter<CanvasState> emit) {
+    final stack = state.undoStack;
+    if (event.undoIndex < 0 || event.undoIndex >= stack.length) return;
+
+    // Push the current state so restoring is itself undoable.
+    final currentSnapshot = _snapshot();
+    final (target, _) = stack[event.undoIndex];
+
+    final newUndoStack = List<HistoryEntry>.from(stack)
+      ..add((currentSnapshot, AgentTurnCommitted('Restore point')));
+    if (newUndoStack.length > _maxHistoryStack) {
+      newUndoStack.removeAt(0);
+    }
+
+    emit(target.copyWith(
+      undoStack: newUndoStack,
+      redoStack: const [],
     ));
   }
 

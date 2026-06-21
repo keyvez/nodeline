@@ -202,6 +202,49 @@ final class UndoRequested extends CanvasEvent {}
 
 final class RedoRequested extends CanvasEvent {}
 
+/// Begins an agent-turn transaction: captures a pre-turn snapshot and suppresses
+/// per-event undo pushes so that the whole turn collapses into a single undo
+/// entry. Pair with [AgentTurnCommitted]. Not undoable itself.
+final class AgentTurnBegan extends CanvasEvent {
+  const AgentTurnBegan() : super(isUndoable: false);
+
+  @override
+  String get description => 'Agent turn began';
+
+  @override
+  List<Object> get props => [];
+}
+
+/// Ends an agent-turn transaction, pushing ONE undo entry (the pre-turn
+/// snapshot) labelled with [summary] — the agent's one-line description of what
+/// the turn did. If no state changed during the turn, nothing is pushed.
+final class AgentTurnCommitted extends CanvasEvent {
+  final String summary;
+
+  const AgentTurnCommitted(this.summary) : super(isUndoable: false);
+
+  @override
+  String get description => summary.isEmpty ? 'Canvas Mode edit' : summary;
+
+  @override
+  List<Object> get props => [summary];
+}
+
+/// Restores the canvas to the snapshot stored at [undoIndex] in the undo stack
+/// (0 = oldest). The current state is pushed onto the undo stack first, so the
+/// jump is itself undoable. Backs the version-timeline "Restore" action.
+final class HistoryRestored extends CanvasEvent {
+  final int undoIndex;
+
+  const HistoryRestored(this.undoIndex) : super(isUndoable: false);
+
+  @override
+  String get description => 'Restored version';
+
+  @override
+  List<Object> get props => [undoIndex];
+}
+
 // --- Project Events ---
 final class ProjectSaved extends CanvasEvent {
   final Function(Map<String, dynamic>) onSave;
