@@ -427,9 +427,32 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       return;
     }
 
-    SnapPoint? newSnapPoint;
-    double minDistance = double.infinity;
     final tolerance = 10.0 / canvasState.viewportZoom;
+
+    // Frames (FigureObjects) are large containers that enclose other nodes. A
+    // frame border is almost always within snap range of any node sitting
+    // inside it, so a flat "nearest border wins" search makes the frame steal
+    // connections meant for the inner node. Track frame candidates separately
+    // and only fall back to a frame when nothing else is snappable — so you can
+    // always connect to a node inside a frame.
+    SnapPoint? bestNonFrame;
+    double bestNonFrameDist = double.infinity;
+    SnapPoint? bestFrame;
+    double bestFrameDist = double.infinity;
+
+    SnapPoint snapOnRect(String objectId, Rect rect) {
+      final closestPoint = getClosestPointOnRectBorder(worldPos, rect);
+      return (
+        objectId: objectId,
+        worldPosition: closestPoint,
+        relativePosition: Offset(
+          (closestPoint.dx - rect.left) /
+              rect.width.clamp(0.001, double.infinity),
+          (closestPoint.dy - rect.top) /
+              rect.height.clamp(0.001, double.infinity),
+        ),
+      );
+    }
 
     for (final obj in canvasState.drawingObjects.values) {
       if (obj.id == _isResizing.objectId) continue;
@@ -438,19 +461,15 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           obj is FigureObject ||
           obj is SvgObject) {
         final distance = distanceToRectBorder(worldPos, obj.rect);
-        if (distance < tolerance && distance < minDistance) {
-          minDistance = distance;
-          final closestPoint = getClosestPointOnRectBorder(worldPos, obj.rect);
-          newSnapPoint = (
-            objectId: obj.id,
-            worldPosition: closestPoint,
-            relativePosition: Offset(
-              (closestPoint.dx - obj.rect.left) /
-                  obj.rect.width.clamp(0.001, double.infinity),
-              (closestPoint.dy - obj.rect.top) /
-                  obj.rect.height.clamp(0.001, double.infinity),
-            ),
-          );
+        if (distance >= tolerance) continue;
+        if (obj is FigureObject) {
+          if (distance < bestFrameDist) {
+            bestFrameDist = distance;
+            bestFrame = snapOnRect(obj.id, obj.rect);
+          }
+        } else if (distance < bestNonFrameDist) {
+          bestNonFrameDist = distance;
+          bestNonFrame = snapOnRect(obj.id, obj.rect);
         }
       }
     }
@@ -459,21 +478,15 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       final nodeBounds = getNodeBoundsInWorld(node);
       if (nodeBounds == null) continue;
       final distance = distanceToRectBorder(worldPos, nodeBounds);
-      if (distance < tolerance && distance < minDistance) {
-        minDistance = distance;
-        final closestPoint = getClosestPointOnRectBorder(worldPos, nodeBounds);
-        newSnapPoint = (
-          objectId: node.id,
-          worldPosition: closestPoint,
-          relativePosition: Offset(
-            (closestPoint.dx - nodeBounds.left) /
-                nodeBounds.width.clamp(0.001, double.infinity),
-            (closestPoint.dy - nodeBounds.top) /
-                nodeBounds.height.clamp(0.001, double.infinity),
-          ),
-        );
+      if (distance < tolerance && distance < bestNonFrameDist) {
+        bestNonFrameDist = distance;
+        bestNonFrame = snapOnRect(node.id, nodeBounds);
       }
     }
+
+    // Prefer any non-frame target; only snap to a frame when nothing else is
+    // in range.
+    final SnapPoint? newSnapPoint = bestNonFrame ?? bestFrame;
 
     if (newSnapPoint != _hoveredSnapPoint) {
       // Always track the CURRENT nearest snap point (or null when the cursor
