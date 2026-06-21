@@ -365,6 +365,25 @@ class FlowDrawToolbar extends StatelessWidget {
                 ),
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: GhostButton(
+                density: ButtonDensity.compact,
+                onPressed: () {
+                  context
+                      .read<CanvasBloc>()
+                      .add(const LayoutAlongGuideRequested());
+                },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(Icons.timeline, size: 16),
+                    SizedBox(width: 6),
+                    Text('Lay on path', style: TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
             const Padding(
               padding: EdgeInsets.only(left: 8),
               child: _FitButton(),

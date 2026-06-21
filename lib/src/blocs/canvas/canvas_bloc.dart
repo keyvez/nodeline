@@ -26,6 +26,13 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
   final StreamController<void> _tidyRequests =
       StreamController<void>.broadcast();
   Stream<void> get tidyRequests => _tidyRequests.stream;
+
+  /// Like [tidyRequests] but for "lay selected nodes along the selected guide
+  /// shape" — also computed in the data layer (needs rendered geometry).
+  final StreamController<void> _layoutAlongGuideRequests =
+      StreamController<void>.broadcast();
+  Stream<void> get layoutAlongGuideRequests =>
+      _layoutAlongGuideRequests.stream;
   /// Snapshot of the state before an ongoing non-undoable operation
   /// (drag, resize, rotation). Captured on the first non-undoable event
   /// and consumed by the corresponding "ended" event.
@@ -77,6 +84,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         CommentResolvedToggled e => _onCommentResolvedToggled(e, emit),
         AutoLayoutApplied e => _onAutoLayoutApplied(e, emit),
         AutoLayoutRequested _ => _tidyRequests.add(null),
+        LayoutAlongGuideRequested _ => _layoutAlongGuideRequests.add(null),
       });
     });
   }
@@ -84,6 +92,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
   @override
   Future<void> close() {
     _tidyRequests.close();
+    _layoutAlongGuideRequests.close();
     return super.close();
   }
 

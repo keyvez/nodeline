@@ -515,6 +515,20 @@ final class AutoLayoutRequested extends CanvasEvent {
   List<Object> get props => [];
 }
 
+/// Signals that the user requested "lay selected nodes along the selected guide
+/// shape". Like [AutoLayoutRequested], computed in the data layer (needs
+/// rendered node geometry); the bloc just relays it. Not undoable itself — the
+/// resulting [AutoLayoutApplied] carries the undo step.
+final class LayoutAlongGuideRequested extends CanvasEvent {
+  const LayoutAlongGuideRequested() : super(isUndoable: false);
+
+  @override
+  String get description => 'Lay along path';
+
+  @override
+  List<Object> get props => [];
+}
+
 /// Attaches a review comment to an entity (or a bare canvas point).
 ///
 /// Not undoable — comments are feedback layered over the drawing, not part of
