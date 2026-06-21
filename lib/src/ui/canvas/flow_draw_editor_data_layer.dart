@@ -1865,33 +1865,56 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     return null;
   }
 
-  /// Cmd/Ctrl+Shift+P: lay the selected boxes out along the single selected
-  /// guide object. Emits one undoable [AutoLayoutApplied]; leaves the guide on
-  /// the canvas. No-op (with a toast) when the selection isn't one guide plus
-  /// at least one box.
+  /// A "strong" guide is a shape you'd deliberately draw *as* a path — a pen
+  /// stroke, line/arrow, circle, diamond, or parallelogram. Plain rectangles
+  /// are NOT strong guides: they're the usual node shape, so a circle drawn
+  /// around a column of rectangle nodes must resolve to the circle, not "many
+  /// guides". A rectangle is only used as a guide when nothing stronger is
+  /// selected.
+  bool _isStrongGuide(DrawingObject obj) =>
+      obj is PencilStrokeObject ||
+      obj is ArrowObject ||
+      obj is LineObject ||
+      obj is CircleObject ||
+      obj is DiamondObject ||
+      obj is ParallelogramObject;
+
+  /// "Lay on path": lay the selected boxes out along the single selected guide
+  /// object. Emits one undoable [AutoLayoutApplied]; leaves the guide on the
+  /// canvas. No-op (with a toast) when the selection isn't one guide plus at
+  /// least one box.
   void _layoutSelectionAlongSelectedGuide() {
     final sel = _selectionBloc.state;
     final objIds = sel.selectedDrawingObjectIds;
 
-    // Find guide candidates among selected drawing objects.
-    final guides = <(DrawingObject, List<Offset>, bool)>[];
+    // Classify selected drawing objects into strong guides (pen/line/arrow/
+    // circle/diamond/parallelogram) and weak guides (rectangles). A rectangle
+    // only counts as the guide when no strong guide is present, so circle +
+    // rectangle nodes resolves unambiguously to the circle.
+    final strong = <(DrawingObject, List<Offset>, bool)>[];
+    final weak = <(DrawingObject, List<Offset>, bool)>[];
     for (final id in objIds) {
       final obj = _canvasBloc.state.drawingObjects[id];
       if (obj == null) continue;
       final g = _guidePolylineFromObject(obj);
-      if (g != null) guides.add((obj, g.$1, g.$2));
+      if (g == null) continue;
+      (_isStrongGuide(obj) ? strong : weak).add((obj, g.$1, g.$2));
     }
+
+    final guides = strong.isNotEmpty ? strong : weak;
 
     if (guides.isEmpty) {
       showNodeEditorSnackbar(
-          'Select a guide (pen stroke, line, or shape) plus the nodes to '
-          'arrange, then click "Lay on path" (⇧⌘U).',
+          'Select a guide (pen stroke, line, circle, diamond, or '
+          'parallelogram) plus the nodes to arrange, then click "Lay on path" '
+          '(⇧⌘U).',
           SnackbarType.info);
       return;
     }
     if (guides.length > 1) {
       showNodeEditorSnackbar(
-          'Select exactly one guide shape to lay nodes along.',
+          'Select exactly one guide shape to lay nodes along (the rest of the '
+          'selection is treated as nodes).',
           SnackbarType.warning);
       return;
     }
