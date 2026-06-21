@@ -12,6 +12,7 @@ import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
 import 'package:flow_draw/src/core/utils/layered_layout.dart';
 import 'package:flow_draw/src/core/utils/path_layout.dart';
 import 'package:flow_draw/src/core/utils/snackbar.dart';
+import 'package:flow_draw/src/core/utils/swap_layout.dart';
 import 'package:flow_draw/src/core/utils/snap_utils.dart';
 import 'package:flow_draw/src/core/utils/renderbox.dart';
 import 'package:flow_draw/src/models/drawing_entities.dart';
@@ -36,6 +37,9 @@ typedef SnapPoint = ({
   Offset worldPosition,
   Offset relativePosition,
 });
+
+/// What the "Swap" action will do given the current selection.
+enum _SwapKind { none, nodes, endpoints }
 
 class FlOverlayData {
   final Widget child;
@@ -200,6 +204,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         _canvasBloc.layoutAlongGuideRequests.listen((_) {
       if (mounted) _layoutSelectionAlongSelectedGuide();
     });
+    _swapReqSub = _canvasBloc.swapRequests.listen((_) {
+      if (mounted) _swapSelection();
+    });
     // Rebuild when keyboard focus moves so the canvas shortcut bindings can be
     // suppressed while a text input (incl. external overlays like the flan
     // annotation box) is focused — letting it receive Cmd/Ctrl+V/C/X natively.
@@ -212,6 +219,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
 
   StreamSubscription<void>? _autoLayoutReqSub;
   StreamSubscription<void>? _layoutAlongGuideReqSub;
+  StreamSubscription<void>? _swapReqSub;
 
   static bool _serviceExtensionsRegistered = false;
 
@@ -356,6 +364,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     GestureBinding.instance.pointerRouter.removeGlobalRoute(_globalPointerRoute);
     _autoLayoutReqSub?.cancel();
     _layoutAlongGuideReqSub?.cancel();
+    _swapReqSub?.cancel();
     FocusManager.instance.removeListener(_onFocusChanged);
     _canvasFocusNode.dispose();
     _kineticTimer?.cancel();
@@ -1201,6 +1210,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       hasSelection: hasSelection,
       selectedCount: selectedIds.length,
       hasArrowSelected: hasArrowSelected,
+      canSwap: _canSwapSelection(),
       onAction: (action) {
         final ids = _selectionBloc.state.selectedDrawingObjectIds;
         switch (action) {
@@ -1271,6 +1281,8 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                 _canvasBloc.add(DrawingObjectUpdated(flipped));
               }
             }
+          case CanvasContextMenuAction.swap:
+            _swapSelection();
           case CanvasContextMenuAction.bringForward:
             _canvasBloc.add(ObjectsBroughtForward(ids));
           case CanvasContextMenuAction.sendBackward:
@@ -1306,10 +1318,18 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     );
   }
 
+  /// True when a modifier that means "add to / toggle the current selection"
+  /// is held. Shift is the classic one; Cmd (meta, macOS) and Ctrl (other
+  /// platforms) now behave the same way for multi-select.
+  bool get _additiveSelectModifier =>
+      HardwareKeyboard.instance.isShiftPressed ||
+      HardwareKeyboard.instance.isMetaPressed ||
+      HardwareKeyboard.instance.isControlPressed;
+
   void _handleArrowToolPointerDown(PointerDownEvent event, Offset worldPos) {
     final hitObjectId = _findHitObject(worldPos);
     if (hitObjectId != null) {
-      final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
+      final isShiftPressed = _additiveSelectModifier;
       final currentSelection = _selectionBloc.state;
       final isNode = _canvasBloc.state.nodes.containsKey(hitObjectId);
 
@@ -1749,9 +1769,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   void _finalizeAreaSelection() {
     final selectedArea = _selectionArea.normalize;
     if (selectedArea.size.longestSide > 10.0 / _canvasBloc.state.viewportZoom) {
-      final holdSelection =
-          HardwareKeyboard.instance.isControlPressed ||
-          HardwareKeyboard.instance.isShiftPressed;
+      final holdSelection = _additiveSelectModifier;
       final (nodes, objects) = _findObjectsInArea(selectedArea);
 
       if (holdSelection) {
@@ -1763,8 +1781,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           SelectionReplaced(nodeIds: nodes, drawingObjectIds: objects),
         );
       }
-    } else if (!HardwareKeyboard.instance.isControlPressed &&
-        !HardwareKeyboard.instance.isShiftPressed) {
+    } else if (!_additiveSelectModifier) {
       _selectionBloc.add(SelectionCleared());
     }
     setState(() {
@@ -1960,6 +1977,149 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     });
 
     _canvasBloc.add(AutoLayoutApplied(offsets));
+  }
+
+  // ---- Swap feature ----------------------------------------------------
+  // "Swap" acts on exactly two selected things:
+  //   * two nodes/shapes  → exchange their centre positions (sizes unchanged;
+  //     attached edges re-route automatically).
+  //   * two edges (arrows/lines) → exchange their END endpoints (world point +
+  //     attachment), so each edge ends where the other did.
+
+  /// True when the current selection is something Swap can act on. Drives the
+  /// toolbar button's enabled state and the context-menu item's visibility.
+  bool _canSwapSelection() => _swapKind() != _SwapKind.none;
+
+  _SwapKind _swapKind() {
+    final sel = _selectionBloc.state;
+    final objIds = sel.selectedDrawingObjectIds;
+    final nodeIds = sel.selectedNodeIds;
+
+    // Two edges (and nothing else)?
+    if (nodeIds.isEmpty && objIds.length == 2) {
+      final objs = [
+        for (final id in objIds) _canvasBloc.state.drawingObjects[id],
+      ];
+      if (objs.every((o) => o is ArrowObject || o is LineObject)) {
+        return _SwapKind.endpoints;
+      }
+    }
+
+    // Two boxes (nodes and/or non-edge shapes), nothing else?
+    final boxIds = <String>[
+      ...nodeIds,
+      for (final id in objIds)
+        if (_layoutBoxRect(id) != null) id,
+    ];
+    final hasEdge = objIds.any((id) {
+      final o = _canvasBloc.state.drawingObjects[id];
+      return o is ArrowObject || o is LineObject;
+    });
+    if (!hasEdge &&
+        boxIds.length == 2 &&
+        nodeIds.length + objIds.length == 2) {
+      return _SwapKind.nodes;
+    }
+    return _SwapKind.none;
+  }
+
+  /// Swap action shared by the toolbar button, the shortcut, and the context
+  /// menu. Picks node-swap or endpoint-swap from the selection; shows a hint
+  /// when neither applies.
+  void _swapSelection() {
+    switch (_swapKind()) {
+      case _SwapKind.nodes:
+        _swapTwoBoxes();
+      case _SwapKind.endpoints:
+        _swapTwoEdgeEndpoints();
+      case _SwapKind.none:
+        showNodeEditorSnackbar(
+            'Select exactly two nodes (to swap positions) or two edges (to '
+            'swap their endpoints), then Swap.',
+            SnackbarType.info);
+    }
+  }
+
+  /// Exchanges the centre positions of the two selected boxes. Emits one
+  /// undoable [AutoLayoutApplied]; sizes are preserved.
+  void _swapTwoBoxes() {
+    final sel = _selectionBloc.state;
+    final ids = <String>[...sel.selectedNodeIds, ...sel.selectedDrawingObjectIds];
+    final rects = <String, Rect>{};
+    for (final id in ids) {
+      final r = _layoutBoxRect(id);
+      if (r != null) rects[id] = r;
+    }
+    final offsets = SwapLayout.swapBoxCentres(rects);
+    if (offsets.isEmpty) return;
+    _canvasBloc.add(AutoLayoutApplied(offsets));
+  }
+
+  /// Exchanges the END endpoints (world point + attachment) of the two selected
+  /// edges, so each edge ends where the other did. Emits one
+  /// [DrawingObjectUpdated] per edge.
+  void _swapTwoEdgeEndpoints() {
+    final ids = _selectionBloc.state.selectedDrawingObjectIds.toList();
+    if (ids.length != 2) return;
+    final objA = _canvasBloc.state.drawingObjects[ids[0]];
+    final objB = _canvasBloc.state.drawingObjects[ids[1]];
+
+    // Snapshot each edge's end (point + attachment), then cross-assign.
+    final endA = _edgeEnd(objA);
+    final endB = _edgeEnd(objB);
+    if (endA == null || endB == null) return;
+
+    final newA = _withEnd(objA!, point: endB.$1, attachment: endB.$2);
+    final newB = _withEnd(objB!, point: endA.$1, attachment: endA.$2);
+    if (newA != null) _canvasBloc.add(DrawingObjectUpdated(newA));
+    if (newB != null) _canvasBloc.add(DrawingObjectUpdated(newB));
+  }
+
+  /// The (end point, end attachment) of an edge, or null if not an edge.
+  (Offset, ObjectAttachment?)? _edgeEnd(DrawingObject? obj) {
+    if (obj is ArrowObject) return (obj.end, obj.endAttachment);
+    if (obj is LineObject) return (obj.end, obj.endAttachment);
+    return null;
+  }
+
+  /// Returns a copy of [obj] with its end point + attachment replaced. The
+  /// routed [waypoints]/[renderedPath] cache is dropped so the arrow re-routes
+  /// to the new endpoint.
+  DrawingObject? _withEnd(
+    DrawingObject obj, {
+    required Offset point,
+    required ObjectAttachment? attachment,
+  }) {
+    if (obj is ArrowObject) {
+      return ArrowObject(
+        id: obj.id,
+        start: obj.start,
+        end: point,
+        isSelected: obj.isSelected,
+        midPoint: obj.midPoint,
+        pathType: obj.pathType,
+        startAttachment: obj.startAttachment,
+        endAttachment: attachment,
+        waypoints: null,
+        lineStyle: obj.lineStyle,
+        arrowLabel: obj.arrowLabel,
+        angle: obj.angle,
+      );
+    }
+    if (obj is LineObject) {
+      return LineObject(
+        id: obj.id,
+        start: obj.start,
+        end: point,
+        isSelected: obj.isSelected,
+        midPoint: obj.midPoint,
+        startAttachment: obj.startAttachment,
+        endAttachment: attachment,
+        lineStyle: obj.lineStyle,
+        angle: obj.angle,
+      );
+    }
+    return null;
   }
 
   void _finalizeDrawing() {
@@ -3517,6 +3677,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
                     const SingleActivator(LogicalKeyboardKey.keyU,
                             control: true, shift: true):
                         _layoutSelectionAlongSelectedGuide,
+                    // Swap: exchange two nodes' positions, or two edges' ends.
+                    const SingleActivator(LogicalKeyboardKey.keyS,
+                        meta: true, shift: true): _swapSelection,
+                    const SingleActivator(LogicalKeyboardKey.keyS,
+                        control: true, shift: true): _swapSelection,
                     const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () async {
                       if (_textInputHasFocus) return;
                       await _copySelection(canvasState, selectionState);

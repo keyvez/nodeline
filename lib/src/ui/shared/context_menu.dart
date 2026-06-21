@@ -9,6 +9,7 @@ enum CanvasContextMenuAction {
   selectAll,
   duplicate,
   flipArrow,
+  swap,
   bringForward,
   sendBackward,
   bringToFront,
@@ -38,6 +39,8 @@ enum CanvasContextMenuAction {
 ///   - Select All is always available.
 ///   - Duplicate, Bring to Front, Send to Back, etc. require a selection.
 ///   - Flip Arrow appears only when a single arrow is selected.
+///   - Swap Positions appears only when exactly two nodes or two edges are
+///     selected ([canSwap]).
 ///   - Alignment items appear only when >= 2 objects are selected.
 ///   - Distribution items appear only when >= 3 objects are selected.
 Future<void> showCanvasContextMenu({
@@ -46,6 +49,7 @@ Future<void> showCanvasContextMenu({
   required bool hasSelection,
   required int selectedCount,
   bool hasArrowSelected = false,
+  bool canSwap = false,
   required ValueChanged<CanvasContextMenuAction> onAction,
 }) async {
   final overlay =
@@ -65,6 +69,7 @@ Future<void> showCanvasContextMenu({
       hasSelection: hasSelection,
       selectedCount: selectedCount,
       hasArrowSelected: hasArrowSelected,
+      canSwap: canSwap,
     ),
   );
 
@@ -77,6 +82,7 @@ List<PopupMenuEntry<CanvasContextMenuAction>> _buildContextMenuItems({
   required bool hasSelection,
   required int selectedCount,
   required bool hasArrowSelected,
+  required bool canSwap,
 }) {
   return [
     _item(CanvasContextMenuAction.cut, 'Cut', enabled: hasSelection),
@@ -91,6 +97,10 @@ List<PopupMenuEntry<CanvasContextMenuAction>> _buildContextMenuItems({
     ],
     if (hasArrowSelected) ...[
       _item(CanvasContextMenuAction.flipArrow, 'Flip Arrow'),
+      const PopupMenuDivider(height: 4),
+    ],
+    if (canSwap) ...[
+      _item(CanvasContextMenuAction.swap, 'Swap Positions'),
       const PopupMenuDivider(height: 4),
     ],
     if (selectedCount >= 2) ...[

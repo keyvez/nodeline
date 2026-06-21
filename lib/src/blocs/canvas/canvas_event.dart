@@ -529,6 +529,20 @@ final class LayoutAlongGuideRequested extends CanvasEvent {
   List<Object> get props => [];
 }
 
+/// Signals that the user requested "Swap" — exchange two selected nodes'
+/// positions or two selected edges' endpoints. Like [AutoLayoutRequested],
+/// computed in the data layer; the bloc just relays it. Not undoable itself —
+/// the resulting position/endpoint change carries the undo step.
+final class SwapRequested extends CanvasEvent {
+  const SwapRequested() : super(isUndoable: false);
+
+  @override
+  String get description => 'Swap';
+
+  @override
+  List<Object> get props => [];
+}
+
 /// Attaches a review comment to an entity (or a bare canvas point).
 ///
 /// Not undoable — comments are feedback layered over the drawing, not part of

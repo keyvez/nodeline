@@ -17,6 +17,59 @@ import 'package:uuid/uuid.dart';
 
 import 'custom_tab.dart';
 
+/// The Cmd (macOS) / Ctrl (other) symbol for shortcut hints in tooltips.
+final String _kCmdKey = Platform.isMacOS ? '⌘' : 'Ctrl';
+
+/// Wraps [child] in a tooltip showing a [description] and an optional
+/// [shortcut] hint (already formatted, e.g. "⇧⌘U"). Used by the toolbar's
+/// action buttons so hovering reveals what they do and how to trigger them.
+Widget _withHint(
+  Widget child, {
+  required String description,
+  String? shortcut,
+}) {
+  return Tooltip(
+    tooltip: (_) => TooltipContainer(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(description, style: const TextStyle(fontSize: 11)),
+          if (shortcut != null)
+            Text(shortcut,
+                style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.white.withValues(alpha: 0.6))),
+        ],
+      ),
+    ),
+    child: child,
+  );
+}
+
+/// Standard padding around a tool-tab icon (kept in sync with the `padding`
+/// local used by the tab builder).
+const EdgeInsets _kToolTabPadding = EdgeInsets.symmetric(vertical: 10.0);
+
+/// Builds a tool-tab's visual: the [icon] with its single-key [keyLabel]
+/// shortcut shown small in the corner (e.g. "R" for the rectangle tool).
+Widget _toolTabChild(Widget icon, String keyLabel) {
+  return Padding(
+    padding: _kToolTabPadding,
+    child: Stack(
+      clipBehavior: Clip.none,
+      children: [
+        icon,
+        Positioned(
+          bottom: -10,
+          right: -10,
+          child: Text(keyLabel, style: const TextStyle(fontSize: 10)),
+        ),
+      ],
+    ),
+  );
+}
+
 class FlowDrawToolbar extends StatelessWidget {
   final List<String> svgs;
 
@@ -94,189 +147,126 @@ class FlowDrawToolbar extends StatelessWidget {
                 if (_isAllowed(EditorTool.arrow))
                   TabItem(
                     index: EditorTool.arrow.index,
-                    child: Padding(
-                      padding: padding,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Assets.icons.arrow.svg(width: 16, color: Colors.white),
-                          Positioned(
-                            bottom: -10,
-                            right: -10,
-                            child: Text('V', style: TextStyle(fontSize: 10)),
-                          ),
-                        ],
-                      ),
+                    child: _withHint(
+                      description: 'Select / move tool',
+                      shortcut: 'V',
+                      _toolTabChild(
+                          Assets.icons.arrow.svg(
+                              width: 16, color: Colors.white),
+                          'V'),
                     ),
                   ),
                 if (_isAllowed(EditorTool.square))
                   TabItem(
                     index: EditorTool.square.index,
-                    child: Padding(
-                      padding: padding,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Assets.icons.square.svg(width: 16, color: Colors.white),
-                          Positioned(
-                            bottom: -10,
-                            right: -10,
-                            child: Text('R', style: TextStyle(fontSize: 10)),
-                          ),
-                        ],
-                      ),
+                    child: _withHint(
+                      description: 'Rectangle',
+                      shortcut: 'R',
+                      _toolTabChild(
+                          Assets.icons.square.svg(
+                              width: 16, color: Colors.white),
+                          'R'),
                     ),
                   ),
                 if (_isAllowed(EditorTool.circle))
                   TabItem(
                     index: EditorTool.circle.index,
-                    child: Padding(
-                      padding: padding,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Assets.icons.circle.svg(width: 16, color: Colors.white),
-                          Positioned(
-                            bottom: -10,
-                            right: -10,
-                            child: Text('O', style: TextStyle(fontSize: 10)),
-                          ),
-                        ],
-                      ),
+                    child: _withHint(
+                      description: 'Ellipse / circle',
+                      shortcut: 'O',
+                      _toolTabChild(
+                          Assets.icons.circle.svg(
+                              width: 16, color: Colors.white),
+                          'O'),
                     ),
                   ),
                 if (_isAllowed(EditorTool.diamond))
                   TabItem(
                     index: EditorTool.diamond.index,
-                    child: Padding(
-                      padding: padding,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Icon(Icons.diamond_outlined, size: 16, color: Colors.white),
-                          Positioned(
-                            bottom: -10,
-                            right: -10,
-                            child: Text('G', style: TextStyle(fontSize: 10)),
-                          ),
-                        ],
-                      ),
+                    child: _withHint(
+                      description: 'Diamond',
+                      shortcut: 'G',
+                      _toolTabChild(
+                          const Icon(Icons.diamond_outlined,
+                              size: 16, color: Colors.white),
+                          'G'),
                     ),
                   ),
                 if (_isAllowed(EditorTool.parallelogram))
                   TabItem(
                     index: EditorTool.parallelogram.index,
-                    child: Padding(
-                      padding: padding,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
+                    child: _withHint(
+                      description: 'Parallelogram',
+                      shortcut: 'P',
+                      _toolTabChild(
                           Transform.rotate(
                             angle: 1.5708, // 90 degrees
-                            child: Icon(Icons.change_history, size: 16, color: Colors.white),
+                            child: const Icon(Icons.change_history,
+                                size: 16, color: Colors.white),
                           ),
-                          Positioned(
-                            bottom: -10,
-                            right: -10,
-                            child: Text('P', style: TextStyle(fontSize: 10)),
-                          ),
-                        ],
-                      ),
+                          'P'),
                     ),
                   ),
                 if (_isAllowed(EditorTool.forkJoin))
                   TabItem(
                     index: EditorTool.forkJoin.index,
-                    child: Padding(
-                      padding: padding,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Icon(Icons.horizontal_rule, size: 16, color: Colors.white),
-                          Positioned(
-                            bottom: -10,
-                            right: -10,
-                            child: Text('J', style: TextStyle(fontSize: 10)),
-                          ),
-                        ],
-                      ),
+                    child: _withHint(
+                      description: 'Fork / join bar',
+                      shortcut: 'J',
+                      _toolTabChild(
+                          const Icon(Icons.horizontal_rule,
+                              size: 16, color: Colors.white),
+                          'J'),
                     ),
                   ),
                 if (_isAllowed(EditorTool.arrowTopRight))
                   TabItem(
                     index: EditorTool.arrowTopRight.index,
-                    child: Padding(
-                      padding: padding,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
+                    child: _withHint(
+                      description: 'Arrow (connects shapes)',
+                      shortcut: 'A',
+                      _toolTabChild(
                           Assets.icons.arrowTopRight.svg(
-                            width: 16,
-                            color: Colors.white,
-                          ),
-                          Positioned(
-                            bottom: -10,
-                            right: -10,
-                            child: Text('A', style: TextStyle(fontSize: 10)),
-                          ),
-                        ],
-                      ),
+                              width: 16, color: Colors.white),
+                          'A'),
                     ),
                   ),
                 if (_isAllowed(EditorTool.line))
                   TabItem(
                     index: EditorTool.line.index,
-                    child: Padding(
-                      padding: padding,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Assets.icons.line.svg(width: 16, color: Colors.white),
-                          Positioned(
-                            bottom: -10,
-                            right: -10,
-                            child: Text('L', style: TextStyle(fontSize: 10)),
-                          ),
-                        ],
-                      ),
+                    child: _withHint(
+                      description: 'Line',
+                      shortcut: 'L',
+                      _toolTabChild(
+                          Assets.icons.line.svg(
+                              width: 16, color: Colors.white),
+                          'L'),
                     ),
                   ),
                 if (_isAllowed(EditorTool.pencil))
                   TabItem(
                     index: EditorTool.pencil.index,
-                    child: Padding(
-                      padding: padding,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Assets.icons.pencil.svg(width: 16, color: Colors.white),
-                          Positioned(
-                            bottom: -10,
-                            right: -10,
-                            child: Text('D', style: TextStyle(fontSize: 10)),
-                          ),
-                        ],
-                      ),
+                    child: _withHint(
+                      description: 'Pencil (freehand)',
+                      shortcut: 'D',
+                      _toolTabChild(
+                          Assets.icons.pencil.svg(
+                              width: 16, color: Colors.white),
+                          'D'),
                     ),
                   ),
                 if (_isAllowed(EditorTool.text))
                   TabItem(
                     index: EditorTool.text.index,
-                    child: Padding(
-                      padding: padding,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Assets.icons.text.svg(width: 16, color: Colors.white),
-                          Positioned(
-                            bottom: -10,
-                          right: -10,
-                          child: Text('T', style: TextStyle(fontSize: 10)),
-                        ),
-                      ],
+                    child: _withHint(
+                      description: 'Text',
+                      shortcut: 'T',
+                      _toolTabChild(
+                          Assets.icons.text.svg(
+                              width: 16, color: Colors.white),
+                          'T'),
                     ),
                   ),
-                ),
               ],
             ),
             if (_isAllowed(EditorTool.figure) || _isAllowed(EditorTool.comment)) ...[
@@ -288,43 +278,38 @@ class FlowDrawToolbar extends StatelessWidget {
                   if (_isAllowed(EditorTool.figure))
                     TabItem(
                       index: EditorTool.figure.index,
-                      child: Padding(
-                        padding: padding.copyWith(
-                          top: padding.top + 2,
-                          bottom: padding.bottom + 2,
-                        ),
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Assets.icons.figure.svg(width: 16, color: Colors.white),
-                            Positioned(
-                              bottom: -10,
-                              right: -10,
-                              child: Text('F', style: TextStyle(fontSize: 10)),
-                            ),
-                          ],
+                      child: _withHint(
+                        description: 'Figure / SVG shape',
+                        shortcut: 'F',
+                        Padding(
+                          padding: padding.copyWith(
+                            top: padding.top + 2,
+                            bottom: padding.bottom + 2,
+                          ),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Assets.icons.figure.svg(width: 16, color: Colors.white),
+                              Positioned(
+                                bottom: -10,
+                                right: -10,
+                                child: Text('F', style: TextStyle(fontSize: 10)),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   if (_isAllowed(EditorTool.comment))
                     TabItem(
                       index: EditorTool.comment.index,
-                      child: Padding(
-                        padding: padding,
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
+                      child: _withHint(
+                        description: 'Comment pin',
+                        shortcut: 'C',
+                        _toolTabChild(
                             Assets.icons.comment.svg(
-                              width: 16,
-                              color: Colors.white,
-                            ),
-                            Positioned(
-                              bottom: -10,
-                              right: -10,
-                              child: Text('C', style: TextStyle(fontSize: 10)),
-                            ),
-                          ],
-                        ),
+                                width: 16, color: Colors.white),
+                            'C'),
                       ),
                     ),
                 ],
@@ -350,37 +335,68 @@ class FlowDrawToolbar extends StatelessWidget {
             const _SvgExportButton(),
             Padding(
               padding: const EdgeInsets.only(left: 16),
-              child: GhostButton(
-                density: ButtonDensity.compact,
-                onPressed: () {
-                  context.read<CanvasBloc>().add(const AutoLayoutRequested());
-                },
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.auto_awesome_mosaic, size: 16),
-                    SizedBox(width: 6),
-                    Text('Tidy', style: TextStyle(fontSize: 12)),
-                  ],
+              child: _withHint(
+                description: 'Auto-layout to reduce edge crossings',
+                shortcut: '⇧$_kCmdKey L',
+                GhostButton(
+                  density: ButtonDensity.compact,
+                  onPressed: () {
+                    context.read<CanvasBloc>().add(const AutoLayoutRequested());
+                  },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.auto_awesome_mosaic, size: 16),
+                      SizedBox(width: 6),
+                      Text('Tidy', style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
                 ),
               ),
             ),
             Padding(
               padding: const EdgeInsets.only(left: 8),
-              child: GhostButton(
-                density: ButtonDensity.compact,
-                onPressed: () {
-                  context
-                      .read<CanvasBloc>()
-                      .add(const LayoutAlongGuideRequested());
-                },
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.timeline, size: 16),
-                    SizedBox(width: 6),
-                    Text('Lay on path', style: TextStyle(fontSize: 12)),
-                  ],
+              child: _withHint(
+                description:
+                    'Distribute selected nodes along a selected guide shape',
+                shortcut: '⇧$_kCmdKey U',
+                GhostButton(
+                  density: ButtonDensity.compact,
+                  onPressed: () {
+                    context
+                        .read<CanvasBloc>()
+                        .add(const LayoutAlongGuideRequested());
+                  },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.timeline, size: 16),
+                      SizedBox(width: 6),
+                      Text('Lay on path', style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: _withHint(
+                description:
+                    'Swap two selected nodes’ positions, or two edges’ endpoints',
+                shortcut: '⇧$_kCmdKey S',
+                GhostButton(
+                  density: ButtonDensity.compact,
+                  onPressed: () {
+                    context.read<CanvasBloc>().add(const SwapRequested());
+                  },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.swap_horiz, size: 16),
+                      SizedBox(width: 6),
+                      Text('Swap', style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -392,15 +408,18 @@ class FlowDrawToolbar extends StatelessWidget {
               builder: (context, canvasState) {
                 return Padding(
                   padding: const EdgeInsets.only(left: 16),
-                  child: GhostButton(
-                    density: ButtonDensity.compact,
-                    onPressed: () {
-                      context.read<CanvasBloc>().add(const GridToggled());
-                    },
-                    child: Icon(
-                      Icons.grid_4x4,
-                      size: 16,
-                      color: canvasState.showGrid ? Colors.white : Colors.white.withValues(alpha: 0.3),
+                  child: _withHint(
+                    description: 'Toggle the alignment grid',
+                    GhostButton(
+                      density: ButtonDensity.compact,
+                      onPressed: () {
+                        context.read<CanvasBloc>().add(const GridToggled());
+                      },
+                      child: Icon(
+                        Icons.grid_4x4,
+                        size: 16,
+                        color: canvasState.showGrid ? Colors.white : Colors.white.withValues(alpha: 0.3),
+                      ),
                     ),
                   ),
                 );

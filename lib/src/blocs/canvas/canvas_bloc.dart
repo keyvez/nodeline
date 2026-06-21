@@ -33,6 +33,12 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       StreamController<void>.broadcast();
   Stream<void> get layoutAlongGuideRequests =>
       _layoutAlongGuideRequests.stream;
+
+  /// "Swap" request — exchange two selected nodes' positions or two selected
+  /// edges' endpoints. Computed in the data layer (needs rendered geometry).
+  final StreamController<void> _swapRequests =
+      StreamController<void>.broadcast();
+  Stream<void> get swapRequests => _swapRequests.stream;
   /// Snapshot of the state before an ongoing non-undoable operation
   /// (drag, resize, rotation). Captured on the first non-undoable event
   /// and consumed by the corresponding "ended" event.
@@ -85,6 +91,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         AutoLayoutApplied e => _onAutoLayoutApplied(e, emit),
         AutoLayoutRequested _ => _tidyRequests.add(null),
         LayoutAlongGuideRequested _ => _layoutAlongGuideRequests.add(null),
+        SwapRequested _ => _swapRequests.add(null),
       });
     });
   }
@@ -93,6 +100,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
   Future<void> close() {
     _tidyRequests.close();
     _layoutAlongGuideRequests.close();
+    _swapRequests.close();
     return super.close();
   }
 
