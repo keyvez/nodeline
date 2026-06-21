@@ -29,17 +29,21 @@ Widget _withHint(
   String? shortcut,
 }) {
   return Tooltip(
-    tooltip: (_) => TooltipContainer(
+    tooltip: (context) => TooltipContainer(
+      // TooltipContainer applies `.primaryForeground()` to its child, so let
+      // both lines inherit that contrasting colour. The shortcut is only dimmed
+      // via Opacity — hard-coding a colour (e.g. white) made it invisible on
+      // the light primary background.
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(description, style: const TextStyle(fontSize: 11)),
           if (shortcut != null)
-            Text(shortcut,
-                style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.white.withValues(alpha: 0.6))),
+            Opacity(
+              opacity: 0.7,
+              child: Text(shortcut, style: const TextStyle(fontSize: 10)),
+            ),
         ],
       ),
     ),
