@@ -12,7 +12,17 @@ class ToolCall {
   /// The decoded JSON arguments object.
   final Map<String, dynamic> args;
 
-  const ToolCall({this.id = '', required this.name, this.args = const {}});
+  /// Opaque provider token that must be echoed back unchanged on the next
+  /// request (Gemini 3 "thought signature"). Null when the provider didn't send
+  /// one. Carried verbatim; not interpreted.
+  final String? thoughtSignature;
+
+  const ToolCall({
+    this.id = '',
+    required this.name,
+    this.args = const {},
+    this.thoughtSignature,
+  });
 
   @override
   String toString() => 'ToolCall($name, $args)';

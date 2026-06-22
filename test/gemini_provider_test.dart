@@ -285,4 +285,74 @@ void main() {
     expect(resp.hasToolCalls, true);
     expect(resp.toolCalls.single.name, 'create_nodes');
   });
+
+  test('captures a functionCall thoughtSignature and echoes it back', () async {
+    // First response carries a thought signature on the functionCall part.
+    final first = MockClient((req) async => http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {
+                      'functionCall': {'name': 'get_canvas_summary', 'args': {}},
+                      'thoughtSignature': 'SIG-123',
+                    }
+                  ]
+                }
+              }
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        ));
+
+    final provider1 = GeminiProvider(apiKey: 'k', client: first);
+    final resp = await provider1.generate(
+      systemPrompt: 's',
+      tools: canvasToolSchemas,
+      history: [AgentMessage.user('summarize')],
+    );
+    expect(resp.toolCalls.single.thoughtSignature, 'SIG-123');
+
+    // The next request must echo that signature on the reconstructed model turn.
+    Map<String, dynamic>? sentBody;
+    final second = MockClient((req) async {
+      sentBody = jsonDecode(req.body) as Map<String, dynamic>;
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {'text': 'done'}
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    final provider2 = GeminiProvider(apiKey: 'k', client: second);
+    await provider2.generate(
+      systemPrompt: 's',
+      tools: canvasToolSchemas,
+      history: [
+        AgentMessage.user('summarize'),
+        AgentMessage.model(toolCalls: resp.toolCalls),
+        AgentMessage.results(const [
+          ToolResult(callId: 'gem_0', ok: true, summary: '19 objects'),
+        ]),
+      ],
+    );
+
+    final contents = sentBody!['contents'] as List;
+    final modelTurn = contents.firstWhere((c) => (c as Map)['role'] == 'model') as Map;
+    final fcPart = (modelTurn['parts'] as List)
+        .firstWhere((p) => (p as Map).containsKey('functionCall')) as Map;
+    expect(fcPart['thoughtSignature'], 'SIG-123');
+  });
 }

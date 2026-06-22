@@ -99,7 +99,11 @@ class GeminiProvider implements LlmProvider {
           }
           for (final c in m.toolCalls) {
             parts.add({
-              'functionCall': {'name': c.name, 'args': c.args}
+              'functionCall': {'name': c.name, 'args': c.args},
+              // Gemini 3 requires the thought signature to be echoed back
+              // verbatim on the functionCall part, or the next request 400s.
+              if (c.thoughtSignature != null)
+                'thoughtSignature': c.thoughtSignature,
             });
           }
           // Gemini requires at least one part.
@@ -168,6 +172,9 @@ class GeminiProvider implements LlmProvider {
           id: 'gem_${callIndex++}',
           name: fc['name'] as String? ?? '',
           args: ((fc['args'] as Map?)?.cast<String, dynamic>()) ?? const {},
+          // Capture the thought signature (camelCase) so we can echo it back on
+          // the next request, as Gemini 3 requires.
+          thoughtSignature: part['thoughtSignature'] as String?,
         ));
       }
     }
