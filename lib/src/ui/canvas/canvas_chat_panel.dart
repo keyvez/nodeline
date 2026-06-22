@@ -163,9 +163,22 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
     );
   }
 
+  /// A compact header icon button that won't overflow the narrow panel.
+  Widget _headerIcon(IconData icon, String tooltip, VoidCallback onPressed,
+      {Color? color}) {
+    return IconButton(
+      icon: Icon(icon, size: 16, color: color ?? Colors.white54),
+      tooltip: tooltip,
+      onPressed: onPressed,
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.all(4),
+      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+    );
+  }
+
   Widget _header() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+      padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
       child: Row(
         children: [
           const Icon(Icons.auto_awesome, size: 18, color: Colors.white70),
@@ -174,48 +187,29 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
               style: TextStyle(
                   color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
           const Spacer(),
-          IconButton(
-            icon: Icon(Icons.travel_explore,
-                size: 16,
-                color: _webSearch ? Colors.purpleAccent : Colors.white38),
-            tooltip: _webSearch ? 'Web search: on' : 'Web search: off',
-            onPressed: () {
+          _headerIcon(
+            Icons.travel_explore,
+            _webSearch ? 'Web search: on' : 'Web search: off',
+            () {
               // Rebuild the agent so the new flag takes effect on the next turn.
               _chat?.dispose();
               _chat = null;
               setState(() => _webSearch = !_webSearch);
             },
+            color: _webSearch ? Colors.purpleAccent : Colors.white38,
           ),
-          IconButton(
-            icon: const Icon(Icons.key, size: 16, color: Colors.white54),
-            tooltip: 'API key',
-            onPressed: () => setState(() => _showKeyEntry = !_showKeyEntry),
-          ),
+          _headerIcon(Icons.key, 'API key',
+              () => setState(() => _showKeyEntry = !_showKeyEntry)),
           if (_hasLines) ...[
-            IconButton(
-              icon: const Icon(Icons.copy_all, size: 16, color: Colors.white54),
-              tooltip: 'Copy whole transcript',
-              onPressed: _copyTranscript,
-            ),
+            _headerIcon(Icons.copy_all, 'Copy whole transcript', _copyTranscript),
             if (widget.onSendTranscript != null)
-              IconButton(
-                icon: const Icon(Icons.send, size: 16, color: Colors.white54),
-                tooltip: 'Send transcript to agent',
-                onPressed: _sendTranscript,
-              ),
+              _headerIcon(Icons.send, 'Send transcript to agent', _sendTranscript),
           ],
           if (_chat != null)
-            IconButton(
-              icon: const Icon(Icons.delete_outline, size: 16, color: Colors.white54),
-              tooltip: 'Clear chat',
-              onPressed: () => _chat?.reset(),
-            ),
+            _headerIcon(
+                Icons.delete_outline, 'Clear chat', () => _chat?.reset()),
           if (widget.onClose != null)
-            IconButton(
-              icon: const Icon(Icons.close, size: 16, color: Colors.white54),
-              tooltip: 'Close',
-              onPressed: widget.onClose,
-            ),
+            _headerIcon(Icons.close, 'Close', widget.onClose!),
         ],
       ),
     );
@@ -251,6 +245,31 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
   Future<void> _copyLine(ChatLine line) async {
     await Clipboard.setData(ClipboardData(text: line.text));
     _toast('Copied');
+  }
+
+  /// A small always-visible "Copy" button shown under a message, so copying is
+  /// discoverable (long-press / right-click also work).
+  Widget _copyAffordance(ChatLine line) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 6),
+      child: InkWell(
+        onTap: () => _copyLine(line),
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.copy, size: 11, color: Colors.white.withValues(alpha: 0.4)),
+              const SizedBox(width: 3),
+              Text('Copy',
+                  style: TextStyle(
+                      fontSize: 10, color: Colors.white.withValues(alpha: 0.4))),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _sendTranscript() {
@@ -332,15 +351,21 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
           child: GestureDetector(
             onLongPress: () => _copyLine(line),
             onSecondaryTap: () => _copyLine(line),
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 8, left: 32),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.blue.withValues(alpha: 0.25),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: SelectableText(line.text,
-                  style: const TextStyle(color: Colors.white, fontSize: 13)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Container(
+                  margin: const EdgeInsets.only(left: 32),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: SelectableText(line.text,
+                      style: const TextStyle(color: Colors.white, fontSize: 13)),
+                ),
+                _copyAffordance(line),
+              ],
             ),
           ),
         );
@@ -349,10 +374,17 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
           onLongPress: () => _copyLine(line),
           onSecondaryTap: () => _copyLine(line),
           child: Container(
-            margin: const EdgeInsets.only(bottom: 8, right: 16),
+            margin: const EdgeInsets.only(bottom: 4, right: 16),
             width: double.infinity,
-            child: SelectableText(line.text,
-                style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.4)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText(line.text,
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 13, height: 1.4)),
+                _copyAffordance(line),
+              ],
+            ),
           ),
         );
       case ChatLineKind.tool:

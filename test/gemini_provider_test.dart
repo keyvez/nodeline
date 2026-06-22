@@ -198,6 +198,10 @@ void main() {
     final tools = sentBody!['tools'] as List;
     expect(tools.any((t) => (t as Map).containsKey('googleSearch')), true);
     expect(tools.any((t) => (t as Map).containsKey('functionDeclarations')), true);
+    // Combining a built-in tool with function calling requires opting into
+    // server-side tool invocations, or Gemini returns HTTP 400.
+    final toolConfig = sentBody!['tool_config'] as Map?;
+    expect(toolConfig?['include_server_side_tool_invocations'], true);
   });
 
   test('omits googleSearch when web search is disabled', () async {
@@ -231,6 +235,8 @@ void main() {
     final tools = sentBody!['tools'] as List;
     expect(tools.any((t) => (t as Map).containsKey('googleSearch')), false);
     expect(tools.any((t) => (t as Map).containsKey('functionDeclarations')), true);
+    // No built-in tool → no server-side-invocation opt-in needed.
+    expect(sentBody!.containsKey('tool_config'), false);
   });
 
   test('parses function calls even when groundingMetadata is present', () async {

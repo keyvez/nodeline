@@ -61,6 +61,11 @@ class GeminiProvider implements LlmProvider {
         if (enableWebSearch) {'googleSearch': <String, dynamic>{}},
         {'functionDeclarations': [for (final t in tools) t.toJson()]}
       ],
+      // Combining a built-in tool (googleSearch) with functionDeclarations
+      // requires opting into server-side tool invocations, or the API rejects
+      // the request with HTTP 400.
+      if (enableWebSearch)
+        'tool_config': {'include_server_side_tool_invocations': true},
     };
 
     final resp = await _client
