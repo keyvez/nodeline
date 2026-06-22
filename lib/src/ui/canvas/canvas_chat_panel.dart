@@ -429,11 +429,19 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
                   onPressed: () => _chat?.cancel(),
                   icon: const Icon(Icons.stop, size: 18),
                   tooltip: 'Stop',
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
+                    foregroundColor: Colors.white,
+                  ),
                 )
               : IconButton.filled(
                   onPressed: _send,
                   icon: const Icon(Icons.arrow_upward, size: 18),
                   tooltip: 'Send',
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.purpleAccent,
+                    foregroundColor: Colors.white,
+                  ),
                 ),
         ],
       ),
