@@ -1350,10 +1350,23 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
           ? currentSelection.selectedNodeIds.contains(hitObjectId)
           : currentSelection.selectedDrawingObjectIds.contains(hitObjectId);
 
-      if (!alreadySelected) {
-        final nodeIds = isNode ? {hitObjectId} : <String>{};
-        final drawingObjectIds = !isNode ? {hitObjectId} : <String>{};
+      final nodeIds = isNode ? {hitObjectId} : <String>{};
+      final drawingObjectIds = !isNode ? {hitObjectId} : <String>{};
 
+      if (isShiftPressed && alreadySelected) {
+        // Additive modifier (Shift/Cmd/Ctrl) on an already-selected object
+        // toggles it OFF, so the modifier can both add and remove. Don't start
+        // a drag — the user is deselecting, not moving.
+        _selectionBloc.add(
+          SelectionObjectsRemoved(
+            nodeIds: nodeIds,
+            drawingObjectIds: drawingObjectIds,
+          ),
+        );
+        return;
+      }
+
+      if (!alreadySelected) {
         if (isShiftPressed) {
           _selectionBloc.add(
             SelectionObjectsAdded(

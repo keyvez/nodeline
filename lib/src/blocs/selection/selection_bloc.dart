@@ -9,6 +9,7 @@ class SelectionBloc extends Bloc<SelectionEvent, SelectionState> {
     on<SelectionEvent>((event, emit) async {
       return (switch (event) {
         SelectionObjectsAdded e => _onSelectionObjectsAdded(e, emit),
+        SelectionObjectsRemoved e => _onSelectionObjectsRemoved(e, emit),
         SelectionReplaced e => _onSelectionReplaced(e, emit),
         SelectionCleared e => _onSelectionCleared(e, emit),
         DrawingObjectHovered e => _onDrawingObjectHovered(e, emit),
@@ -24,6 +25,15 @@ class SelectionBloc extends Bloc<SelectionEvent, SelectionState> {
         ...state.selectedDrawingObjectIds,
         ...event.drawingObjectIds
       },
+    ));
+  }
+
+  void _onSelectionObjectsRemoved(
+      SelectionObjectsRemoved event, Emitter<SelectionState> emit) {
+    emit(state.copyWith(
+      selectedNodeIds: {...state.selectedNodeIds}..removeAll(event.nodeIds),
+      selectedDrawingObjectIds: {...state.selectedDrawingObjectIds}
+        ..removeAll(event.drawingObjectIds),
     ));
   }
 

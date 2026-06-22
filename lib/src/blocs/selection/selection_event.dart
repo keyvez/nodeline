@@ -37,6 +37,20 @@ final class SelectionReplaced extends SelectionEvent {
 }
 
 
+/// Event to remove a set of IDs from the current selection (toggle off).
+final class SelectionObjectsRemoved extends SelectionEvent {
+  final Set<String> nodeIds;
+  final Set<String> drawingObjectIds;
+
+  const SelectionObjectsRemoved({
+    this.nodeIds = const {},
+    this.drawingObjectIds = const {},
+  });
+
+  @override
+  List<Object> get props => [nodeIds, drawingObjectIds];
+}
+
 /// Event to clear the entire selection.
 final class SelectionCleared extends SelectionEvent {}
 
