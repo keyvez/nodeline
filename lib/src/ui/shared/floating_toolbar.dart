@@ -383,15 +383,72 @@ class _FontMenuPanelState extends State<_FontMenuPanel> {
   static const double _minSize = 6;
   static const double _maxSize = 96;
 
+  /// Whether [preset] matches the panel's current family + size.
+  bool _isActivePreset(TextStylePreset preset) =>
+      preset.family == _family && (preset.size - _size).abs() < 0.5;
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 200,
+      width: 220,
+      constraints: const BoxConstraints(maxHeight: 420),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Column(
+      child: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Text-style presets (Title / Heading 1 / … / Leaf node), Docs-style.
+          const Padding(
+            padding: EdgeInsets.only(bottom: 2),
+            child: Text('Text style',
+                style: TextStyle(fontSize: 11, color: Colors.white54)),
+          ),
+          for (final p in kTextStylePresets)
+            InkWell(
+              onTap: () {
+                setState(() {
+                  _family = p.family;
+                  _size = p.size;
+                });
+                widget.onChanged(p.family, p.size);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      _isActivePreset(p)
+                          ? Icons.check
+                          : Icons.text_fields,
+                      size: 14,
+                      color: _isActivePreset(p) ? null : Colors.white38,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        p.label,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          // Preview in the preset's own family; cap the rendered
+                          // size so big presets don't blow out the row.
+                          fontFamily: p.family,
+                          fontSize: p.size.clamp(11, 18).toDouble(),
+                        ),
+                      ),
+                    ),
+                    Text('${p.size.round()}',
+                        style: const TextStyle(fontSize: 11, color: Colors.white38)),
+                  ],
+                ),
+              ),
+            ),
+          const Divider(height: 12),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 2),
+            child: Text('Font',
+                style: TextStyle(fontSize: 11, color: Colors.white54)),
+          ),
           for (final f in kEditorFontFamilies)
             InkWell(
               onTap: () {
@@ -464,6 +521,7 @@ class _FontMenuPanelState extends State<_FontMenuPanel> {
             ),
           ],
         ],
+      ),
       ),
     );
   }

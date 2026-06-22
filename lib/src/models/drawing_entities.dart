@@ -24,6 +24,29 @@ const String kEditorDefaultFontFamily = 'Courier';
 /// The font size applied to shape text when nothing else has been chosen.
 const double kEditorDefaultFontSize = 16.0;
 
+/// A named text-style preset (à la Google Docs' Title / Heading 1 / …),
+/// bundling a font family and size so a whole look can be applied in one tap.
+class TextStylePreset {
+  final String label;
+  final String family;
+  final double size;
+
+  const TextStylePreset(this.label, this.family, this.size);
+}
+
+/// Built-in text-style presets shown at the top of the font panel. Sizes are
+/// tuned for diagram shapes (node labels), descending from a big title down to a
+/// small leaf-node/caption size.
+const List<TextStylePreset> kTextStylePresets = <TextStylePreset>[
+  TextStylePreset('Title', 'sans-serif', 32),
+  TextStylePreset('Heading 1', 'sans-serif', 24),
+  TextStylePreset('Heading 2', 'sans-serif', 20),
+  TextStylePreset('Subtitle', 'serif', 18),
+  TextStylePreset('Body', kEditorDefaultFontFamily, kEditorDefaultFontSize),
+  TextStylePreset('Leaf node', kEditorDefaultFontFamily, 12),
+  TextStylePreset('Caption', 'sans-serif', 10),
+];
+
 /// Sane bounds for a font size. Guards against corrupt persisted values — an
 /// earlier resize bug could blow a font size up to ~1e31, which poisons text
 /// layout. Out-of-range or non-finite sizes are clamped on deserialization.
