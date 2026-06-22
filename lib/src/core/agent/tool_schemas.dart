@@ -113,6 +113,20 @@ final List<ToolSchema> canvasToolSchemas = [
     }, required: ['style']),
   ),
   ToolSchema(
+    name: 'set_edge_direction',
+    description:
+        'Make edges directed (with an arrowhead) or undirected (a plain line). '
+        'Use for "make this edge undirected" / "turn these into arrows". Omit ids '
+        'to use the current selection.',
+    parameters: _object({
+      'ids': _array({'type': 'string'}, 'Target edge ids. Omit to use the current selection.'),
+      'directed': {
+        'type': 'boolean',
+        'description': 'true = directed (arrowhead), false = undirected (plain line).',
+      },
+    }, required: ['directed']),
+  ),
+  ToolSchema(
     name: 'create_nodes',
     description:
         'Create one or more node shapes. Each node may set label, shape, optional '

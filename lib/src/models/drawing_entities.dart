@@ -902,6 +902,9 @@ class ArrowObject extends DrawingObject {
   final LineStyle lineStyle;
   /// Optional stroke (line + arrowhead) color. Null = the default object color.
   final Color? strokeColor;
+  /// The arrowhead at the end. [ArrowHeadType.none] makes the edge undirected
+  /// (a plain line); [triangle] (default) is a directed arrow.
+  final ArrowHeadType arrowHead;
   /// Optional text label displayed at the midpoint of this arrow.
   final String? arrowLabel;
   /// Optional simplified freehand stroke (world coords) that softly biases the
@@ -929,6 +932,7 @@ class ArrowObject extends DrawingObject {
     this.waypoints,
     this.lineStyle = LineStyle.solid,
     this.strokeColor,
+    this.arrowHead = ArrowHeadType.triangle,
     this.arrowLabel,
     this.routeGuide,
   });
@@ -1011,6 +1015,7 @@ class ArrowObject extends DrawingObject {
     'creationZoom': creationZoom,
     'lineStyle': lineStyle.name,
     if (strokeColor != null) 'strokeColor': strokeColor!.toARGB32(),
+    if (arrowHead != ArrowHeadType.triangle) 'arrowHead': arrowHead.name,
     if (arrowLabel != null) 'arrowLabel': arrowLabel,
     if (routeGuide != null)
       'routeGuide': routeGuide!.map((o) => o.toJson()).toList(),
@@ -1030,6 +1035,9 @@ class ArrowObject extends DrawingObject {
       midPoint: json['midPoint'] != null ? JSONOffset.fromJson((json['midPoint'] as List).cast<double>()) : null,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
       strokeColor: json['strokeColor'] != null ? Color(json['strokeColor'] as int) : null,
+      arrowHead: json['arrowHead'] != null
+          ? ArrowHeadType.values.byName(json['arrowHead'])
+          : ArrowHeadType.triangle,
       arrowLabel: json['arrowLabel'] as String?,
       routeGuide: json['routeGuide'] != null
           ? (json['routeGuide'] as List)
@@ -1054,6 +1062,7 @@ class ArrowObject extends DrawingObject {
     LineStyle? lineStyle,
     Color? strokeColor,
     bool clearStroke = false,
+    ArrowHeadType? arrowHead,
     String? arrowLabel,
     bool clearArrowLabel = false,
     List<Offset>? routeGuide,
@@ -1073,6 +1082,7 @@ class ArrowObject extends DrawingObject {
       waypoints: waypoints ?? this.waypoints,
       lineStyle: lineStyle ?? this.lineStyle,
       strokeColor: clearStroke ? null : (strokeColor ?? this.strokeColor),
+      arrowHead: arrowHead ?? this.arrowHead,
       arrowLabel: clearArrowLabel ? null : (arrowLabel ?? this.arrowLabel),
       routeGuide: clearRouteGuide ? null : (routeGuide ?? this.routeGuide),
     );

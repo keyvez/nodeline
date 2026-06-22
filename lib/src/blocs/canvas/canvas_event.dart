@@ -419,6 +419,25 @@ final class ObjectsLineStyleChanged extends CanvasEvent {
   List<Object> get props => [selectedIds, lineStyle];
 }
 
+/// Sets the arrowhead style of the selected arrows — e.g. [ArrowHeadType.none]
+/// to make an edge undirected (a plain line), or [ArrowHeadType.triangle] to
+/// make it a directed arrow. Non-arrow objects are ignored. Undoable as one step.
+final class ObjectsArrowHeadChanged extends CanvasEvent {
+  final Set<String> selectedIds;
+  final ArrowHeadType arrowHead;
+
+  const ObjectsArrowHeadChanged(this.selectedIds, this.arrowHead)
+      : super(isUndoable: true);
+
+  @override
+  String get description => arrowHead == ArrowHeadType.none
+      ? 'Made edge undirected'
+      : 'Made edge directed';
+
+  @override
+  List<Object> get props => [selectedIds, arrowHead];
+}
+
 /// Changes the global default font for shape text.
 ///
 /// Updates [CanvasState.defaultFontFamily]/[defaultFontSize] and, by extension,

@@ -1208,13 +1208,16 @@ class FlowDrawEditorRenderBox extends RenderBox
           _paintStyledPath(canvas, path, paint, obj.lineStyle, seed: obj.id.hashCode);
         }
 
-        // Draw the arrowhead at the shortened end
-        if (pathType == LinkPathType.orthogonal) {
-          if (arrowControl != null) {
-            _paintArrowHead(canvas, arrowControl, lineEnd, paint, lineStyle: obj.lineStyle);
+        // Draw the arrowhead at the shortened end — unless this is an
+        // undirected edge (arrowHead == none), which renders as a plain line.
+        if (obj.arrowHead != ArrowHeadType.none) {
+          if (pathType == LinkPathType.orthogonal) {
+            if (arrowControl != null) {
+              _paintArrowHead(canvas, arrowControl, lineEnd, paint, lineStyle: obj.lineStyle);
+            }
+          } else {
+            _paintArrowHead(canvas, controlPoint, lineEnd, paint, lineStyle: obj.lineStyle);
           }
-        } else {
-          _paintArrowHead(canvas, controlPoint, lineEnd, paint, lineStyle: obj.lineStyle);
         }
 
         // Draw connection point dots at attached endpoints

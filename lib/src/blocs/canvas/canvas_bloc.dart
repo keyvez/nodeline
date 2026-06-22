@@ -104,6 +104,7 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
         ObjectsDistributed e => _onObjectsDistributed(e, emit),
         ObjectColorsChanged e => _onObjectColorsChanged(e, emit),
         ObjectsLineStyleChanged e => _onObjectsLineStyleChanged(e, emit),
+        ObjectsArrowHeadChanged e => _onObjectsArrowHeadChanged(e, emit),
         GlobalFontChanged e => _onGlobalFontChanged(e, emit),
         ObjectFontChanged e => _onObjectFontChanged(e, emit),
         ObjectFontReset e => _onObjectFontReset(e, emit),
@@ -1284,6 +1285,22 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
       }
     }
 
+    _emitWithHistory(
+      state.copyWith(drawingObjects: updatedObjects),
+      event,
+      emit,
+    );
+  }
+
+  void _onObjectsArrowHeadChanged(
+      ObjectsArrowHeadChanged event, Emitter<CanvasState> emit) {
+    final updatedObjects = Map<String, DrawingObject>.from(state.drawingObjects);
+    for (final id in event.selectedIds) {
+      final obj = updatedObjects[id];
+      if (obj is ArrowObject) {
+        updatedObjects[id] = obj.copyWith(arrowHead: event.arrowHead);
+      }
+    }
     _emitWithHistory(
       state.copyWith(drawingObjects: updatedObjects),
       event,

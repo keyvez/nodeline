@@ -329,6 +329,7 @@ class FlowDrawToolbar extends StatelessWidget {
             const _GlobalFontButton(),
             Gap(16),
             const _ColorButton(),
+            const _EdgeDirectionButton(),
             Gap(16),
             Builder(
               builder: (context) {
@@ -863,6 +864,55 @@ class _FitButtonState extends State<_FitButton> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Top-toolbar toggle to make the selected edge(s) directed (arrowhead) or
+/// undirected (plain line). Only shown when an arrow is selected.
+class _EdgeDirectionButton extends StatelessWidget {
+  const _EdgeDirectionButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<SelectionBloc, SelectionState>(
+      builder: (context, sel) {
+        return BlocBuilder<CanvasBloc, CanvasState>(
+          builder: (context, state) {
+            final arrows = sel.selectedDrawingObjectIds
+                .where((id) => state.drawingObjects[id] is ArrowObject)
+                .toSet();
+            if (arrows.isEmpty) return const SizedBox.shrink();
+
+            // Directed if any selected arrow currently has a head.
+            final anyDirected = arrows.any((id) =>
+                (state.drawingObjects[id] as ArrowObject).arrowHead !=
+                ArrowHeadType.none);
+            final canvasBloc = context.read<CanvasBloc>();
+
+            return Padding(
+              padding: const EdgeInsets.only(left: 16),
+              child: GhostButton(
+                density: ButtonDensity.compact,
+                onPressed: () => canvasBloc.add(ObjectsArrowHeadChanged(
+                  arrows,
+                  anyDirected ? ArrowHeadType.none : ArrowHeadType.triangle,
+                )),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(anyDirected ? Icons.arrow_right_alt : Icons.remove,
+                        size: 16),
+                    const Gap(6),
+                    Text(anyDirected ? 'Directed' : 'Undirected',
+                        style: const TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

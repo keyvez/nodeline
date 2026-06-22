@@ -337,6 +337,8 @@ class SvgExporter {
     List<Rect> bounds,
   ) {
     final dashArray = _dashArray(obj.lineStyle);
+    // Undirected edges (arrowHead == none) export as a plain line, no head.
+    final showHead = obj.arrowHead != ArrowHeadType.none;
 
     if (obj.pathType == LinkPathType.orthogonal) {
       var fullPath = _computeOrthogonalPath(obj, solidRects);
@@ -348,7 +350,7 @@ class SvgExporter {
           'stroke-linecap="round"'
           '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
           '/>');
-      _renderArrowhead(fullPath, svg);
+      if (showHead) _renderArrowhead(fullPath, svg);
       _addPathBounds(fullPath, bounds);
     } else {
       // Straight or curved (quadratic bezier via midPoint).
@@ -366,7 +368,7 @@ class SvgExporter {
         // Tangent direction at t=1: 2*(end - cp)
         final tangent = obj.end - cp;
         final len = math.sqrt(tangent.dx * tangent.dx + tangent.dy * tangent.dy);
-        if (len > 0.1) {
+        if (len > 0.1 && showHead) {
           _renderArrowhead([obj.end - tangent * (1.0 / len), obj.end], svg);
         }
       } else {
@@ -376,7 +378,7 @@ class SvgExporter {
             'stroke-linejoin="round" stroke-linecap="round"'
             '${dashArray.isNotEmpty ? ' stroke-dasharray="$dashArray"' : ''}'
             '/>');
-        _renderArrowhead([obj.start, obj.end], svg);
+        if (showHead) _renderArrowhead([obj.start, obj.end], svg);
       }
 
       // Bounds: include control point for curves.

@@ -2119,6 +2119,7 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         waypoints: null,
         lineStyle: obj.lineStyle,
         strokeColor: obj.strokeColor,
+        arrowHead: obj.arrowHead,
         arrowLabel: obj.arrowLabel,
         routeGuide: obj.routeGuide,
         angle: obj.angle,

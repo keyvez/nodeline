@@ -42,6 +42,7 @@ class ToolDispatcher {
     'color_objects',
     'set_line_style',
     'set_text_style',
+    'set_edge_direction',
     'create_nodes',
     'create_edges',
     'delete_objects',
@@ -74,6 +75,7 @@ class ToolDispatcher {
         'color_objects' => _colorObjects(call),
         'set_line_style' => _setLineStyle(call),
         'set_text_style' => _setTextStyle(call),
+        'set_edge_direction' => _setEdgeDirection(call),
         'create_nodes' => _createNodes(call),
         'create_edges' => _createEdges(call),
         'delete_objects' => _deleteObjects(call),
@@ -206,6 +208,45 @@ class ToolDispatcher {
       if (p.label.toLowerCase() == target) return p;
     }
     return null;
+  }
+
+  /// Makes the target edges directed (arrowhead) or undirected (plain line).
+  /// Omit ids to use the current selection.
+  ToolResult _setEdgeDirection(ToolCall c) {
+    final ids = _idsFromArgs(c.args);
+    if (ids.isEmpty) return ToolResult.error('No target ids', callId: c.id);
+    final directed = _parseDirected(c.args);
+    if (directed == null) {
+      return ToolResult.error(
+        'Specify directed:true/false (or direction:"directed"/"undirected")',
+        callId: c.id,
+      );
+    }
+    canvasBloc.add(ObjectsArrowHeadChanged(
+      ids,
+      directed ? ArrowHeadType.triangle : ArrowHeadType.none,
+    ));
+    return ToolResult.ok(
+      'Made ${ids.length} edge(s) ${directed ? 'directed' : 'undirected'}',
+      callId: c.id,
+    );
+  }
+
+  /// Interprets the various ways the model might express directedness.
+  static bool? _parseDirected(Map<String, dynamic> a) {
+    if (a['directed'] is bool) return a['directed'] as bool;
+    final s = (a['direction'] ?? a['style'])?.toString().toLowerCase();
+    switch (s) {
+      case 'directed':
+      case 'arrow':
+        return true;
+      case 'undirected':
+      case 'line':
+      case 'none':
+        return false;
+      default:
+        return null;
+    }
   }
 
   // --- creation -----------------------------------------------------------
