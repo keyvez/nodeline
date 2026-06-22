@@ -328,6 +328,8 @@ class FlowDrawToolbar extends StatelessWidget {
             Gap(16),
             const _GlobalFontButton(),
             Gap(16),
+            const _ColorButton(),
+            Gap(16),
             Builder(
               builder: (context) {
                 return const _MermaidButton();
@@ -861,6 +863,123 @@ class _FitButtonState extends State<_FitButton> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Top-toolbar fill/stroke color control. Acts on the current shape selection;
+/// disabled (greyed) when nothing colorable is selected.
+class _ColorButton extends StatelessWidget {
+  const _ColorButton();
+
+  static bool _isColorable(DrawingObject? o) =>
+      o is RectangleObject ||
+      o is CircleObject ||
+      o is DiamondObject ||
+      o is ParallelogramObject ||
+      o is ForkJoinObject ||
+      o is ArrowObject ||
+      o is LineObject;
+
+  static Color? _fillOf(DrawingObject? o) => switch (o) {
+        RectangleObject() => o.fillColor,
+        CircleObject() => o.fillColor,
+        DiamondObject() => o.fillColor,
+        ParallelogramObject() => o.fillColor,
+        ForkJoinObject() => o.fillColor,
+        _ => null,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<SelectionBloc, SelectionState>(
+      builder: (context, sel) {
+        return BlocBuilder<CanvasBloc, CanvasState>(
+          builder: (context, state) {
+            final ids = sel.selectedDrawingObjectIds
+                .where((id) => _isColorable(state.drawingObjects[id]))
+                .toSet();
+            final enabled = ids.isNotEmpty;
+            Color? currentFill;
+            for (final id in ids) {
+              final f = _fillOf(state.drawingObjects[id]);
+              if (f != null) currentFill = f;
+            }
+            final canvasBloc = context.read<CanvasBloc>();
+
+            return GhostButton(
+              density: ButtonDensity.compact,
+              enabled: enabled,
+              onPressed: !enabled
+                  ? null
+                  : () {
+                      showPopover(
+                        context: context,
+                        alignment: Alignment.topCenter,
+                        builder: (popoverContext) {
+                          return ModalContainer(
+                            child: SizedBox(
+                              width: 220,
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    FillColorPicker(
+                                      currentColor: currentFill,
+                                      onColorChanged: (c) {
+                                        canvasBloc.add(ObjectColorsChanged(
+                                          ids,
+                                          fillColor: c,
+                                          clearFill: c == null,
+                                        ));
+                                      },
+                                    ),
+                                    const Gap(10),
+                                    StrokeColorPicker(
+                                      currentColor: Colors.white,
+                                      onColorChanged: (c) {
+                                        canvasBloc.add(ObjectColorsChanged(
+                                          ids,
+                                          strokeColor: c,
+                                        ));
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: currentFill ?? Colors.transparent,
+                      borderRadius: BorderRadius.circular(3),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.5)),
+                    ),
+                    child: currentFill == null
+                        ? Icon(Icons.format_color_fill,
+                            size: 10,
+                            color: Colors.white.withValues(alpha: 0.7))
+                        : null,
+                  ),
+                  const Gap(6),
+                  const Text('Color', style: TextStyle(fontSize: 12)),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
