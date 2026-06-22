@@ -565,6 +565,19 @@ start -> outputPhase
               },
               child: Row(
                 children: [
+                  if (_showChat)
+                    CanvasChatPanel(
+                      onClose: () => setState(() => _showChat = false),
+                      onSendTranscript: (turns) => FlanBinding.sendChatLog(
+                        turns: [
+                          for (final t in turns)
+                            <String, dynamic>{...t},
+                        ],
+                        summary:
+                            'Canvas Mode AI chat transcript (${turns.length} turns) from ${_currentFileName ?? 'Untitled'}',
+                        screen: 'Canvas Mode',
+                      ),
+                    ),
                   Expanded(
                     child: Stack(
                 children: [
@@ -727,10 +740,11 @@ start -> outputPhase
                       ],
                     ),
                   ),
-                  // Minimap (bottom-left)
+                  // Minimap (bottom-right, raised above the history panel which
+                  // floats at the very bottom-right).
                   const Positioned(
-                    bottom: 16,
-                    left: 16,
+                    bottom: 80,
+                    right: 16,
                     child: MiniMap(),
                   ),
                   // Shortcut overlay
@@ -744,10 +758,6 @@ start -> outputPhase
                 ],
               ),
                   ),
-                  if (_showChat)
-                    CanvasChatPanel(
-                      onClose: () => setState(() => _showChat = false),
-                    ),
                 ],
               ),
             ),

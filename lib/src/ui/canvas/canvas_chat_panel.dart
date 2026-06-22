@@ -5,10 +5,17 @@ import 'package:flow_draw/src/core/agent/gemini_provider.dart';
 import 'package:flow_draw/src/core/agent/tool_dispatcher.dart';
 import 'package:flow_draw/src/ui/canvas/canvas_chat_controller.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _prefGeminiKey = 'canvas_mode_gemini_key';
+
+/// A single transcript turn handed to [CanvasChatPanel.onSendTranscript], shaped
+/// to match Flan's `sendChatLog` turns (`{role, text}` with role one of
+/// 'user' | 'assistant' | 'tool' | 'error'). The package stays free of any Flan
+/// dependency — the host app decides what to do with the turns.
+typedef ChatTranscriptTurn = Map<String, String>;
 
 /// A docked chat side panel that drives Canvas Mode: type natural-language
 /// directions, watch the agent create/edit the diagram live.
@@ -23,7 +30,18 @@ class CanvasChatPanel extends StatefulWidget {
   /// Called when the user closes the panel (X). Null hides the close button.
   final VoidCallback? onClose;
 
-  const CanvasChatPanel({super.key, this.width = 340, this.onClose});
+  /// Called when the user taps "send transcript to agent". Receives the ordered
+  /// transcript turns. Null hides the send-to-agent button. The host wires this
+  /// to e.g. Flan's `sendChatLog`. Returns whether the send succeeded (for the
+  /// toast); a void callback is also accepted.
+  final bool Function(List<ChatTranscriptTurn> turns)? onSendTranscript;
+
+  const CanvasChatPanel({
+    super.key,
+    this.width = 340,
+    this.onClose,
+    this.onSendTranscript,
+  });
 
   @override
   State<CanvasChatPanel> createState() => _CanvasChatPanelState();
@@ -128,7 +146,7 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
       width: widget.width,
       decoration: BoxDecoration(
         color: const Color(0xFF161616),
-        border: Border(left: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+        border: Border(right: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
       ),
       child: SafeArea(
         child: Column(
@@ -173,6 +191,19 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
             tooltip: 'API key',
             onPressed: () => setState(() => _showKeyEntry = !_showKeyEntry),
           ),
+          if (_hasLines) ...[
+            IconButton(
+              icon: const Icon(Icons.copy_all, size: 16, color: Colors.white54),
+              tooltip: 'Copy whole transcript',
+              onPressed: _copyTranscript,
+            ),
+            if (widget.onSendTranscript != null)
+              IconButton(
+                icon: const Icon(Icons.send, size: 16, color: Colors.white54),
+                tooltip: 'Send transcript to agent',
+                onPressed: _sendTranscript,
+              ),
+          ],
           if (_chat != null)
             IconButton(
               icon: const Icon(Icons.delete_outline, size: 16, color: Colors.white54),
@@ -187,6 +218,52 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
             ),
         ],
       ),
+    );
+  }
+
+  bool get _hasLines => (_chat?.lines.isNotEmpty ?? false);
+
+  /// Maps a [ChatLineKind] to a transcript role string. Tool lines are folded
+  /// into the assistant's actions.
+  static String _roleOf(ChatLineKind k) => switch (k) {
+        ChatLineKind.user => 'user',
+        ChatLineKind.assistant => 'assistant',
+        ChatLineKind.tool => 'tool',
+        ChatLineKind.error => 'error',
+      };
+
+  List<ChatTranscriptTurn> _buildTurns() => [
+        for (final l in (_chat?.lines ?? const <ChatLine>[]))
+          {'role': _roleOf(l.kind), 'text': l.text},
+      ];
+
+  /// Plain-text rendering of the transcript for the clipboard.
+  String _transcriptText() => [
+        for (final l in (_chat?.lines ?? const <ChatLine>[]))
+          '${_roleOf(l.kind)}: ${l.text}',
+      ].join('\n\n');
+
+  Future<void> _copyTranscript() async {
+    await Clipboard.setData(ClipboardData(text: _transcriptText()));
+    _toast('Transcript copied');
+  }
+
+  Future<void> _copyLine(ChatLine line) async {
+    await Clipboard.setData(ClipboardData(text: line.text));
+    _toast('Copied');
+  }
+
+  void _sendTranscript() {
+    final send = widget.onSendTranscript;
+    if (send == null) return;
+    final ok = send(_buildTurns());
+    _toast(ok ? 'Sent transcript to agent' : 'Agent not connected');
+  }
+
+  void _toast(String message) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
     );
   }
 
@@ -252,21 +329,31 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
       case ChatLineKind.user:
         return Align(
           alignment: Alignment.centerRight,
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 8, left: 32),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.blue.withValues(alpha: 0.25),
-              borderRadius: BorderRadius.circular(12),
+          child: GestureDetector(
+            onLongPress: () => _copyLine(line),
+            onSecondaryTap: () => _copyLine(line),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 8, left: 32),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: SelectableText(line.text,
+                  style: const TextStyle(color: Colors.white, fontSize: 13)),
             ),
-            child: Text(line.text, style: const TextStyle(color: Colors.white, fontSize: 13)),
           ),
         );
       case ChatLineKind.assistant:
-        return Container(
-          margin: const EdgeInsets.only(bottom: 8, right: 16),
-          child: Text(line.text,
-              style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.4)),
+        return GestureDetector(
+          onLongPress: () => _copyLine(line),
+          onSecondaryTap: () => _copyLine(line),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8, right: 16),
+            width: double.infinity,
+            child: SelectableText(line.text,
+                style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.4)),
+          ),
         );
       case ChatLineKind.tool:
         final running = line.toolOk == null;
