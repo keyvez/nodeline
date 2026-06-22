@@ -1056,6 +1056,8 @@ class ArrowObject extends DrawingObject {
     LinkPathType? pathType,
     ObjectAttachment? startAttachment,
     ObjectAttachment? endAttachment,
+    bool clearStartAttachment = false,
+    bool clearEndAttachment = false,
     double? angle,
     double? creationZoom,
     List<Offset>? waypoints,
@@ -1075,8 +1077,10 @@ class ArrowObject extends DrawingObject {
       isSelected: isSelected ?? this.isSelected,
       midPoint: midPoint ?? this.midPoint,
       pathType: pathType ?? this.pathType,
-      startAttachment: startAttachment ?? this.startAttachment,
-      endAttachment: endAttachment ?? this.endAttachment,
+      startAttachment:
+          clearStartAttachment ? null : (startAttachment ?? this.startAttachment),
+      endAttachment:
+          clearEndAttachment ? null : (endAttachment ?? this.endAttachment),
       angle: angle ?? this.angle,
       creationZoom: creationZoom ?? this.creationZoom,
       waypoints: waypoints ?? this.waypoints,
@@ -1200,6 +1204,8 @@ class LineObject extends DrawingObject {
     bool? isSelected,
     ObjectAttachment? startAttachment,
     ObjectAttachment? endAttachment,
+    bool clearStartAttachment = false,
+    bool clearEndAttachment = false,
     double? angle,
     double? creationZoom,
     LineStyle? lineStyle,
@@ -1212,8 +1218,10 @@ class LineObject extends DrawingObject {
       end: end ?? this.end,
       midPoint: midPoint ?? this.midPoint,
       isSelected: isSelected ?? this.isSelected,
-      startAttachment: startAttachment ?? this.startAttachment,
-      endAttachment: endAttachment ?? this.endAttachment,
+      startAttachment:
+          clearStartAttachment ? null : (startAttachment ?? this.startAttachment),
+      endAttachment:
+          clearEndAttachment ? null : (endAttachment ?? this.endAttachment),
       angle: angle ?? this.angle,
       creationZoom: creationZoom ?? this.creationZoom,
       lineStyle: lineStyle ?? this.lineStyle,

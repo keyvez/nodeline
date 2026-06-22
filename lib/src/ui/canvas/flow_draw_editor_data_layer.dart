@@ -2332,32 +2332,29 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
               relativePosition: _hoveredSnapPoint!.relativePosition,
             )
           : null;
+      // Rebuild via copyWith so all unrelated attributes — strokeColor,
+      // arrowHead, routeGuide, creationZoom — survive an endpoint reroute.
+      // Only the dragged endpoint's position and attachment change; a null
+      // attachment means the handle was dragged off a node, so clear it.
+      final draggingStart = _isResizing.handle == Handle.arrowStart;
       if (object is ArrowObject) {
-        finalObject = ArrowObject(
-          id: object.id,
-          start: _isResizing.handle == Handle.arrowStart ? newPos : object.start,
-          end: _isResizing.handle == Handle.arrowEnd ? newPos : object.end,
-          midPoint: object.midPoint,
-          isSelected: object.isSelected,
-          pathType: object.pathType,
-          startAttachment: _isResizing.handle == Handle.arrowStart ? attachment : object.startAttachment,
-          endAttachment: _isResizing.handle == Handle.arrowEnd ? attachment : object.endAttachment,
-          angle: object.angle,
-          waypoints: temp.waypoints ?? object.waypoints,
-          lineStyle: object.lineStyle,
-          arrowLabel: object.arrowLabel,
+        finalObject = object.copyWith(
+          start: draggingStart ? newPos : null,
+          end: draggingStart ? null : newPos,
+          startAttachment: draggingStart ? attachment : null,
+          endAttachment: draggingStart ? null : attachment,
+          clearStartAttachment: draggingStart && attachment == null,
+          clearEndAttachment: !draggingStart && attachment == null,
+          waypoints: temp.waypoints,
         );
       } else if (object is LineObject) {
-        finalObject = LineObject(
-          id: object.id,
-          start: _isResizing.handle == Handle.arrowStart ? newPos : object.start,
-          end: _isResizing.handle == Handle.arrowEnd ? newPos : object.end,
-          midPoint: object.midPoint,
-          isSelected: object.isSelected,
-          startAttachment: _isResizing.handle == Handle.arrowStart ? attachment : object.startAttachment,
-          endAttachment: _isResizing.handle == Handle.arrowEnd ? attachment : object.endAttachment,
-          angle: object.angle,
-          lineStyle: object.lineStyle,
+        finalObject = object.copyWith(
+          start: draggingStart ? newPos : null,
+          end: draggingStart ? null : newPos,
+          startAttachment: draggingStart ? attachment : null,
+          endAttachment: draggingStart ? null : attachment,
+          clearStartAttachment: draggingStart && attachment == null,
+          clearEndAttachment: !draggingStart && attachment == null,
         );
       }
       setState(() => _tempDrawingObject = null);
