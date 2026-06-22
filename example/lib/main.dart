@@ -567,6 +567,7 @@ start -> outputPhase
                 children: [
                   if (_showChat)
                     CanvasChatPanel(
+                      documentId: _currentFileName,
                       onClose: () => setState(() => _showChat = false),
                       onSendTranscript: (turns) => FlanBinding.sendChatLog(
                         turns: [

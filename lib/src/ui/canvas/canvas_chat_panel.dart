@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flow_draw/src/blocs/canvas/canvas_bloc.dart';
 import 'package:flow_draw/src/blocs/selection/selection_bloc.dart';
 import 'package:flow_draw/src/core/agent/canvas_agent.dart';
@@ -36,11 +38,18 @@ class CanvasChatPanel extends StatefulWidget {
   /// toast); a void callback is also accepted.
   final bool Function(List<ChatTranscriptTurn> turns)? onSendTranscript;
 
+  /// Identifies the current document so the chat transcript can be saved and
+  /// restored per file (context survives reopen). When this changes, the panel
+  /// saves the previous document's chat and loads the new one. Null = a single
+  /// shared/unnamed conversation.
+  final String? documentId;
+
   const CanvasChatPanel({
     super.key,
     this.width = 340,
     this.onClose,
     this.onSendTranscript,
+    this.documentId,
   });
 
   @override
@@ -62,6 +71,52 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
   void initState() {
     super.initState();
     _loadKey();
+    _restoreChatForDocument();
+  }
+
+  @override
+  void didUpdateWidget(CanvasChatPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.documentId != widget.documentId) {
+      // Switched documents: persist the old conversation, then load the new
+      // one's. The agent is rebuilt so context doesn't bleed across documents.
+      _saveChat(oldWidget.documentId);
+      _chat?.dispose();
+      _chat = null;
+      _restoreChatForDocument();
+    }
+  }
+
+  String _chatKey(String? docId) => 'canvas_mode_chat_${docId ?? '__shared__'}';
+
+  Future<void> _saveChat(String? docId) async {
+    final chat = _chat;
+    if (chat == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final key = _chatKey(docId);
+    if (chat.lines.isEmpty) {
+      await prefs.remove(key);
+    } else {
+      await prefs.setString(
+          key, jsonEncode([for (final l in chat.lines) l.toJson()]));
+    }
+  }
+
+  Future<void> _restoreChatForDocument() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_chatKey(widget.documentId));
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final list = (jsonDecode(raw) as List)
+          .map((e) => ChatLine.fromJson((e as Map).cast<String, dynamic>()))
+          .toList();
+      if (list.isEmpty) return;
+      // Build the controller (needs context for blocs) and restore into it.
+      if (!mounted) return;
+      _chatController().restore(list);
+    } catch (_) {
+      // Corrupt entry — ignore and start fresh.
+    }
   }
 
   Future<void> _loadKey() async {
@@ -109,6 +164,9 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
   void _onChatChanged() {
     if (!mounted) return;
     setState(() {});
+    // Persist after each turn settles (not mid-run) so the document's chat
+    // survives reopen.
+    if (!(_chat?.running ?? false)) _saveChat(widget.documentId);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
         _scroll.animateTo(

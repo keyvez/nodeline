@@ -104,15 +104,44 @@ void main() {
     expect(userLines.single.text, 'first');
   });
 
-  test('reset clears the transcript', () async {
+  test('reset clears the transcript and the agent history', () async {
     final c = _make([
       const AgentResponse(text: 'hi'),
     ], canvas: canvas, selection: selection);
     addTearDown(c.dispose);
     await c.send('hello');
     expect(c.lines, isNotEmpty);
+    expect(c.agent.history, isNotEmpty);
     c.reset();
     expect(c.lines, isEmpty);
+    expect(c.agent.history, isEmpty);
+  });
+
+  test('restore shows prior lines and seeds the agent history as turns', () {
+    final c = _make([], canvas: canvas, selection: selection);
+    addTearDown(c.dispose);
+
+    c.restore(const [
+      ChatLine(ChatLineKind.user, 'add a node'),
+      ChatLine(ChatLineKind.tool, 'create 1 node — ok', toolOk: true),
+      ChatLine(ChatLineKind.assistant, 'Added it.'),
+    ]);
+
+    // Display: all three lines restored.
+    expect(c.lines, hasLength(3));
+    // Agent context: only user + assistant turns carry forward (not tool lines).
+    final roles = c.agent.history.map((m) => m.role).toList();
+    expect(roles, [AgentRole.user, AgentRole.model]);
+    expect(c.agent.history.first.text, 'add a node');
+    expect(c.agent.history.last.text, 'Added it.');
+  });
+
+  test('ChatLine round-trips through JSON', () {
+    const line = ChatLine(ChatLineKind.tool, 'create 2 edges', toolOk: false);
+    final restored = ChatLine.fromJson(line.toJson());
+    expect(restored.kind, ChatLineKind.tool);
+    expect(restored.text, 'create 2 edges');
+    expect(restored.toolOk, false);
   });
 
   test('notifies listeners as lines arrive', () async {

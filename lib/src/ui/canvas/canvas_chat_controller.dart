@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flow_draw/src/core/agent/canvas_agent.dart';
+import 'package:flow_draw/src/core/agent/llm_provider.dart';
 import 'package:flow_draw/src/core/agent/tool_call.dart';
 import 'package:flutter/foundation.dart';
 
@@ -16,6 +17,21 @@ class ChatLine {
   final bool? toolOk;
 
   const ChatLine(this.kind, this.text, {this.toolOk});
+
+  Map<String, dynamic> toJson() => {
+        'kind': kind.name,
+        'text': text,
+        if (toolOk != null) 'toolOk': toolOk,
+      };
+
+  factory ChatLine.fromJson(Map<String, dynamic> json) => ChatLine(
+        ChatLineKind.values.firstWhere(
+          (k) => k.name == json['kind'],
+          orElse: () => ChatLineKind.assistant,
+        ),
+        json['text'] as String? ?? '',
+        toolOk: json['toolOk'] as bool?,
+      );
 }
 
 /// Owns the chat transcript and the running [CanvasAgent], translating the
@@ -123,6 +139,24 @@ class CanvasChatController extends ChangeNotifier {
 
   void reset() {
     _lines.clear();
+    agent.clearHistory();
+    notifyListeners();
+  }
+
+  /// Restores a saved transcript: shows the prior [lines] and seeds the agent's
+  /// history with the user/assistant turns so context carries across reopen.
+  /// Tool/error lines are display-only and not fed back to the model.
+  void restore(List<ChatLine> lines) {
+    _lines
+      ..clear()
+      ..addAll(lines);
+    agent.seedHistory([
+      for (final l in lines)
+        if (l.kind == ChatLineKind.user)
+          AgentMessage.user(l.text)
+        else if (l.kind == ChatLineKind.assistant)
+          AgentMessage.model(text: l.text),
+    ]);
     notifyListeners();
   }
 

@@ -67,6 +67,17 @@ class CanvasAgent {
 
   List<AgentMessage> get history => List.unmodifiable(_history);
 
+  /// Replaces the conversation history (e.g. when restoring a saved chat for a
+  /// document) so the model has prior context on the next turn.
+  void seedHistory(List<AgentMessage> messages) {
+    _history
+      ..clear()
+      ..addAll(messages);
+  }
+
+  /// Clears the conversation history (e.g. "New").
+  void clearHistory() => _history.clear();
+
   /// Requests cancellation of the in-flight run. The loop stops after the
   /// current provider/tool step completes.
   void cancel() => _cancelled = true;
