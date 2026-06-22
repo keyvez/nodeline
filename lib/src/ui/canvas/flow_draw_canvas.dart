@@ -139,6 +139,8 @@ class FlowDrawCanvas extends StatelessWidget {
                     hasFontTarget: fontInfo.hasFontTarget,
                     currentFontFamily: fontInfo.family,
                     currentFontSize: fontInfo.size,
+                    globalFontFamily: canvasState.defaultFontFamily,
+                    globalFontSize: canvasState.defaultFontSize,
                     fontCustomized: fontInfo.customized,
                     onFontChanged: fontInfo.hasFontTarget
                         ? (family, size) {

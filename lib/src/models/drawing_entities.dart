@@ -24,27 +24,36 @@ const String kEditorDefaultFontFamily = 'Courier';
 /// The font size applied to shape text when nothing else has been chosen.
 const double kEditorDefaultFontSize = 16.0;
 
-/// A named text-style preset (à la Google Docs' Title / Heading 1 / …),
-/// bundling a font family and size so a whole look can be applied in one tap.
+/// A named text-style preset (à la Google Docs' Title / Heading 1 / …).
+///
+/// Presets are defined relative to the *global* font so they all share the
+/// current global family and scale off the global size: a "Body" preset is the
+/// global size (scale 1.0), a "Title" is larger, a "Leaf node" smaller. This
+/// keeps the whole type hierarchy tied to the global style — change the global
+/// font to Courier 36 and Title/Heading/etc. all become Courier, scaled from 36.
 class TextStylePreset {
   final String label;
-  final String family;
-  final double size;
 
-  const TextStylePreset(this.label, this.family, this.size);
+  /// Multiplier applied to the global default font size. Body == 1.0.
+  final double scale;
+
+  const TextStylePreset(this.label, this.scale);
+
+  /// The concrete font size for this preset given the [globalSize].
+  double sizeFor(double globalSize) => globalSize * scale;
 }
 
-/// Built-in text-style presets shown at the top of the font panel. Sizes are
-/// tuned for diagram shapes (node labels), descending from a big title down to a
-/// small leaf-node/caption size.
+/// Built-in text-style presets, ordered largest → smallest. Scales are relative
+/// to the global font size (Body == global size), so the hierarchy descends as
+/// tree depth increases (root = Title, then Heading 1/2, … leaf = Leaf node).
 const List<TextStylePreset> kTextStylePresets = <TextStylePreset>[
-  TextStylePreset('Title', 'sans-serif', 32),
-  TextStylePreset('Heading 1', 'sans-serif', 24),
-  TextStylePreset('Heading 2', 'sans-serif', 20),
-  TextStylePreset('Subtitle', 'serif', 18),
-  TextStylePreset('Body', kEditorDefaultFontFamily, kEditorDefaultFontSize),
-  TextStylePreset('Leaf node', kEditorDefaultFontFamily, 12),
-  TextStylePreset('Caption', 'sans-serif', 10),
+  TextStylePreset('Title', 2.0),
+  TextStylePreset('Heading 1', 1.5),
+  TextStylePreset('Heading 2', 1.25),
+  TextStylePreset('Subtitle', 1.125),
+  TextStylePreset('Body', 1.0),
+  TextStylePreset('Leaf node', 0.85),
+  TextStylePreset('Caption', 0.7),
 ];
 
 /// Sane bounds for a font size. Guards against corrupt persisted values — an

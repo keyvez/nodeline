@@ -972,6 +972,8 @@ class _GlobalFontButton extends StatelessWidget {
                           customized: sel.customized,
                           family: family,
                           size: size,
+                          globalFamily: state.defaultFontFamily,
+                          globalSize: state.defaultFontSize,
                           onChanged: (f, s) {
                             if (editingSelection) {
                               // Edit only the selected shapes; marks them
@@ -1052,6 +1054,8 @@ class _RichFontButton extends StatelessWidget {
                     customized: false,
                     family: sel.fontFamily ?? kEditorDefaultFontFamily,
                     size: sel.fontSize ?? kEditorDefaultFontSize,
+                    globalFamily: kEditorDefaultFontFamily,
+                    globalSize: kEditorDefaultFontSize,
                     // Rich mode: route family/size to the live selection.
                     onChanged: (f, s) {
                       controller.applyToSelection(
@@ -1139,6 +1143,12 @@ class _FontControls extends StatefulWidget {
   final double size;
   final void Function(String family, double size) onChanged;
 
+  /// The global default family/size. Text-style presets resolve against these
+  /// (preset family = global family, size = global size × preset scale) so the
+  /// whole type hierarchy is tied to the global style.
+  final String globalFamily;
+  final double globalSize;
+
   /// True when this control is editing the selected shapes (vs the global
   /// default) — changes the header so the user knows the scope.
   final bool editingSelection;
@@ -1162,6 +1172,8 @@ class _FontControls extends StatefulWidget {
     required this.family,
     required this.size,
     required this.onChanged,
+    required this.globalFamily,
+    required this.globalSize,
     this.editingSelection = false,
     this.customized = false,
     this.onReset,
@@ -1184,9 +1196,14 @@ class _FontControlsState extends State<_FontControls> {
 
   void _emit() => widget.onChanged(_family, _size);
 
-  /// Whether [preset] matches the current family + size.
+  /// A preset's concrete size = global size × scale.
+  double _presetSize(TextStylePreset p) => p.sizeFor(widget.globalSize);
+
+  /// Whether [preset] matches the current family + size. Presets always use the
+  /// global family, so match against that.
   bool _isActivePreset(TextStylePreset preset) =>
-      preset.family == _family && (preset.size - _size).abs() < 0.5;
+      _family == widget.globalFamily &&
+      (_presetSize(preset) - _size).abs() < 0.5;
 
   @override
   Widget build(BuildContext context) {
@@ -1211,8 +1228,8 @@ class _FontControlsState extends State<_FontControls> {
             behavior: HitTestBehavior.opaque,
             onTap: () {
               setState(() {
-                _family = p.family;
-                _size = p.size;
+                _family = widget.globalFamily;
+                _size = _presetSize(p).clamp(_minSize, _maxSize);
               });
               _emit();
             },
@@ -1233,12 +1250,13 @@ class _FontControlsState extends State<_FontControls> {
                       p.label,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontFamily: p.family,
-                        fontSize: p.size.clamp(11, 18).toDouble(),
+                        // Preview in the global family at a capped size.
+                        fontFamily: widget.globalFamily,
+                        fontSize: _presetSize(p).clamp(11, 18).toDouble(),
                       ),
                     ),
                   ),
-                  Text('${p.size.round()}',
+                  Text('${_presetSize(p).round()}',
                       style: TextStyle(
                           fontSize: 11, color: Colors.white.withValues(alpha: 0.35))),
                 ],

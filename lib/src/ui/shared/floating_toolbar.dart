@@ -37,6 +37,11 @@ class FloatingToolbar extends StatelessWidget {
   /// The effective font size currently shown for the selection.
   final double currentFontSize;
 
+  /// The global default family/size — text-style presets resolve against these
+  /// (preset family = global family, size = global size × scale).
+  final String globalFontFamily;
+  final double globalFontSize;
+
   /// Whether the selection's font has been individually customized (controls
   /// whether the "Reset to default" action is offered).
   final bool fontCustomized;
@@ -65,6 +70,8 @@ class FloatingToolbar extends StatelessWidget {
     this.hasFontTarget = false,
     this.currentFontFamily = kEditorDefaultFontFamily,
     this.currentFontSize = kEditorDefaultFontSize,
+    this.globalFontFamily = kEditorDefaultFontFamily,
+    this.globalFontSize = kEditorDefaultFontSize,
     this.fontCustomized = false,
     this.onFontChanged,
     this.onFontReset,
@@ -126,6 +133,8 @@ class FloatingToolbar extends StatelessWidget {
                 _FontButton(
                   family: currentFontFamily,
                   size: currentFontSize,
+                  globalFamily: globalFontFamily,
+                  globalSize: globalFontSize,
                   customized: fontCustomized,
                   onChanged: onFontChanged!,
                   onReset: onFontReset,
@@ -301,6 +310,8 @@ class _LineStylePainter extends CustomPainter {
 class _FontButton extends StatelessWidget {
   final String family;
   final double size;
+  final String globalFamily;
+  final double globalSize;
   final bool customized;
   final void Function(String? family, double? size) onChanged;
   final VoidCallback? onReset;
@@ -308,6 +319,8 @@ class _FontButton extends StatelessWidget {
   const _FontButton({
     required this.family,
     required this.size,
+    required this.globalFamily,
+    required this.globalSize,
     required this.customized,
     required this.onChanged,
     this.onReset,
@@ -346,6 +359,8 @@ class _FontButton extends StatelessWidget {
         _FontMenuPanel(
           family: family,
           size: size,
+          globalFamily: globalFamily,
+          globalSize: globalSize,
           customized: customized,
           onChanged: onChanged,
           onReset: onReset,
@@ -360,6 +375,8 @@ class _FontButton extends StatelessWidget {
 class _FontMenuPanel extends StatefulWidget {
   final String family;
   final double size;
+  final String globalFamily;
+  final double globalSize;
   final bool customized;
   final void Function(String? family, double? size) onChanged;
   final VoidCallback? onReset;
@@ -367,6 +384,8 @@ class _FontMenuPanel extends StatefulWidget {
   const _FontMenuPanel({
     required this.family,
     required this.size,
+    required this.globalFamily,
+    required this.globalSize,
     required this.customized,
     required this.onChanged,
     this.onReset,
@@ -383,9 +402,14 @@ class _FontMenuPanelState extends State<_FontMenuPanel> {
   static const double _minSize = 6;
   static const double _maxSize = 96;
 
-  /// Whether [preset] matches the panel's current family + size.
+  /// A preset's concrete size = global size × scale.
+  double _presetSize(TextStylePreset p) => p.sizeFor(widget.globalSize);
+
+  /// Whether [preset] matches the current family + size. Presets use the global
+  /// family, so match against that.
   bool _isActivePreset(TextStylePreset preset) =>
-      preset.family == _family && (preset.size - _size).abs() < 0.5;
+      _family == widget.globalFamily &&
+      (_presetSize(preset) - _size).abs() < 0.5;
 
   @override
   Widget build(BuildContext context) {
@@ -407,11 +431,12 @@ class _FontMenuPanelState extends State<_FontMenuPanel> {
           for (final p in kTextStylePresets)
             InkWell(
               onTap: () {
+                final s = _presetSize(p).clamp(_minSize, _maxSize);
                 setState(() {
-                  _family = p.family;
-                  _size = p.size;
+                  _family = widget.globalFamily;
+                  _size = s;
                 });
-                widget.onChanged(p.family, p.size);
+                widget.onChanged(widget.globalFamily, s);
               },
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
@@ -430,14 +455,14 @@ class _FontMenuPanelState extends State<_FontMenuPanel> {
                         p.label,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          // Preview in the preset's own family; cap the rendered
-                          // size so big presets don't blow out the row.
-                          fontFamily: p.family,
-                          fontSize: p.size.clamp(11, 18).toDouble(),
+                          // Preview in the global family; cap the rendered size
+                          // so big presets don't blow out the row.
+                          fontFamily: widget.globalFamily,
+                          fontSize: _presetSize(p).clamp(11, 18).toDouble(),
                         ),
                       ),
                     ),
-                    Text('${p.size.round()}',
+                    Text('${_presetSize(p).round()}',
                         style: const TextStyle(fontSize: 11, color: Colors.white38)),
                   ],
                 ),
