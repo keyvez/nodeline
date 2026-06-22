@@ -79,8 +79,9 @@ final List<ToolSchema> canvasToolSchemas = [
   ToolSchema(
     name: 'color_objects',
     description:
-        'Set fill and/or stroke color on objects. Omit "ids" to color the current '
-        'selection. Colors are hex strings like "#C1272D".',
+        'Set fill and/or stroke color on objects. Works on shapes (fill + stroke) '
+        'and on edges/arrows/lines (stroke only — the line + arrowhead color). '
+        'Omit "ids" to color the current selection. Colors are hex like "#C1272D".',
     parameters: _object({
       'ids': _array({'type': 'string'}, 'Target object ids. Omit to use the current selection.'),
       'fill': _string('Fill color as hex, e.g. "#F2C94C".'),

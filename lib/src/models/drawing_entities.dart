@@ -900,6 +900,8 @@ class ArrowObject extends DrawingObject {
   final ObjectAttachment? endAttachment;
   List<Offset>? waypoints;
   final LineStyle lineStyle;
+  /// Optional stroke (line + arrowhead) color. Null = the default object color.
+  final Color? strokeColor;
   /// Optional text label displayed at the midpoint of this arrow.
   final String? arrowLabel;
   /// Optional simplified freehand stroke (world coords) that softly biases the
@@ -926,6 +928,7 @@ class ArrowObject extends DrawingObject {
     this.endAttachment,
     this.waypoints,
     this.lineStyle = LineStyle.solid,
+    this.strokeColor,
     this.arrowLabel,
     this.routeGuide,
   });
@@ -1007,6 +1010,7 @@ class ArrowObject extends DrawingObject {
     'angle': angle,
     'creationZoom': creationZoom,
     'lineStyle': lineStyle.name,
+    if (strokeColor != null) 'strokeColor': strokeColor!.toARGB32(),
     if (arrowLabel != null) 'arrowLabel': arrowLabel,
     if (routeGuide != null)
       'routeGuide': routeGuide!.map((o) => o.toJson()).toList(),
@@ -1025,6 +1029,7 @@ class ArrowObject extends DrawingObject {
       creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       midPoint: json['midPoint'] != null ? JSONOffset.fromJson((json['midPoint'] as List).cast<double>()) : null,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
+      strokeColor: json['strokeColor'] != null ? Color(json['strokeColor'] as int) : null,
       arrowLabel: json['arrowLabel'] as String?,
       routeGuide: json['routeGuide'] != null
           ? (json['routeGuide'] as List)
@@ -1047,6 +1052,8 @@ class ArrowObject extends DrawingObject {
     double? creationZoom,
     List<Offset>? waypoints,
     LineStyle? lineStyle,
+    Color? strokeColor,
+    bool clearStroke = false,
     String? arrowLabel,
     bool clearArrowLabel = false,
     List<Offset>? routeGuide,
@@ -1065,6 +1072,7 @@ class ArrowObject extends DrawingObject {
       creationZoom: creationZoom ?? this.creationZoom,
       waypoints: waypoints ?? this.waypoints,
       lineStyle: lineStyle ?? this.lineStyle,
+      strokeColor: clearStroke ? null : (strokeColor ?? this.strokeColor),
       arrowLabel: clearArrowLabel ? null : (arrowLabel ?? this.arrowLabel),
       routeGuide: clearRouteGuide ? null : (routeGuide ?? this.routeGuide),
     );
@@ -1078,6 +1086,8 @@ class LineObject extends DrawingObject {
   final ObjectAttachment? startAttachment;
   final ObjectAttachment? endAttachment;
   final LineStyle lineStyle;
+  /// Optional stroke color. Null = the default object color.
+  final Color? strokeColor;
 
   LineObject({
     required super.id,
@@ -1090,6 +1100,7 @@ class LineObject extends DrawingObject {
     super.angle,
     super.creationZoom,
     this.lineStyle = LineStyle.solid,
+    this.strokeColor,
   });
 
   @override
@@ -1148,6 +1159,7 @@ class LineObject extends DrawingObject {
     'creationZoom': creationZoom,
     'midPoint': midPoint?.toJson(),
     'lineStyle': lineStyle.name,
+    if (strokeColor != null) 'strokeColor': strokeColor!.toARGB32(),
   };
 
   factory LineObject.fromJson(Map<String, dynamic> json) {
@@ -1166,6 +1178,7 @@ class LineObject extends DrawingObject {
       creationZoom: (json['creationZoom'] as num?)?.toDouble() ?? 1.0,
       midPoint: json['midPoint'] != null ? JSONOffset.fromJson((json['midPoint'] as List).cast<double>()) : null,
       lineStyle: json['lineStyle'] != null ? LineStyle.values.byName(json['lineStyle']) : LineStyle.solid,
+      strokeColor: json['strokeColor'] != null ? Color(json['strokeColor'] as int) : null,
     );
   }
 
@@ -1180,6 +1193,8 @@ class LineObject extends DrawingObject {
     double? angle,
     double? creationZoom,
     LineStyle? lineStyle,
+    Color? strokeColor,
+    bool clearStroke = false,
   }) {
     return LineObject(
       id: id,
@@ -1192,6 +1207,7 @@ class LineObject extends DrawingObject {
       angle: angle ?? this.angle,
       creationZoom: creationZoom ?? this.creationZoom,
       lineStyle: lineStyle ?? this.lineStyle,
+      strokeColor: clearStroke ? null : (strokeColor ?? this.strokeColor),
     );
   }
 }

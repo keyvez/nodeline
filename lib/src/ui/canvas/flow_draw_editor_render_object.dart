@@ -968,7 +968,16 @@ class FlowDrawEditorRenderBox extends RenderBox
         }
         continue;
       } else if (obj is ArrowObject) {
-        final paint = obj.isSelected ? selectedArrowPaint : objectPaint;
+        final paint = obj.isSelected
+            ? selectedArrowPaint
+            : (obj.strokeColor != null
+                ? (Paint()
+                  ..color = obj.strokeColor!
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = objectPaint.strokeWidth
+                  ..strokeCap = objectPaint.strokeCap
+                  ..strokeJoin = objectPaint.strokeJoin)
+                : objectPaint);
         final pathType = obj.pathType;
         // Resolve attached object rects
         Rect? startObjRect;
@@ -1337,7 +1346,16 @@ class FlowDrawEditorRenderBox extends RenderBox
         }
         continue;
       } else if (obj is LineObject) {
-        final paint = obj.isSelected ? selectedArrowPaint : objectPaint;
+        final paint = obj.isSelected
+            ? selectedArrowPaint
+            : (obj.strokeColor != null
+                ? (Paint()
+                  ..color = obj.strokeColor!
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = objectPaint.strokeWidth
+                  ..strokeCap = objectPaint.strokeCap
+                  ..strokeJoin = objectPaint.strokeJoin)
+                : objectPaint);
 
         var start = obj.start;
         final startAttachment = obj.startAttachment;

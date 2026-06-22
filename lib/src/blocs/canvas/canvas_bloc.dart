@@ -1238,6 +1238,17 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
           clearFill: event.clearFill,
           clearStroke: event.clearStroke,
         ) as DrawingObject;
+      } else if (obj is ArrowObject) {
+        // Edges have only a stroke (line + arrowhead) color, no fill.
+        updatedObjects[id] = obj.copyWith(
+          strokeColor: event.strokeColor,
+          clearStroke: event.clearStroke,
+        ) as DrawingObject;
+      } else if (obj is LineObject) {
+        updatedObjects[id] = obj.copyWith(
+          strokeColor: event.strokeColor,
+          clearStroke: event.clearStroke,
+        ) as DrawingObject;
       }
     }
 

@@ -184,6 +184,37 @@ void main() {
     });
   });
 
+  group('edge stroke color', () {
+    test('color_objects sets an arrow stroke color', () async {
+      canvas.add(DrawingObjectAdded(ArrowObject(
+        id: 'a1',
+        start: Offset.zero,
+        end: const Offset(100, 0),
+      )));
+      await _pump();
+
+      d.dispatch(ToolCall(name: 'color_objects', args: {
+        'ids': ['a1'],
+        'stroke': '#FF0000',
+      }));
+      await _pump();
+
+      expect((canvas.state.drawingObjects['a1'] as ArrowObject).strokeColor,
+          const Color(0xFFFF0000));
+    });
+
+    test('arrow strokeColor round-trips through JSON', () {
+      final arrow = ArrowObject(
+        id: 'a2',
+        start: Offset.zero,
+        end: const Offset(10, 10),
+        strokeColor: const Color(0xFF00AAFF),
+      );
+      final restored = ArrowObject.fromJson(arrow.toJson());
+      expect(restored.strokeColor, const Color(0xFF00AAFF));
+    });
+  });
+
   group('clear fill', () {
     test('color_objects with clearFill removes an existing fill', () async {
       canvas.add(DrawingObjectAdded(RectangleObject(
