@@ -178,6 +178,20 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
     });
   }
 
+  /// Inserts a newline at the cursor (replacing any selection), keeping the
+  /// caret after the inserted character. Used for Shift/Alt+Enter.
+  void _insertNewline() {
+    final value = _input.value;
+    final selection = value.selection;
+    final start = selection.isValid ? selection.start : value.text.length;
+    final end = selection.isValid ? selection.end : value.text.length;
+    final newText = value.text.replaceRange(start, end, '\n');
+    _input.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: start + 1),
+    );
+  }
+
   void _send() {
     final text = _input.text.trim();
     if (text.isEmpty) return;
@@ -503,14 +517,37 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
-            child: TextField(
-              controller: _input,
-              minLines: 1,
-              maxLines: 4,
-              enabled: !running,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              decoration: _fieldDecoration('Ask the canvas…'),
-              onSubmitted: (_) => _send(),
+            child: Focus(
+              onKeyEvent: (node, event) {
+                // Enter sends; Shift/Alt+Enter inserts a newline. We handle
+                // this here rather than via onSubmitted so the multiline field
+                // can distinguish "send" from "new line".
+                if (event is! KeyDownEvent ||
+                    event.logicalKey != LogicalKeyboardKey.enter) {
+                  return KeyEventResult.ignored;
+                }
+                final keys = HardwareKeyboard.instance.logicalKeysPressed;
+                final newlineModifier = keys.contains(
+                          LogicalKeyboardKey.shiftLeft,
+                        ) ||
+                    keys.contains(LogicalKeyboardKey.shiftRight) ||
+                    keys.contains(LogicalKeyboardKey.altLeft) ||
+                    keys.contains(LogicalKeyboardKey.altRight);
+                if (newlineModifier) {
+                  _insertNewline();
+                } else {
+                  _send();
+                }
+                return KeyEventResult.handled;
+              },
+              child: TextField(
+                controller: _input,
+                minLines: 1,
+                maxLines: 4,
+                enabled: !running,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: _fieldDecoration('Ask the canvas…'),
+              ),
             ),
           ),
           const SizedBox(width: 8),
