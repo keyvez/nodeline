@@ -160,6 +160,14 @@ fork/join bars), edges (arrows, lines), text, and frames (labelled containers
 that group objects). Every object has a stable id.
 
 Guidance:
+- ALWAYS understand the current diagram before adding to it. When a request
+  refers to "the places we're going", "the existing nodes", or anything already
+  on the canvas, call `list_nodes` first to get the real node labels and ids.
+  Connect new edges to those existing ids — do NOT invent new nodes that
+  duplicate or stand in for ones that already exist, and do NOT substitute your
+  own suggestions (e.g. famous landmarks) for the user's actual nodes.
+- Only create a node when the user explicitly asks for something new that isn't
+  already present. Prefer connecting to / extending existing nodes.
 - To act on existing objects, first `select` them (by frame, kind, or label), or
   pass explicit ids. Tools without ids act on the current selection.
 - "These", "the selection", "the selected edges" refer to the current selection.

@@ -52,6 +52,7 @@ class ToolDispatcher {
     'apply_style_template',
     'get_selection',
     'get_canvas_summary',
+    'list_nodes',
   };
 
   /// Opens an agent-turn transaction so all subsequent tool mutations collapse
@@ -82,6 +83,7 @@ class ToolDispatcher {
         'apply_style_template' => _applyStyleTemplate(call),
         'get_selection' => _getSelection(call),
         'get_canvas_summary' => _getCanvasSummary(call),
+        'list_nodes' => _listNodes(call),
         _ => ToolResult.error('Unknown tool: ${call.name}', callId: call.id),
       };
     } catch (e) {
@@ -477,19 +479,68 @@ class ToolDispatcher {
     final objs = canvasBloc.state.drawingObjects;
     final counts = <String, int>{};
     final frames = <Map<String, dynamic>>[];
+    final nodeLabels = <String>[];
     for (final o in objs.values) {
       final t = _typeName(o);
       counts[t] = (counts[t] ?? 0) + 1;
       if (o is FigureObject) {
         frames.add({'id': o.id, 'label': o.label, 'childrenIds': o.childrenIds.toList()});
       }
+      if (_isNode(o)) {
+        final l = SelectionResolver.labelOf(o);
+        if (l != null && l.isNotEmpty) nodeLabels.add(l);
+      }
     }
     return ToolResult.ok(
-      '${objs.length} objects',
+      '${objs.length} objects, ${nodeLabels.length} labelled nodes',
       callId: c.id,
-      data: {'counts': counts, 'frames': frames},
+      // Include the node labels so the model knows what already exists and can
+      // connect to it rather than inventing parallel nodes. Use list_nodes for
+      // ids + edges.
+      data: {'counts': counts, 'frames': frames, 'nodeLabels': nodeLabels},
     );
   }
+
+  /// Lists the existing nodes (id, type, label) and edges (with resolved
+  /// endpoint labels) so the model can reference and connect to what's already
+  /// on the canvas instead of creating duplicates.
+  ToolResult _listNodes(ToolCall c) {
+    final objs = canvasBloc.state.drawingObjects;
+    final nodes = <Map<String, dynamic>>[];
+    final edges = <Map<String, dynamic>>[];
+    for (final o in objs.values) {
+      if (_isNode(o)) {
+        nodes.add({
+          'id': o.id,
+          'type': _typeName(o),
+          'label': SelectionResolver.labelOf(o) ?? '',
+        });
+      } else if (o is ArrowObject) {
+        final fromId = o.startAttachment?.objectId;
+        final toId = o.endAttachment?.objectId;
+        edges.add({
+          'id': o.id,
+          if (fromId != null) 'fromId': fromId,
+          if (toId != null) 'toId': toId,
+          'from': fromId != null ? (SelectionResolver.labelOf(objs[fromId] ?? o) ?? '') : '',
+          'to': toId != null ? (SelectionResolver.labelOf(objs[toId] ?? o) ?? '') : '',
+          if (o.arrowLabel != null) 'label': o.arrowLabel,
+        });
+      }
+    }
+    return ToolResult.ok(
+      '${nodes.length} node(s), ${edges.length} edge(s)',
+      callId: c.id,
+      data: {'nodes': nodes, 'edges': edges},
+    );
+  }
+
+  static bool _isNode(DrawingObject o) =>
+      o is RectangleObject ||
+      o is CircleObject ||
+      o is DiamondObject ||
+      o is ParallelogramObject ||
+      o is ForkJoinObject;
 
   // --- arg parsing helpers ------------------------------------------------
 

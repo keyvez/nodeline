@@ -210,6 +210,40 @@ void main() {
       expect(counts['rectangle'], 2);
       expect(counts['arrow'], 1);
     });
+
+    test('get_canvas_summary includes existing node labels for grounding', () async {
+      canvas
+        ..add(DrawingObjectAdded(rect('m', text: 'Museum of Science')))
+        ..add(DrawingObjectAdded(rect('z', text: 'Lincoln Park Zoo')));
+      await _pump();
+      final res = d.dispatch(ToolCall(name: 'get_canvas_summary'));
+      final labels = res.data!['nodeLabels'] as List;
+      expect(labels, containsAll(['Museum of Science', 'Lincoln Park Zoo']));
+    });
+
+    test('list_nodes returns nodes and edges with resolved endpoint labels', () async {
+      canvas
+        ..add(DrawingObjectAdded(rect('a', text: 'Chicago')))
+        ..add(DrawingObjectAdded(rect('b', text: 'Museum')));
+      await _pump();
+      // Connect them via the create_edges tool (attaches by id).
+      d.dispatch(ToolCall(name: 'create_edges', args: {
+        'edges': [
+          {'from': 'Chicago', 'to': 'Museum', 'label': 'visit'}
+        ]
+      }));
+      await _pump();
+
+      final res = d.dispatch(ToolCall(name: 'list_nodes'));
+      final nodes = res.data!['nodes'] as List;
+      final edges = res.data!['edges'] as List;
+      expect(nodes.map((n) => (n as Map)['label']), containsAll(['Chicago', 'Museum']));
+      expect(edges, hasLength(1));
+      final e = edges.first as Map;
+      expect(e['from'], 'Chicago');
+      expect(e['to'], 'Museum');
+      expect(e['label'], 'visit');
+    });
   });
 
   group('robustness', () {

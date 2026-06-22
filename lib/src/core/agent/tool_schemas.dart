@@ -200,7 +200,18 @@ final List<ToolSchema> canvasToolSchemas = [
   ),
   const ToolSchema(
     name: 'get_canvas_summary',
-    description: 'Read a summary of the canvas: object counts by type and the frames present.',
+    description:
+        'Read a summary of the canvas: object counts by type, the frames present, '
+        'and the labels of existing nodes. Call this before creating nodes so you '
+        'can connect to what already exists instead of duplicating it.',
+    parameters: {'type': 'object', 'properties': {}},
+  ),
+  const ToolSchema(
+    name: 'list_nodes',
+    description:
+        'List existing nodes (id, type, label) and edges (with endpoint labels). '
+        'Use the ids/labels to connect new edges to existing nodes rather than '
+        'creating new copies of nodes that are already on the canvas.',
     parameters: {'type': 'object', 'properties': {}},
   ),
 ];
