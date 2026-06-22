@@ -2103,6 +2103,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
     required Offset point,
     required ObjectAttachment? attachment,
   }) {
+    // Reconstruct with the new end point/attachment. Carry ALL other
+    // attributes — including strokeColor, routeGuide, creationZoom — so a swap
+    // never silently drops styling (e.g. resetting a colored edge to white).
     if (obj is ArrowObject) {
       return ArrowObject(
         id: obj.id,
@@ -2115,8 +2118,11 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         endAttachment: attachment,
         waypoints: null,
         lineStyle: obj.lineStyle,
+        strokeColor: obj.strokeColor,
         arrowLabel: obj.arrowLabel,
+        routeGuide: obj.routeGuide,
         angle: obj.angle,
+        creationZoom: obj.creationZoom,
       );
     }
     if (obj is LineObject) {
@@ -2129,7 +2135,9 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         startAttachment: obj.startAttachment,
         endAttachment: attachment,
         lineStyle: obj.lineStyle,
+        strokeColor: obj.strokeColor,
         angle: obj.angle,
+        creationZoom: obj.creationZoom,
       );
     }
     return null;
