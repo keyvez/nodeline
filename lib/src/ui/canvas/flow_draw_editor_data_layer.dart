@@ -86,6 +86,17 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
   bool _isDrawing = false;
   bool _isEditingText = false;
 
+  /// When an additive modifier (Shift/Cmd/Ctrl) is held and the user presses on
+  /// an already-selected object, we defer the deselect to pointer-up: if the
+  /// gesture turns into a drag the modifier means something else (e.g. Cmd =
+  /// re-port destination endpoints), so we only toggle it off on a pure click.
+  ({Set<String> nodeIds, Set<String> drawingObjectIds})? _pendingDeselect;
+
+  /// The set of node IDs whose attached edges should be live re-ported while
+  /// this selection drag is in progress. Populated at drag start from the
+  /// dragged nodes; consulted each move tick when Alt/Cmd is held.
+  Set<String> _reportDragNodeIds = const {};
+
   /// Debug: overlay the handle hit-test zones on the canvas. Toggle with
   /// Cmd/Ctrl+Shift+H. Endpoints (connection points) are drawn in blue with
   /// the expanded radius; resize/rotate/midpoint zones in orange.
@@ -1025,6 +1036,16 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         _canvasBloc.add(ObjectsDragged(selectedIds, dragDelta));
       }
       _totalDragDelta += event.delta.distance;
+      // Move mode: while dragging a node, re-port its attached edges to the
+      // node side that faces the other endpoint. Alt re-ports edges whose
+      // ORIGIN (start) is attached; Cmd re-ports edges whose DESTINATION (end)
+      // is attached. Both are combinable.
+      final reportStart = HardwareKeyboard.instance.isAltPressed;
+      final reportEnd = HardwareKeyboard.instance.isMetaPressed ||
+          HardwareKeyboard.instance.isControlPressed;
+      if ((reportStart || reportEnd) && _reportDragNodeIds.isNotEmpty) {
+        _reportDraggedEdges(reportStart: reportStart, reportEnd: reportEnd);
+      }
     } else if (_isAreaSelecting) {
       setState(
             () => _selectionArea = Rect.fromPoints(_selectionStart, worldPos),
@@ -1060,8 +1081,19 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
             _selectionBloc.state.selectedDrawingObjectIds,
           ),
         ));
+      } else if (_pendingDeselect != null) {
+        // Pure click (no real drag) on an already-selected object with the
+        // additive modifier held → toggle it off now.
+        _selectionBloc.add(
+          SelectionObjectsRemoved(
+            nodeIds: _pendingDeselect!.nodeIds,
+            drawingObjectIds: _pendingDeselect!.drawingObjectIds,
+          ),
+        );
       }
     }
+    _pendingDeselect = null;
+    _reportDragNodeIds = const {};
     _isRotating = false;
     _isDraggingSelection = false;
     _isResizing = (objectId: '', handle: Handle.none);
@@ -1353,20 +1385,14 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       final nodeIds = isNode ? {hitObjectId} : <String>{};
       final drawingObjectIds = !isNode ? {hitObjectId} : <String>{};
 
+      _pendingDeselect = null;
       if (isShiftPressed && alreadySelected) {
         // Additive modifier (Shift/Cmd/Ctrl) on an already-selected object
-        // toggles it OFF, so the modifier can both add and remove. Don't start
-        // a drag — the user is deselecting, not moving.
-        _selectionBloc.add(
-          SelectionObjectsRemoved(
-            nodeIds: nodeIds,
-            drawingObjectIds: drawingObjectIds,
-          ),
-        );
-        return;
-      }
-
-      if (!alreadySelected) {
+        // toggles it OFF — but only on a pure click. If this turns into a drag
+        // the modifier means something else (Alt/Cmd re-port endpoints), so we
+        // defer the toggle to pointer-up and let the drag proceed.
+        _pendingDeselect = (nodeIds: nodeIds, drawingObjectIds: drawingObjectIds);
+      } else if (!alreadySelected) {
         if (isShiftPressed) {
           _selectionBloc.add(
             SelectionObjectsAdded(
@@ -1385,6 +1411,12 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
       }
       _totalDragDelta = 0.0;
       _isDraggingSelection = true;
+      // Capture which nodes are being dragged so Alt/Cmd held during the move
+      // can re-port their attached edges. Includes the hit node plus any other
+      // selected nodes that move with it.
+      final selectedNodes = {..._selectionBloc.state.selectedNodeIds};
+      if (isNode) selectedNodes.add(hitObjectId);
+      _reportDragNodeIds = selectedNodes;
       return;
     }
 
@@ -2532,6 +2564,66 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         if (mounted) _fitViewToContent();
       });
     });
+  }
+
+  /// World rect of a node or drawing object by id, or null.
+  Rect? _entityRect(String id) {
+    final node = _canvasBloc.state.nodes[id];
+    if (node != null) return getNodeBoundsInWorld(node);
+    return _canvasBloc.state.drawingObjects[id]?.rect;
+  }
+
+  /// The cardinal port (attachment relativePosition) on [fromRect] that faces
+  /// [toRect]'s center.
+  Offset _facingPort(Rect fromRect, Rect toRect) {
+    const top = Offset(0.5, 0.0);
+    const bottom = Offset(0.5, 1.0);
+    const left = Offset(0.0, 0.5);
+    const right = Offset(1.0, 0.5);
+    final d = toRect.center - fromRect.center;
+    if (d.dy.abs() >= d.dx.abs()) {
+      return d.dy >= 0 ? bottom : top;
+    }
+    return d.dx >= 0 ? right : left;
+  }
+
+  /// Move-mode helper: while a node is being dragged, re-point its attached
+  /// edges to the node side facing the other endpoint. [reportStart] handles
+  /// edges whose origin (start) is attached to a dragged node; [reportEnd]
+  /// handles edges whose destination (end) is attached to one. Only edges
+  /// touching a dragged node are affected, and we only emit an update when a
+  /// port actually changes so the move stays cheap.
+  void _reportDraggedEdges({required bool reportStart, required bool reportEnd}) {
+    final dragged = _reportDragNodeIds;
+    for (final obj in _canvasBloc.state.drawingObjects.values) {
+      if (obj is! ArrowObject) continue;
+      final sAtt = obj.startAttachment;
+      final eAtt = obj.endAttachment;
+      if (sAtt == null || eAtt == null) continue;
+
+      final startOnDragged = reportStart && dragged.contains(sAtt.objectId);
+      final endOnDragged = reportEnd && dragged.contains(eAtt.objectId);
+      if (!startOnDragged && !endOnDragged) continue;
+
+      final sRect = _entityRect(sAtt.objectId);
+      final eRect = _entityRect(eAtt.objectId);
+      if (sRect == null || eRect == null) continue;
+
+      var newStart = sAtt.relativePosition;
+      var newEnd = eAtt.relativePosition;
+      if (startOnDragged) newStart = _facingPort(sRect, eRect);
+      if (endOnDragged) newEnd = _facingPort(eRect, sRect);
+
+      if (newStart == sAtt.relativePosition && newEnd == eAtt.relativePosition) {
+        continue;
+      }
+      _canvasBloc.add(DrawingObjectUpdated(obj.copyWith(
+        startAttachment:
+            ObjectAttachment(objectId: sAtt.objectId, relativePosition: newStart),
+        endAttachment:
+            ObjectAttachment(objectId: eAtt.objectId, relativePosition: newEnd),
+      )));
+    }
   }
 
   /// After an auto-layout, reassigns every connecting arrow's start/end ports
