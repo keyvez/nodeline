@@ -13,7 +13,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 const _storageKey = 'flow_draw_project';
 const _fileListKey = 'flow_draw_file_list';
 const _lastFileKey = 'flow_draw_last_file';
+/// Autosave slot for the current *untitled* (never-named) document. A named
+/// file is persisted under [_fileKey]; an untitled canvas would otherwise only
+/// hit the legacy [_storageKey], which the loader ignores whenever a named file
+/// was last open — so unsaved work was lost on restart. This dedicated slot is
+/// restored first, so an untitled diagram always comes back.
+const _draftKey = 'flow_draw_untitled_draft';
 String _fileKey(String name) => 'flow_draw_file_$name';
+
+/// True if a decoded project document has no content worth restoring.
+bool _isEmptyDoc(Map<String, dynamic> data) {
+  final nodes = data['nodes'];
+  final objs = data['drawingObjects'];
+  final nodeCount = nodes is List ? nodes.length : 0;
+  final objCount = objs is List ? objs.length : 0;
+  return nodeCount == 0 && objCount == 0;
+}
 
 void main() {
   FlanBinding.ensureInitialized();
@@ -118,6 +133,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _loadSavedProject() async {
     await _loadFileList();
     final prefs = await SharedPreferences.getInstance();
+
+    // An untitled draft (unsaved work) takes precedence — it's the most recent
+    // thing the user was working on and would otherwise be lost on restart.
+    final draft = prefs.getString(_draftKey);
+    if (draft != null) {
+      try {
+        final data = jsonDecode(draft) as Map<String, dynamic>;
+        if (!_isEmptyDoc(data)) {
+          controller.loadProject(data);
+          setState(() => _currentFileName = null); // still untitled
+          return;
+        }
+        await prefs.remove(_draftKey); // empty draft — discard
+      } catch (_) {
+        await prefs.remove(_draftKey); // corrupt — discard
+      }
+    }
+
     final lastName = prefs.getString(_lastFileKey);
 
     if (lastName != null) {
@@ -163,6 +196,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         controller.loadProject(data);
         setState(() => _currentFileName = name);
         await _setLastFile(name);
+        // Deliberately opening a named file makes it the active doc, so the
+        // untitled draft is no longer "the last thing open" — clear it so it
+        // doesn't override this file on the next launch. (The autoSaveCurrent
+        // step above already re-persisted any untitled work to the draft; that
+        // is intentional only up until an explicit navigation like this.)
+        await prefs.remove(_draftKey);
         return;
       } catch (_) {}
     }
@@ -237,12 +276,21 @@ start -> outputPhase
             const JsonEncoder.withIndent('  ').convert(data));
       } catch (_) {}
       final prefs = await SharedPreferences.getInstance();
+      final encoded = jsonEncode(data);
       if (_currentFileName != null) {
-        await prefs.setString(
-            _fileKey(_currentFileName!), jsonEncode(data));
+        await prefs.setString(_fileKey(_currentFileName!), encoded);
+        // The work now lives under a named file — drop any stale untitled draft
+        // so we don't restore it over the named file on next launch.
+        await prefs.remove(_draftKey);
+      } else if (!_isEmptyDoc(data)) {
+        // Untitled but non-empty: keep it in the dedicated draft slot so it
+        // survives a restart even when a named file was last open.
+        await prefs.setString(_draftKey, encoded);
+      } else {
+        await prefs.remove(_draftKey);
       }
       // Also save to legacy key for backwards compat
-      await prefs.setString(_storageKey, jsonEncode(data));
+      await prefs.setString(_storageKey, encoded);
       completer.complete();
     });
     return completer.future;
