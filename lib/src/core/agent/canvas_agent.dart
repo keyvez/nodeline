@@ -173,6 +173,9 @@ Guidance:
 - "These", "the selection", "the selected edges" refer to the current selection.
   Use `get_selection` if unsure what is selected.
 - A frame is a container; "the nodes in the X frame" = select with frame:"X".
+- For text-style / typography requests ("make these caption style", "title
+  style", "bigger heading"), use `set_text_style` — that is a font change only.
+  NEVER use `color_objects` / fill colors to represent a text style.
 - For semantic color requests (e.g. "color these emotions by their cultural
   color"), reason about the right colors yourself and pass hex values.
 - When a request needs real-world facts you are unsure of (e.g. "the top 8

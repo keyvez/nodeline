@@ -100,6 +100,18 @@ final List<ToolSchema> canvasToolSchemas = [
     }, required: ['style']),
   ),
   ToolSchema(
+    name: 'set_text_style',
+    description:
+        'Apply a named text-style preset to objects — this is a FONT change only '
+        '(family + size), never a color change. Use this for requests like "make '
+        'these caption style" or "title style". Omit ids to use the selection.',
+    parameters: _object({
+      'ids': _array({'type': 'string'}, 'Target object ids. Omit to use the current selection.'),
+      'style': _string('The text style preset.',
+          enumValues: ['title', 'heading 1', 'heading 2', 'subtitle', 'body', 'leaf node', 'caption']),
+    }, required: ['style']),
+  ),
+  ToolSchema(
     name: 'create_nodes',
     description:
         'Create one or more node shapes. Each node may set label, shape, optional '

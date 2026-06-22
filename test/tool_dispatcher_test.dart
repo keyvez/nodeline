@@ -184,6 +184,47 @@ void main() {
     });
   });
 
+  group('set_text_style', () {
+    test('caption style changes font only, never fill color', () async {
+      // Global default is Courier 16 (kEditorDefaults); caption = 0.7 scale.
+      canvas.add(DrawingObjectAdded(RectangleObject(
+        id: 'd1',
+        rect: const Rect.fromLTWH(0, 0, 80, 40),
+        text: 'Dist: 5 miles',
+        fillColor: const Color(0xFF223344), // pre-existing fill must be preserved
+      )));
+      await _pump();
+
+      final res = d.dispatch(ToolCall(name: 'set_text_style', args: {
+        'ids': ['d1'],
+        'style': 'caption',
+      }));
+      await _pump();
+      expect(res.ok, true);
+
+      final node = canvas.state.drawingObjects['d1'] as RectangleObject;
+      // Font size scaled off the global size; family is the global family.
+      expect(node.textStyle?.fontSize, closeTo(16 * 0.7, 0.01));
+      // Crucially: fill color is untouched.
+      expect(node.fillColor, const Color(0xFF223344));
+    });
+
+    test('accepts h1 / title aliases and rejects unknown styles', () async {
+      canvas.add(DrawingObjectAdded(rect('n1', text: 'X')));
+      await _pump();
+
+      final ok = d.dispatch(
+          ToolCall(name: 'set_text_style', args: {'ids': ['n1'], 'style': 'h1'}));
+      await _pump();
+      expect(ok.ok, true);
+
+      final bad = d.dispatch(ToolCall(
+          name: 'set_text_style', args: {'ids': ['n1'], 'style': 'gigantic'}));
+      expect(bad.ok, false);
+      expect(bad.summary, contains('Unknown text style'));
+    });
+  });
+
   group('read tools', () {
     test('get_selection returns ids, types and labels', () async {
       canvas.add(DrawingObjectAdded(rect('r1', text: 'Hello')));

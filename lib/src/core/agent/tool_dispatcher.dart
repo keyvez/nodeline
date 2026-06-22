@@ -41,6 +41,7 @@ class ToolDispatcher {
     'clear_selection',
     'color_objects',
     'set_line_style',
+    'set_text_style',
     'create_nodes',
     'create_edges',
     'delete_objects',
@@ -72,6 +73,7 @@ class ToolDispatcher {
         'clear_selection' => _clearSelection(call),
         'color_objects' => _colorObjects(call),
         'set_line_style' => _setLineStyle(call),
+        'set_text_style' => _setTextStyle(call),
         'create_nodes' => _createNodes(call),
         'create_edges' => _createEdges(call),
         'delete_objects' => _deleteObjects(call),
@@ -161,6 +163,49 @@ class ToolDispatcher {
       'Set ${ids.length} object(s) to ${style.name}',
       callId: c.id,
     );
+  }
+
+  /// Applies a named text-style preset (title / heading 1 / … / caption) to the
+  /// targets: sets the global font family at the preset's scaled size. This is
+  /// purely a FONT change — it never alters fill/stroke colors.
+  ToolResult _setTextStyle(ToolCall c) {
+    final ids = _idsFromArgs(c.args);
+    if (ids.isEmpty) return ToolResult.error('No target ids', callId: c.id);
+    final name = (c.args['style'] as String?)?.trim().toLowerCase();
+    if (name == null || name.isEmpty) {
+      return ToolResult.error('Missing "style"', callId: c.id);
+    }
+    final preset = _presetByName(name);
+    if (preset == null) {
+      final names = kTextStylePresets.map((p) => p.label.toLowerCase()).join(', ');
+      return ToolResult.error(
+        'Unknown text style "$name" (use one of: $names)',
+        callId: c.id,
+      );
+    }
+    final globalFamily = canvasBloc.state.defaultFontFamily;
+    final size = preset.sizeFor(canvasBloc.state.defaultFontSize);
+    canvasBloc.add(ObjectFontChanged(
+      ids,
+      fontFamily: globalFamily,
+      fontSize: size,
+    ));
+    return ToolResult.ok(
+      'Applied ${preset.label} style ($globalFamily ${size.round()}) to ${ids.length} object(s)',
+      callId: c.id,
+    );
+  }
+
+  /// Resolves a loose style name to a preset: matches the label
+  /// (case-insensitive), tolerating "h1"/"h2" shorthands.
+  static TextStylePreset? _presetByName(String name) {
+    final n = name.replaceAll('-', ' ').trim();
+    const aliases = {'h1': 'heading 1', 'h2': 'heading 2', 'normal': 'body'};
+    final target = aliases[n] ?? n;
+    for (final p in kTextStylePresets) {
+      if (p.label.toLowerCase() == target) return p;
+    }
+    return null;
   }
 
   // --- creation -----------------------------------------------------------
