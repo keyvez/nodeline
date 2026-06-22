@@ -1215,7 +1215,14 @@ class _FlowDrawEditorDataLayerState extends State<FlowDrawEditorDataLayer>
         ],
       ),
     );
-    controller.dispose();
+    // Defer disposal until after the dialog's dismiss animation finishes. The
+    // showDialog future completes the instant Navigator.pop is called, but the
+    // route (and its TextField) is still in the tree fading out over the next
+    // frames — disposing the controller now makes the still-rebuilding TextField
+    // call addListener on a disposed controller ("used after being disposed").
+    // A delay past the dialog's transition duration lets the route leave the
+    // tree first.
+    Future.delayed(const Duration(milliseconds: 350), controller.dispose);
     if (newLabel == null) return; // cancelled
     final trimmed = newLabel.trim();
     final updated = (trimmed.isEmpty
