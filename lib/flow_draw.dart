@@ -38,6 +38,8 @@ export 'package:flow_draw/src/models/drawing_entities.dart'
         kEditorFontFamilies,
         kEditorDefaultFontFamily,
         kEditorDefaultFontSize,
+        TextStylePreset,
+        kTextStylePresets,
         kDefaultTextColor,
         kDefaultFitMargin;
 

@@ -1184,9 +1184,16 @@ class _FontControlsState extends State<_FontControls> {
 
   void _emit() => widget.onChanged(_family, _size);
 
+  /// Whether [preset] matches the current family + size.
+  bool _isActivePreset(TextStylePreset preset) =>
+      preset.family == _family && (preset.size - _size).abs() < 0.5;
+
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 440),
+      child: SingleChildScrollView(
+        child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1195,6 +1202,53 @@ class _FontControlsState extends State<_FontControls> {
           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
         ),
         const Gap(8),
+        // Text-style presets (Title / Heading 1 / … / Leaf node), Docs-style.
+        Text('Text style',
+            style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.5))),
+        const Gap(2),
+        for (final p in kTextStylePresets)
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              setState(() {
+                _family = p.family;
+                _size = p.size;
+              });
+              _emit();
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Icon(
+                    _isActivePreset(p) ? Icons.check : Icons.text_fields,
+                    size: 14,
+                    color: _isActivePreset(p)
+                        ? null
+                        : Colors.white.withValues(alpha: 0.35),
+                  ),
+                  const Gap(8),
+                  Expanded(
+                    child: Text(
+                      p.label,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: p.family,
+                        fontSize: p.size.clamp(11, 18).toDouble(),
+                      ),
+                    ),
+                  ),
+                  Text('${p.size.round()}',
+                      style: TextStyle(
+                          fontSize: 11, color: Colors.white.withValues(alpha: 0.35))),
+                ],
+              ),
+            ),
+          ),
+        const Gap(8),
+        Text('Font',
+            style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.5))),
+        const Gap(2),
         // Family choices.
         for (final family in kEditorFontFamilies)
           GestureDetector(
@@ -1271,6 +1325,8 @@ class _FontControlsState extends State<_FontControls> {
           ),
         ],
       ],
+        ),
+      ),
     );
   }
 
