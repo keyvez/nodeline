@@ -184,6 +184,28 @@ void main() {
     });
   });
 
+  group('clear fill', () {
+    test('color_objects with clearFill removes an existing fill', () async {
+      canvas.add(DrawingObjectAdded(RectangleObject(
+        id: 'r1',
+        rect: const Rect.fromLTWH(0, 0, 80, 40),
+        fillColor: const Color(0xFFF0F0F0),
+      )));
+      await _pump();
+      expect((canvas.state.drawingObjects['r1'] as RectangleObject).fillColor,
+          isNotNull);
+
+      d.dispatch(ToolCall(name: 'color_objects', args: {
+        'ids': ['r1'],
+        'clearFill': true,
+      }));
+      await _pump();
+
+      expect((canvas.state.drawingObjects['r1'] as RectangleObject).fillColor,
+          isNull);
+    });
+  });
+
   group('set_text_style', () {
     test('caption style changes font only, never fill color', () async {
       // Global default is Courier 16 (kEditorDefaults); caption = 0.7 scale.

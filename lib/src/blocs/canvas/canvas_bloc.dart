@@ -1205,28 +1205,38 @@ class CanvasBloc extends Bloc<CanvasEvent, CanvasState> {
 
       if (obj is RectangleObject) {
         updatedObjects[id] = obj.copyWith(
-          fillColor: event.clearFill ? null : event.fillColor ?? obj.fillColor,
-          strokeColor: event.clearStroke ? null : event.strokeColor ?? obj.strokeColor,
+          fillColor: event.fillColor,
+          strokeColor: event.strokeColor,
+          clearFill: event.clearFill,
+          clearStroke: event.clearStroke,
         ) as DrawingObject;
       } else if (obj is CircleObject) {
         updatedObjects[id] = obj.copyWith(
-          fillColor: event.clearFill ? null : event.fillColor ?? obj.fillColor,
-          strokeColor: event.clearStroke ? null : event.strokeColor ?? obj.strokeColor,
+          fillColor: event.fillColor,
+          strokeColor: event.strokeColor,
+          clearFill: event.clearFill,
+          clearStroke: event.clearStroke,
         ) as DrawingObject;
       } else if (obj is DiamondObject) {
         updatedObjects[id] = obj.copyWith(
-          fillColor: event.clearFill ? null : event.fillColor ?? obj.fillColor,
-          strokeColor: event.clearStroke ? null : event.strokeColor ?? obj.strokeColor,
+          fillColor: event.fillColor,
+          strokeColor: event.strokeColor,
+          clearFill: event.clearFill,
+          clearStroke: event.clearStroke,
         ) as DrawingObject;
       } else if (obj is ParallelogramObject) {
         updatedObjects[id] = obj.copyWith(
-          fillColor: event.clearFill ? null : event.fillColor ?? obj.fillColor,
-          strokeColor: event.clearStroke ? null : event.strokeColor ?? obj.strokeColor,
+          fillColor: event.fillColor,
+          strokeColor: event.strokeColor,
+          clearFill: event.clearFill,
+          clearStroke: event.clearStroke,
         ) as DrawingObject;
       } else if (obj is ForkJoinObject) {
         updatedObjects[id] = obj.copyWith(
-          fillColor: event.clearFill ? null : event.fillColor ?? obj.fillColor,
-          strokeColor: event.clearStroke ? null : event.strokeColor ?? obj.strokeColor,
+          fillColor: event.fillColor,
+          strokeColor: event.strokeColor,
+          clearFill: event.clearFill,
+          clearStroke: event.clearStroke,
         ) as DrawingObject;
       }
     }

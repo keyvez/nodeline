@@ -475,7 +475,7 @@ class RectangleObject extends DrawingObject {
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, double? borderRadius, Color? fillColor, Color? strokeColor, TextStyle? textStyle, List<TextRun>? richText, bool? fontCustomized}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, double? borderRadius, Color? fillColor, Color? strokeColor, TextStyle? textStyle, List<TextRun>? richText, bool? fontCustomized, bool clearFill = false, bool clearStroke = false}) {
     return RectangleObject(
       id: id,
       rect: rect ?? _rect,
@@ -489,8 +489,8 @@ class RectangleObject extends DrawingObject {
       lineStyle: lineStyle ?? this.lineStyle,
       borderRadius: borderRadius ?? this.borderRadius,
       isEditing: isEditing ?? this.isEditing,
-      fillColor: fillColor ?? this.fillColor,
-      strokeColor: strokeColor ?? this.strokeColor,
+      fillColor: clearFill ? null : (fillColor ?? this.fillColor),
+      strokeColor: clearStroke ? null : (strokeColor ?? this.strokeColor),
     );
   }
 }
@@ -554,7 +554,7 @@ class CircleObject extends DrawingObject {
   }
 
   @override
-  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, Color? fillColor, Color? strokeColor, TextStyle? textStyle, List<TextRun>? richText, bool? fontCustomized}) {
+  DrawingObject copyWith({Rect? rect, bool? isSelected, double? angle, double? creationZoom, LineStyle? lineStyle, bool? isEditing, Color? fillColor, Color? strokeColor, TextStyle? textStyle, List<TextRun>? richText, bool? fontCustomized, bool clearFill = false, bool clearStroke = false}) {
     return CircleObject(
       id: id,
       rect: rect ?? _rect,
@@ -567,8 +567,8 @@ class CircleObject extends DrawingObject {
       fontCustomized: fontCustomized ?? this.fontCustomized,
       lineStyle: lineStyle ?? this.lineStyle,
       isEditing: isEditing ?? this.isEditing,
-      fillColor: fillColor ?? this.fillColor,
-      strokeColor: strokeColor ?? this.strokeColor,
+      fillColor: clearFill ? null : (fillColor ?? this.fillColor),
+      strokeColor: clearStroke ? null : (strokeColor ?? this.strokeColor),
     );
   }
 }
@@ -671,6 +671,8 @@ class DiamondObject extends DrawingObject {
     TextStyle? textStyle,
     List<TextRun>? richText,
     bool? fontCustomized,
+    bool clearFill = false,
+    bool clearStroke = false,
   }) {
     return DiamondObject(
       id: id,
@@ -684,8 +686,8 @@ class DiamondObject extends DrawingObject {
       fontCustomized: fontCustomized ?? this.fontCustomized,
       lineStyle: lineStyle ?? this.lineStyle,
       isEditing: isEditing ?? this.isEditing,
-      fillColor: fillColor ?? this.fillColor,
-      strokeColor: strokeColor ?? this.strokeColor,
+      fillColor: clearFill ? null : (fillColor ?? this.fillColor),
+      strokeColor: clearStroke ? null : (strokeColor ?? this.strokeColor),
     );
   }
 }
@@ -791,6 +793,8 @@ class ParallelogramObject extends DrawingObject {
     TextStyle? textStyle,
     List<TextRun>? richText,
     bool? fontCustomized,
+    bool clearFill = false,
+    bool clearStroke = false,
   }) {
     return ParallelogramObject(
       id: id,
@@ -805,8 +809,8 @@ class ParallelogramObject extends DrawingObject {
       lineStyle: lineStyle ?? this.lineStyle,
       isEditing: isEditing ?? this.isEditing,
       skewOffset: skewOffset,
-      fillColor: fillColor ?? this.fillColor,
-      strokeColor: strokeColor ?? this.strokeColor,
+      fillColor: clearFill ? null : (fillColor ?? this.fillColor),
+      strokeColor: clearStroke ? null : (strokeColor ?? this.strokeColor),
     );
   }
 }
@@ -871,6 +875,8 @@ class ForkJoinObject extends DrawingObject {
     LineStyle? lineStyle,
     Color? fillColor,
     Color? strokeColor,
+    bool clearFill = false,
+    bool clearStroke = false,
   }) {
     return ForkJoinObject(
       id: id,
@@ -879,8 +885,8 @@ class ForkJoinObject extends DrawingObject {
       angle: angle ?? this.angle,
       creationZoom: creationZoom ?? this.creationZoom,
       lineStyle: lineStyle ?? this.lineStyle,
-      fillColor: fillColor ?? this.fillColor,
-      strokeColor: strokeColor ?? this.strokeColor,
+      fillColor: clearFill ? null : (fillColor ?? this.fillColor),
+      strokeColor: clearStroke ? null : (strokeColor ?? this.strokeColor),
     );
   }
 }

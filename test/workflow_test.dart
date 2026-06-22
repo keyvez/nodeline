@@ -242,6 +242,20 @@ void main() {
       final copy = rect.copyWith(borderRadius: 16.0);
       expect((copy as RectangleObject).borderRadius, 16.0);
     });
+
+    test('copyWith(clearFill) removes the fill (null != "keep")', () {
+      final rect = RectangleObject(
+        id: 'rect-6',
+        rect: Rect.fromLTWH(0, 0, 100, 80),
+        fillColor: const Color(0xFFAABBCC),
+      );
+      // Plain copyWith without fillColor keeps it...
+      expect((rect.copyWith() as RectangleObject).fillColor,
+          const Color(0xFFAABBCC));
+      // ...clearFill removes it.
+      expect((rect.copyWith(clearFill: true) as RectangleObject).fillColor,
+          isNull);
+    });
   });
 
   group('ConnectionPort', () {

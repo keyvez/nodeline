@@ -643,6 +643,12 @@ class FlowDrawEditorRenderBox extends RenderBox
       ..color = const Color(0xFF1a1a1a)
       ..style = PaintingStyle.fill;
 
+    // A shape with no fill color renders truly transparent (canvas shows
+    // through), so the "remove fill" action is visible.
+    final Paint noFillPaint = Paint()
+      ..color = const Color(0x00000000)
+      ..style = PaintingStyle.fill;
+
     final Paint handlePaint = Paint()..color = Colors.blue;
     final Paint handleHitAreaPaint = Paint()..color = Colors.transparent;
     final Paint selectedRectBorderPaint = Paint()
@@ -801,7 +807,7 @@ class FlowDrawEditorRenderBox extends RenderBox
             obj.layoutPainter().paint(canvas, obj.rect.topLeft);
           }
         } else if (obj is CircleObject) {
-          final circleFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
+          final circleFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : noFillPaint;
           final circleStroke = obj.strokeColor != null ? (Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = objectPaint.strokeWidth) : objectPaint;
           canvas.drawOval(obj.rect, circleFill);
           if (obj.lineStyle == LineStyle.solid) {
@@ -820,7 +826,7 @@ class FlowDrawEditorRenderBox extends RenderBox
           final objCornerRadius =
               obj.borderRadius > 0 ? obj.borderRadius : 12.0 / zoom;
           final squircle = _squircleFor(obj.rect, objCornerRadius);
-          final rectFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
+          final rectFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : noFillPaint;
           final rectStroke = obj.strokeColor != null ? (Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = objectPaint.strokeWidth) : objectPaint;
           canvas.drawRSuperellipse(squircle, rectFill);
           if (obj.lineStyle == LineStyle.solid) {
@@ -834,7 +840,7 @@ class FlowDrawEditorRenderBox extends RenderBox
           }
         } else if (obj is DiamondObject) {
           final diamondPath = obj.path;
-          final diaFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
+          final diaFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : noFillPaint;
           final diaStroke = obj.strokeColor != null ? (Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = objectPaint.strokeWidth) : objectPaint;
           canvas.drawPath(diamondPath, diaFill);
           if (obj.lineStyle == LineStyle.solid) {
@@ -847,7 +853,7 @@ class FlowDrawEditorRenderBox extends RenderBox
           }
         } else if (obj is ParallelogramObject) {
           final paraPath = obj.path;
-          final paraFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : fillPaint;
+          final paraFill = obj.fillColor != null ? (Paint()..color = obj.fillColor!..style = PaintingStyle.fill) : noFillPaint;
           final paraStroke = obj.strokeColor != null ? (Paint()..color = obj.strokeColor!..style = PaintingStyle.stroke..strokeWidth = objectPaint.strokeWidth) : objectPaint;
           canvas.drawPath(paraPath, paraFill);
           if (obj.lineStyle == LineStyle.solid) {
