@@ -1,3 +1,8 @@
+## 0.1.1 - 2026-06-23
+
+- Fixed broken README images by hosting real, SDK-rendered diagram screenshots
+  and pointing repository/homepage URLs at the canonical GitHub repo.
+
 ## 0.1.0 - 2025-07-27
 
 - Updated README.md to include a new "Roadmap & Future Features" section, outlining planned improvements and upcoming features for the library.
