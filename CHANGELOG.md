@@ -1,3 +1,9 @@
+## 0.1.2 - 2026-06-23
+
+- Regenerated the README diagrams with faithful perpendicular edge routing
+  (arrows now leave/enter nodes via square stubs instead of crossing the
+  node edges at an angle).
+
 ## 0.1.1 - 2026-06-23
 
 - Fixed broken README images by hosting real, SDK-rendered diagram screenshots

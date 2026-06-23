@@ -26,25 +26,44 @@ Future<void> _render(String mermaid, String outPath, {double pixelRatio = 2.0}) 
   expect(objects, isNotEmpty, reason: 'importer produced no objects for $outPath');
 
   // Route arrows orthogonally so the exported image matches the real app's
-  // perpendicular routing (the importer marks arrows orthogonal but leaves
-  // waypoints for the paint-time router; we run that router here).
-  final obstacles = objects.values
-      .where((o) => o is! ArrowObject && o is! LineObject)
-      .map((o) => o.rect)
-      .toList();
+  // perpendicular routing. The importer marks arrows orthogonal but leaves
+  // waypoints for the paint-time router, so we run that router here exactly the
+  // way the render object does: snap each endpoint to its attached node's edge,
+  // pass the source/target rects (which drive the perpendicular exit/entry
+  // stubs) and exclude those two rects from the obstacle list.
   final routed = <(Offset, Offset)>[];
   for (final o in objects.values) {
-    if (o is ArrowObject && o.pathType == LinkPathType.orthogonal) {
-      o.waypoints = OrthogonalRouter.route(
-        start: o.start,
-        end: o.end,
-        obstacles: obstacles,
-        existingSegments: routed,
-      );
-      final pts = [o.start, ...?o.waypoints, o.end];
-      for (var i = 0; i < pts.length - 1; i++) {
-        routed.add((pts[i], pts[i + 1]));
-      }
+    if (o is! ArrowObject || o.pathType != LinkPathType.orthogonal) continue;
+
+    final startId = o.startAttachment?.objectId;
+    final endId = o.endAttachment?.objectId;
+    final startRect = startId != null ? objects[startId]?.rect : null;
+    final endRect = endId != null ? objects[endId]?.rect : null;
+
+    var start = startRect != null ? _snapToNearestEdge(o.start, startRect) : o.start;
+    var end = endRect != null ? _snapToNearestEdge(o.end, endRect) : o.end;
+
+    final obstacles = <Rect>[];
+    for (final other in objects.values) {
+      if (other.id == o.id) continue;
+      if (other.id == startId || other.id == endId) continue;
+      if (other is ArrowObject || other is LineObject) continue;
+      obstacles.add(other.rect);
+    }
+
+    o.start = start;
+    o.end = end;
+    o.waypoints = OrthogonalRouter.route(
+      start: start,
+      end: end,
+      obstacles: obstacles,
+      startObjectRect: startRect,
+      endObjectRect: endRect,
+      existingSegments: routed,
+    );
+    final pts = [start, ...?o.waypoints, end];
+    for (var i = 0; i < pts.length - 1; i++) {
+      routed.add((pts[i], pts[i + 1]));
     }
   }
 
@@ -56,6 +75,21 @@ Future<void> _render(String mermaid, String outPath, {double pixelRatio = 2.0}) 
   file.writeAsBytesSync(png!);
   // ignore: avoid_print
   print('wrote $outPath (${png.length} bytes, ${objects.length} objects)');
+}
+
+/// Mirrors the render object's snap: moves [point] onto the nearest edge of
+/// [rect] so the router's stub leaves the box perpendicularly.
+Offset _snapToNearestEdge(Offset point, Rect rect) {
+  final distToLeft = (point.dx - rect.left).abs();
+  final distToRight = (point.dx - rect.right).abs();
+  final distToTop = (point.dy - rect.top).abs();
+  final distToBottom = (point.dy - rect.bottom).abs();
+  final minDist =
+      [distToLeft, distToRight, distToTop, distToBottom].reduce((a, b) => a < b ? a : b);
+  if (minDist == distToLeft) return Offset(rect.left, point.dy);
+  if (minDist == distToRight) return Offset(rect.right, point.dy);
+  if (minDist == distToTop) return Offset(point.dx, rect.top);
+  return Offset(point.dx, rect.bottom);
 }
 
 Future<void> _loadRealFont() async {
