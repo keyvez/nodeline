@@ -1,11 +1,11 @@
 # nodeline
 
 [![Pub Version](https://img.shields.io/pub/v/nodeline.svg)](https://pub.dev/packages/nodeline)
-[![Project Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/nodeline/nodeline#-project-status-alpha)
+[![Project Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/keyvez/nodeline#-project-status-alpha)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub Stars](https://img.shields.io/github/stars/nodeline/nodeline.svg)](https://github.com/nodeline/nodeline/stargazers)
-[![GitHub Issues](https://img.shields.io/github/issues/nodeline/nodeline.svg)](https://github.com/nodeline/nodeline/issues)
-[![GitHub Forks](https://img.shields.io/github/forks/nodeline/nodeline.svg)](https://github.com/nodeline/nodeline/network/members)
+[![GitHub Stars](https://img.shields.io/github/stars/keyvez/nodeline.svg)](https://github.com/keyvez/nodeline/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/keyvez/nodeline.svg)](https://github.com/keyvez/nodeline/issues)
+[![GitHub Forks](https://img.shields.io/github/forks/keyvez/nodeline.svg)](https://github.com/keyvez/nodeline/network/members)
 
 A powerful, extensible, and high-performance infinite canvas and diagramming library for Flutter, inspired by [tldraw](https://www.tldraw.com/) and [eraser.io](https://www.eraser.io)
 
@@ -123,7 +123,12 @@ class _MyDiagramPageState extends State<MyDiagramPage> {
 }
 ```
 
-![nodeline Basic UI](https://raw.githubusercontent.com/nodeline/nodeline/main/assets/readme/basic_ui.png)
+![nodeline basic flowchart](https://raw.githubusercontent.com/keyvez/nodeline/main/assets/readme/basic_ui.png)
+
+`nodeline` scales from simple flowcharts to dense graphs, with automatic
+perpendicular edge routing throughout:
+
+![nodeline complex diagram](https://raw.githubusercontent.com/keyvez/nodeline/main/assets/readme/complex.png)
 
 ## 🧠 Core Concepts
 
@@ -161,8 +166,6 @@ The `FlowDrawToolbar` widget provides a ready-made UI for selecting the active t
 | Text      |   `T`    | Create a text object.                |
 | Figure    |   `F`    | Create a dashed group container.     |
 
-![nodeline Tool Shortcuts GIF](https://raw.githubusercontent.com/nodeline/nodeline/main/assets/readme/tool_shortcuts.gif)
-
 ### Modifier Keys for Enhanced Control
 
 You can hold down modifier keys to enhance the behavior of tools and actions, providing more precise control over your creations.
@@ -174,8 +177,6 @@ You can hold down modifier keys to enhance the behavior of tools and actions, pr
 | `Shift` + Click        | **Multi-Select**                   | While using the Select tool, hold `Shift` and click on objects to add them to your current selection without deselecting others. |
 | `Ctrl`/`Cmd` + Click   | **Multi-Select (Alternative)**     | Same as Shift + Click, allows for adding objects to the current selection.                                                       |
 | `Shift` + `Ctrl`/`Cmd` | **Draw Orthogonal Arrows**         | While drawing with the Arrow tool, hold both `Shift` and `Ctrl`/`Cmd` to create an orthogonal (right-angled) connector line.     |
-
-![nodeline Modifier Keys GIF](https://raw.githubusercontent.com/nodeline/nodeline/main/assets/readme/modifier_keys.gif)
 
 ## 🛠️ Advanced Usage
 
@@ -298,17 +299,17 @@ If you'd like to contribute, please feel free to:
 
 ## Star History
 
-<a href="https://star-history.com/#nodeline/nodeline">
+<a href="https://star-history.com/#keyvez/nodeline">
 	<picture>
 	  <source
 	    media="(prefers-color-scheme: dark)"
-	    srcset="https://api.star-history.com/svg?repos=nodeline/nodeline&type=Date&theme=dark"
+	    srcset="https://api.star-history.com/svg?repos=keyvez/nodeline&type=Date&theme=dark"
 	  />
 	  <source
 	    media="(prefers-color-scheme: light)"
-	    srcset="https://api.star-history.com/svg?repos=nodeline/nodeline&type=Date"
+	    srcset="https://api.star-history.com/svg?repos=keyvez/nodeline&type=Date"
 	  />
-	  <img src="https://api.star-history.com/svg?repos=nodeline/nodeline&type=Date" alt="Star History Chart" width="100%" />
+	  <img src="https://api.star-history.com/svg?repos=keyvez/nodeline&type=Date" alt="Star History Chart" width="100%" />
 	</picture>
 </a>
 

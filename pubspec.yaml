@@ -1,9 +1,9 @@
 name: nodeline
 description: "The open-source tldraw alternative for building infinite canvas apps in Flutter."
 version: 0.1.0
-homepage: "https://github.com/nodeline/nodeline"
-repository: "https://github.com/nodeline/nodeline"
-issue_tracker: "https://github.com/nodeline/nodeline/issues"
+homepage: "https://github.com/keyvez/nodeline"
+repository: "https://github.com/keyvez/nodeline"
+issue_tracker: "https://github.com/keyvez/nodeline/issues"
 
 environment:
   sdk: ^3.8.0
