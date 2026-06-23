@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flow_draw/src/blocs/canvas/canvas_bloc.dart';
-import 'package:flow_draw/src/blocs/selection/selection_bloc.dart';
-import 'package:flow_draw/src/core/agent/tool_call.dart';
-import 'package:flow_draw/src/core/agent/tool_dispatcher.dart';
-import 'package:flow_draw/src/core/utils/svg_exporter.dart';
-import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:nodeline/src/blocs/canvas/canvas_bloc.dart';
+import 'package:nodeline/src/blocs/selection/selection_bloc.dart';
+import 'package:nodeline/src/core/agent/tool_call.dart';
+import 'package:nodeline/src/core/agent/tool_dispatcher.dart';
+import 'package:nodeline/src/core/utils/svg_exporter.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
 
 /// Directed ↔ undirected edges: ArrowObject.arrowHead, the bloc event, the
 /// agent tool, and SVG export.

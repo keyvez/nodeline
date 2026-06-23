@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:collection/collection.dart';
-import 'package:flow_draw/flow_draw.dart';
-import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:nodeline/nodeline.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 

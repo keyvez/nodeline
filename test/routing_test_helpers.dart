@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
+import 'package:nodeline/src/core/utils/orthogonal_router.dart';
 
 /// A self-contained routing fixture that captures the geometry of a
 /// source→target connection and can reproduce the routed path.

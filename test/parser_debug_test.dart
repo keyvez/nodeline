@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flow_draw/src/core/parser/flow_draw_parser.dart';
+import 'package:nodeline/src/core/parser/flow_draw_parser.dart';
 
 void main() {
   test('parse default project and print arrow data', () {

@@ -1,4 +1,4 @@
-import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
 import 'package:flutter/material.dart';
 
 /// A [TextEditingController] that carries per-character style runs so a single

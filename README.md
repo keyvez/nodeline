@@ -1,15 +1,15 @@
-# flow_draw
+# nodeline
 
-[![Pub Version](https://img.shields.io/pub/v/flow_draw.svg)](https://pub.dev/packages/flow_draw)
-[![Project Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/flow-draw/flow_draw#-project-status-alpha)
+[![Pub Version](https://img.shields.io/pub/v/nodeline.svg)](https://pub.dev/packages/nodeline)
+[![Project Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/nodeline/nodeline#-project-status-alpha)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub Stars](https://img.shields.io/github/stars/flow-draw/flow_draw.svg)](https://github.com/flow-draw/flow_draw/stargazers)
-[![GitHub Issues](https://img.shields.io/github/issues/flow-draw/flow_draw.svg)](https://github.com/flow-draw/flow_draw/issues)
-[![GitHub Forks](https://img.shields.io/github/forks/flow-draw/flow_draw.svg)](https://github.com/flow-draw/flow_draw/network/members)
+[![GitHub Stars](https://img.shields.io/github/stars/nodeline/nodeline.svg)](https://github.com/nodeline/nodeline/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/nodeline/nodeline.svg)](https://github.com/nodeline/nodeline/issues)
+[![GitHub Forks](https://img.shields.io/github/forks/nodeline/nodeline.svg)](https://github.com/nodeline/nodeline/network/members)
 
 A powerful, extensible, and high-performance infinite canvas and diagramming library for Flutter, inspired by [tldraw](https://www.tldraw.com/) and [eraser.io](https://www.eraser.io)
 
-`flow_draw` provides a complete toolkit for building applications that require node-based editors, whiteboarding, or any kind of interactive canvas. It's built from the ground up with performance and customization in mind, using a custom rendering pipeline to ensure a smooth experience even with a large number of objects.
+`nodeline` provides a complete toolkit for building applications that require node-based editors, whiteboarding, or any kind of interactive canvas. It's built from the ground up with performance and customization in mind, using a custom rendering pipeline to ensure a smooth experience even with a large number of objects.
 
 <p align="center">
   <img src="https://i.ibb.co/tMn7pHjb/Build-using-Flutter.png" alt="Build using Flutter" width="450"/>
@@ -28,7 +28,7 @@ A powerful, extensible, and high-performance infinite canvas and diagramming lib
 - **Powerful Controller API**: Programmatically control the canvas, manage tools, and manipulate objects from your own widgets.
 - **Undo/Redo History**: A robust, built-in history stack for all major actions.
 - **Keyboard Shortcuts**: Speed up your workflow with intuitive keyboard shortcuts for tools and actions.
-- **Text-to-Diagram (flow_draw-lang)**: A simple, text-based language to programmatically generate entire diagrams.
+- **Text-to-Diagram (nodeline-lang)**: A simple, text-based language to programmatically generate entire diagrams.
 - **Customizable UI**: Use builders to completely customize the appearance of nodes, context menus, and more coming soon.
 
 ## 📖 Table of Contents
@@ -52,21 +52,21 @@ A powerful, extensible, and high-performance infinite canvas and diagramming lib
 
 ## 📦 Installation
 
-Add `flow_draw` to your `pubspec.yaml` file:
+Add `nodeline` to your `pubspec.yaml` file:
 
 ```yaml
 dependencies:
-  flow_draw: ^latest_version
+  nodeline: ^latest_version
 ```
 
 Then, run `flutter pub get` in your terminal.
 
 ## 🚀 Quick Start
 
-Getting started with `flow_draw` is simple. Wrap your canvas area with the `FlowDraw` widget and provide it with a `FlowDrawCanvas` and a `FlowDrawToolbar`.
+Getting started with `nodeline` is simple. Wrap your canvas area with the `FlowDraw` widget and provide it with a `FlowDrawCanvas` and a `FlowDrawToolbar`.
 
 ```dart
-import 'package:flow_draw/flow_draw.dart';
+import 'package:nodeline/nodeline.dart';
 import 'package:flutter/material.dart';
 
 class MyDiagramPage extends StatefulWidget {
@@ -123,7 +123,7 @@ class _MyDiagramPageState extends State<MyDiagramPage> {
 }
 ```
 
-![flow_draw Basic UI](https://raw.githubusercontent.com/flow-draw/flow_draw/main/assets/readme/basic_ui.png)
+![nodeline Basic UI](https://raw.githubusercontent.com/nodeline/nodeline/main/assets/readme/basic_ui.png)
 
 ## 🧠 Core Concepts
 
@@ -161,7 +161,7 @@ The `FlowDrawToolbar` widget provides a ready-made UI for selecting the active t
 | Text      |   `T`    | Create a text object.                |
 | Figure    |   `F`    | Create a dashed group container.     |
 
-![flow_draw Tool Shortcuts GIF](https://raw.githubusercontent.com/flow-draw/flow_draw/main/assets/readme/tool_shortcuts.gif)
+![nodeline Tool Shortcuts GIF](https://raw.githubusercontent.com/nodeline/nodeline/main/assets/readme/tool_shortcuts.gif)
 
 ### Modifier Keys for Enhanced Control
 
@@ -175,7 +175,7 @@ You can hold down modifier keys to enhance the behavior of tools and actions, pr
 | `Ctrl`/`Cmd` + Click   | **Multi-Select (Alternative)**     | Same as Shift + Click, allows for adding objects to the current selection.                                                       |
 | `Shift` + `Ctrl`/`Cmd` | **Draw Orthogonal Arrows**         | While drawing with the Arrow tool, hold both `Shift` and `Ctrl`/`Cmd` to create an orthogonal (right-angled) connector line.     |
 
-![flow_draw Modifier Keys GIF](https://raw.githubusercontent.com/flow-draw/flow_draw/main/assets/readme/modifier_keys.gif)
+![nodeline Modifier Keys GIF](https://raw.githubusercontent.com/nodeline/nodeline/main/assets/readme/modifier_keys.gif)
 
 ## 🛠️ Advanced Usage
 
@@ -204,11 +204,11 @@ controller.centerView();
 
 ### Text-to-Diagram with `FlowDrawParser`
 
-`flow_draw` includes a powerful parser for a simple, text-based language to define entire diagrams. This is perfect for generating diagrams from code, versioning them in git, or building integrations.
+`nodeline` includes a powerful parser for a simple, text-based language to define entire diagrams. This is perfect for generating diagrams from code, versioning them in git, or building integrations.
 
 ```dart
 void generateDiagramFromText() {
-  // 1. Define your diagram using flow_draw-lang syntax
+  // 1. Define your diagram using nodeline-lang syntax
   const myDiagramCode = """
     // This is a comment
 
@@ -264,7 +264,7 @@ FlowDrawCanvas(
 
 ## Roadmap & Future Features
 
-`flow_draw` is under active development. My goal is to make it the most powerful and easy-to-use diagramming library for Flutter. Below is a list of planned features and improvements. Contributions are highly welcome!
+`nodeline` is under active development. My goal is to make it the most powerful and easy-to-use diagramming library for Flutter. Below is a list of planned features and improvements. Contributions are highly welcome!
 
 ☐ **Style & Property Inspector**: Implement a robust styling system (fill color, stroke, text properties) and a property panel widget to edit selected objects.
 
@@ -282,7 +282,7 @@ FlowDrawCanvas(
 
 ## Contributing ❤️
 
-Contributions are welcome and greatly appreciated! `flow_draw` is an open-source project, and we'd love to see it grow with the help of the community.
+Contributions are welcome and greatly appreciated! `nodeline` is an open-source project, and we'd love to see it grow with the help of the community.
 
 If you'd like to contribute, please feel free to:
 
@@ -298,17 +298,17 @@ If you'd like to contribute, please feel free to:
 
 ## Star History
 
-<a href="https://star-history.com/#flow-draw/flow_draw">
+<a href="https://star-history.com/#nodeline/nodeline">
 	<picture>
 	  <source
 	    media="(prefers-color-scheme: dark)"
-	    srcset="https://api.star-history.com/svg?repos=flow-draw/flow_draw&type=Date&theme=dark"
+	    srcset="https://api.star-history.com/svg?repos=nodeline/nodeline&type=Date&theme=dark"
 	  />
 	  <source
 	    media="(prefers-color-scheme: light)"
-	    srcset="https://api.star-history.com/svg?repos=flow-draw/flow_draw&type=Date"
+	    srcset="https://api.star-history.com/svg?repos=nodeline/nodeline&type=Date"
 	  />
-	  <img src="https://api.star-history.com/svg?repos=flow-draw/flow_draw&type=Date" alt="Star History Chart" width="100%" />
+	  <img src="https://api.star-history.com/svg?repos=nodeline/nodeline&type=Date" alt="Star History Chart" width="100%" />
 	</picture>
 </a>
 
@@ -328,7 +328,7 @@ I am currently open looking for new job opportunities and interesting contract p
 
 ## Support The Project
 
-If `flow_draw` has been useful to you, please consider giving it a ⭐️ on GitHub!
+If `nodeline` has been useful to you, please consider giving it a ⭐️ on GitHub!
 
 For those who wish to provide more direct support, you can:
 
@@ -338,4 +338,4 @@ Your support helps in the ongoing development and maintenance of the project. Th
 
 ## License 📜
 
-`flow_draw` is released under the [MIT License](https://opensource.org/licenses/MIT). See the `LICENSE` file for more details.
+`nodeline` is released under the [MIT License](https://opensource.org/licenses/MIT). See the `LICENSE` file for more details.

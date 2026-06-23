@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flow_draw/flow_draw.dart';
+import 'package:nodeline/nodeline.dart';
 import 'package:flutter/widgets.dart';
 
 import 'flow_draw_controller_interface.dart';

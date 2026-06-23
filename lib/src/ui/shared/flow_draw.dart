@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:flow_draw/flow_draw.dart';
-import 'package:flow_draw/src/core/controller/flow_draw_controller.dart';
+import 'package:nodeline/nodeline.dart';
+import 'package:nodeline/src/core/controller/flow_draw_controller.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';

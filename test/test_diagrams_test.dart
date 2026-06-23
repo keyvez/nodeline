@@ -1,5 +1,5 @@
-import 'package:flow_draw/src/core/mermaid/mermaid_importer.dart';
-import 'package:flow_draw/src/core/mermaid/test_diagrams.dart';
+import 'package:nodeline/src/core/mermaid/mermaid_importer.dart';
+import 'package:nodeline/src/core/mermaid/test_diagrams.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

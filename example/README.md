@@ -1,16 +1,42 @@
-# example
+# nodeline example
 
-A new Flutter project.
+A minimal example showing how to embed the [`nodeline`](https://pub.dev/packages/nodeline)
+infinite-canvas editor in a Flutter app.
 
-## Getting Started
+```dart
+import 'package:flutter/widgets.dart';
+import 'package:nodeline/nodeline.dart';
 
-This project is a starting point for a Flutter application.
+void main() => runApp(const NodelineExampleApp());
 
-A few resources to get you started if this is your first Flutter project:
+class NodelineExampleApp extends StatelessWidget {
+  const NodelineExampleApp({super.key});
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+  @override
+  Widget build(BuildContext context) {
+    return const FlowDraw(
+      child: Stack(
+        children: [
+          FlowDrawCanvas(),
+          Align(
+            alignment: Alignment.topCenter,
+            child: Padding(
+              padding: EdgeInsets.only(top: 24),
+              child: FlowDrawToolbar(svgs: []),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+`FlowDraw` provides the canvas BLoCs and app shell; drop a `FlowDrawCanvas`
+inside it and overlay a `FlowDrawToolbar` for the editing tools.
+
+## Run
+
+```sh
+flutter run -d macos   # or: -d chrome
+```

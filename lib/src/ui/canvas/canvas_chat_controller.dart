@@ -1,8 +1,8 @@
 import 'dart:async';
 
-import 'package:flow_draw/src/core/agent/canvas_agent.dart';
-import 'package:flow_draw/src/core/agent/llm_provider.dart';
-import 'package:flow_draw/src/core/agent/tool_call.dart';
+import 'package:nodeline/src/core/agent/canvas_agent.dart';
+import 'package:nodeline/src/core/agent/llm_provider.dart';
+import 'package:nodeline/src/core/agent/tool_call.dart';
 import 'package:flutter/foundation.dart';
 
 /// A single line in the chat transcript as the panel renders it. This is a

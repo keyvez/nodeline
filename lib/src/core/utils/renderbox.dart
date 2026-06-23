@@ -1,7 +1,7 @@
 import 'package:flutter/widgets.dart';
 
-import 'package:flow_draw/src/models/entities.dart';
-import 'package:flow_draw/src/constants.dart';
+import 'package:nodeline/src/models/entities.dart';
+import 'package:nodeline/src/constants.dart';
 
 /// Retrieves the global offset of a widget identified by a [GlobalKey].
 Offset? getOffsetFromGlobalKey(GlobalKey key) {

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flow_draw/src/blocs/canvas/canvas_bloc.dart';
-import 'package:flow_draw/src/blocs/selection/selection_resolver.dart';
-import 'package:flow_draw/src/models/drawing_entities.dart';
-import 'package:flow_draw/src/models/styles.dart';
+import 'package:nodeline/src/blocs/canvas/canvas_bloc.dart';
+import 'package:nodeline/src/blocs/selection/selection_resolver.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/styles.dart';
 
 /// Tests for Canvas Mode step 1: the selection resolver and the
 /// ObjectsLineStyleChanged event. Both are pure model/bloc work, so they need

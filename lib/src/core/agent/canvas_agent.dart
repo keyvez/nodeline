@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:flow_draw/src/core/agent/llm_provider.dart';
-import 'package:flow_draw/src/core/agent/tool_call.dart';
-import 'package:flow_draw/src/core/agent/tool_dispatcher.dart';
-import 'package:flow_draw/src/core/agent/tool_schemas.dart';
+import 'package:nodeline/src/core/agent/llm_provider.dart';
+import 'package:nodeline/src/core/agent/tool_call.dart';
+import 'package:nodeline/src/core/agent/tool_dispatcher.dart';
+import 'package:nodeline/src/core/agent/tool_schemas.dart';
 
 /// An event emitted by the agent as it works, for the chat panel to render a
 /// live trace and for tests to assert on.

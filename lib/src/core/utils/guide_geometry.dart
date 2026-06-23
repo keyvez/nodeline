@@ -1,7 +1,7 @@
 import 'dart:math';
 import 'dart:ui';
 
-import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
 
 /// Pure extraction of a polyline from a drawing object, for treating any drawn
 /// shape as a "guide" path. Used by Canvas Mode's `read_drawing` tool so the

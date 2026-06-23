@@ -1,5 +1,5 @@
-import 'package:flow_draw/flow_draw.dart';
-import 'package:flow_draw/src/ui/shared/debug_info.dart';
+import 'package:nodeline/nodeline.dart';
+import 'package:nodeline/src/ui/shared/debug_info.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../ui/nodes/builders.dart';
@@ -40,7 +40,7 @@ class FlowDrawCanvas extends StatelessWidget {
         children: [
           Positioned.fill(
             child: FlowDrawEditorDataLayer(
-              fragmentShader: 'packages/flow_draw/shaders/grid.frag',
+              fragmentShader: 'packages/nodeline/shaders/grid.frag',
               headerBuilder: headerBuilder,
               nodeBuilder: nodeBuilder,
             ),

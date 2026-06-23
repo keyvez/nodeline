@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
 
 /// The Docs-style text-style presets shown at the top of the font panel. Presets
 /// are now global-relative: a scale factor off the global font size.

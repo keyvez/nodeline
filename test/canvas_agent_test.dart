@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flow_draw/src/blocs/canvas/canvas_bloc.dart';
-import 'package:flow_draw/src/blocs/selection/selection_bloc.dart';
-import 'package:flow_draw/src/core/agent/canvas_agent.dart';
-import 'package:flow_draw/src/core/agent/llm_provider.dart';
-import 'package:flow_draw/src/core/agent/tool_call.dart';
-import 'package:flow_draw/src/core/agent/tool_dispatcher.dart';
-import 'package:flow_draw/src/core/agent/tool_schemas.dart';
-import 'package:flow_draw/src/models/drawing_entities.dart';
-import 'package:flow_draw/src/models/styles.dart';
+import 'package:nodeline/src/blocs/canvas/canvas_bloc.dart';
+import 'package:nodeline/src/blocs/selection/selection_bloc.dart';
+import 'package:nodeline/src/core/agent/canvas_agent.dart';
+import 'package:nodeline/src/core/agent/llm_provider.dart';
+import 'package:nodeline/src/core/agent/tool_call.dart';
+import 'package:nodeline/src/core/agent/tool_dispatcher.dart';
+import 'package:nodeline/src/core/agent/tool_schemas.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/styles.dart';
 
 /// Step 3: the agent loop. Driven by a scripted fake provider so the full
 /// tool-use cycle (prompt → tool calls → dispatch → results → loop → final

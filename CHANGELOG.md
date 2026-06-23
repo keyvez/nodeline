@@ -7,7 +7,7 @@
 
 ### Added
 
-This is the initial public release of `flow_draw`, a powerful and extensible infinite canvas and diagramming library for Flutter.
+This is the initial public release of `nodeline`, a powerful and extensible infinite canvas and diagramming library for Flutter.
 
 #### 🎨 Core Canvas & Rendering Engine
 
@@ -52,5 +52,5 @@ This is the initial public release of `flow_draw`, a powerful and extensible inf
 
 - A powerful, high-level `FlowDrawController` that provides a clean, programmatic API for interacting with the canvas, managing tools, and manipulating objects from external widgets.
 - A simple, declarative `FlowDraw` widget to easily integrate the entire system into any Flutter application.
-- **flow_draw-lang**: A custom, text-to-diagram Domain-Specific Language (DSL) with an accompanying `FlowDrawParser` to generate entire, fully-connected diagrams from a simple text format.
+- **nodeline-lang**: A custom, text-to-diagram Domain-Specific Language (DSL) with an accompanying `FlowDrawParser` to generate entire, fully-connected diagrams from a simple text format.
 - Customizable node appearance through `headerBuilder` and `nodeBuilder` functions passed to the `FlowDrawCanvas` widget.

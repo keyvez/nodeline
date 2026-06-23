@@ -1,4 +1,4 @@
-import 'package:flow_draw/src/ui/canvas/rich_text_editing_controller.dart';
+import 'package:nodeline/src/ui/canvas/rich_text_editing_controller.dart';
 import 'package:flutter/foundation.dart';
 
 /// App-level channel publishing the rich-text controller for the node whose

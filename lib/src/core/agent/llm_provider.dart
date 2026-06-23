@@ -1,5 +1,5 @@
-import 'package:flow_draw/src/core/agent/tool_call.dart';
-import 'package:flow_draw/src/core/agent/tool_schemas.dart';
+import 'package:nodeline/src/core/agent/tool_call.dart';
+import 'package:nodeline/src/core/agent/tool_schemas.dart';
 
 /// One entry in the conversation sent to the model.
 ///

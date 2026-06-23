@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import 'package:flow_draw/src/blocs/canvas/canvas_bloc.dart';
-import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:nodeline/src/blocs/canvas/canvas_bloc.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
 
 /// A small toggleable HUD badge that shows the live count of edge crossings
 /// (arrow-vs-arrow segment intersections) in the current diagram. Useful for

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'package:flow_draw/src/models/entities.dart';
+import 'package:nodeline/src/models/entities.dart';
 
 enum FlLineDrawMode { solid, dashed, dotted }
 

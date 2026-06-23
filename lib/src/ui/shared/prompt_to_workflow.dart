@@ -1,8 +1,8 @@
 import 'dart:convert';
 
-import 'package:flow_draw/src/blocs/canvas/canvas_bloc.dart';
-import 'package:flow_draw/src/core/mermaid/mermaid_importer.dart';
-import 'package:flow_draw/src/core/utils/snackbar.dart';
+import 'package:nodeline/src/blocs/canvas/canvas_bloc.dart';
+import 'package:nodeline/src/core/mermaid/mermaid_importer.dart';
+import 'package:nodeline/src/core/utils/snackbar.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:http/http.dart' as http;
 import 'package:shadcn_flutter/shadcn_flutter.dart';

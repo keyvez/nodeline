@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flow_draw/flow_draw.dart';
+import 'package:nodeline/nodeline.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 class HistoryPanel extends StatefulWidget {

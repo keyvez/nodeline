@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flow_draw/src/blocs/canvas/canvas_bloc.dart';
-import 'package:flow_draw/src/blocs/selection/selection_bloc.dart';
-import 'package:flow_draw/src/core/agent/canvas_agent.dart';
-import 'package:flow_draw/src/core/agent/llm_provider.dart';
-import 'package:flow_draw/src/core/agent/tool_call.dart';
-import 'package:flow_draw/src/core/agent/tool_dispatcher.dart';
-import 'package:flow_draw/src/core/agent/tool_schemas.dart';
-import 'package:flow_draw/src/ui/canvas/canvas_chat_controller.dart';
+import 'package:nodeline/src/blocs/canvas/canvas_bloc.dart';
+import 'package:nodeline/src/blocs/selection/selection_bloc.dart';
+import 'package:nodeline/src/core/agent/canvas_agent.dart';
+import 'package:nodeline/src/core/agent/llm_provider.dart';
+import 'package:nodeline/src/core/agent/tool_call.dart';
+import 'package:nodeline/src/core/agent/tool_dispatcher.dart';
+import 'package:nodeline/src/core/agent/tool_schemas.dart';
+import 'package:nodeline/src/ui/canvas/canvas_chat_controller.dart';
 
 /// Step 4: the chat controller — the testable logic behind the panel widget.
 /// Drives a real agent with a scripted fake provider over real BLoCs.

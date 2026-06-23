@@ -1,6 +1,6 @@
 import 'dart:ui';
 
-import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
 
 /// The kind of object a [SelectionQuery] matches against.
 ///

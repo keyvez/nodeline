@@ -1,8 +1,8 @@
 import 'dart:math';
 
 import 'package:equatable/equatable.dart';
-import 'package:flow_draw/src/core/utils/json_extensions.dart';
-import 'package:flow_draw/src/models/styles.dart';
+import 'package:nodeline/src/core/utils/json_extensions.dart';
+import 'package:nodeline/src/models/styles.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';

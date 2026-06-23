@@ -1,5 +1,5 @@
-import 'package:flow_draw/src/models/drawing_entities.dart';
-import 'package:flow_draw/src/models/styles.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/styles.dart';
 import 'package:flutter/material.dart';
 
 /// A contextual floating toolbar that appears near selected objects.

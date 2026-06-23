@@ -1,5 +1,5 @@
 import 'package:equatable/equatable.dart';
-import 'package:flow_draw/flow_draw.dart';
+import 'package:nodeline/nodeline.dart';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 

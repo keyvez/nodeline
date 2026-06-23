@@ -1,0 +1,36 @@
+# NOTE: when this file exists, pub uses it INSTEAD of .gitignore to decide
+# what to exclude from the published archive. So it must re-list the build
+# artifacts that .gitignore would normally cover, plus the dev-only files.
+
+# Build artifacts / generated
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+**/doc/api/
+*.iml
+.idea/
+
+# Tests and tooling
+test/
+tool/
+
+# Internal docs / experiment artifacts
+CANVAS_MODE_DESIGN.md
+REPORT.md
+program.md
+results.tsv
+todo.todo
+
+# Editor / project metadata
+.mcp.json
+devtools_options.yaml
+.metadata
+
+# Example: ship only source, not the platform scaffolding / build output
+example/macos/
+example/web/
+example/build/
+example/.dart_tool/
+example/.idea/
+example/pubspec.lock

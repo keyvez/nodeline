@@ -1,7 +1,7 @@
 import 'dart:math';
 
-import 'package:flow_draw/src/models/drawing_entities.dart';
-import 'package:flow_draw/src/models/styles.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/styles.dart';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 

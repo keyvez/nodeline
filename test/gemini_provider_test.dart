@@ -1,10 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flow_draw/src/core/agent/gemini_provider.dart';
-import 'package:flow_draw/src/core/agent/llm_provider.dart';
-import 'package:flow_draw/src/core/agent/tool_call.dart';
-import 'package:flow_draw/src/core/agent/tool_schemas.dart';
+import 'package:nodeline/src/core/agent/gemini_provider.dart';
+import 'package:nodeline/src/core/agent/llm_provider.dart';
+import 'package:nodeline/src/core/agent/tool_call.dart';
+import 'package:nodeline/src/core/agent/tool_schemas.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 

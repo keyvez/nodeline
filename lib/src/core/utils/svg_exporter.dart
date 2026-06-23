@@ -2,9 +2,9 @@ import 'dart:math' as math;
 import 'dart:ui' hide TextStyle;
 
 import 'package:flutter/painting.dart' show TextStyle;
-import 'package:flow_draw/src/core/utils/orthogonal_router.dart';
-import 'package:flow_draw/src/models/drawing_entities.dart';
-import 'package:flow_draw/src/models/styles.dart';
+import 'package:nodeline/src/core/utils/orthogonal_router.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/styles.dart';
 
 // Theme constants (dark background, colored strokes — matches app).
 const _bg = '#1a1a1a';

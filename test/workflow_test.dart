@@ -7,10 +7,10 @@ import 'package:flutter/material.dart'
         TextEditingValue,
         FontWeight;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flow_draw/flow_draw.dart';
-import 'package:flow_draw/src/models/drawing_entities.dart';
-import 'package:flow_draw/src/core/utils/svg_exporter.dart';
-import 'package:flow_draw/src/ui/canvas/rich_text_editing_controller.dart';
+import 'package:nodeline/nodeline.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
+import 'package:nodeline/src/core/utils/svg_exporter.dart';
+import 'package:nodeline/src/ui/canvas/rich_text_editing_controller.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

@@ -1,4 +1,4 @@
-import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
 
 /// Converts flow_draw canvas drawing objects into a Mermaid flowchart string.
 class MermaidExporter {

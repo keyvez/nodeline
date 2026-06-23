@@ -1,8 +1,8 @@
 import 'dart:convert';
 
-import 'package:flow_draw/src/core/agent/llm_provider.dart';
-import 'package:flow_draw/src/core/agent/tool_call.dart';
-import 'package:flow_draw/src/core/agent/tool_schemas.dart';
+import 'package:nodeline/src/core/agent/llm_provider.dart';
+import 'package:nodeline/src/core/agent/tool_call.dart';
+import 'package:nodeline/src/core/agent/tool_schemas.dart';
 import 'package:http/http.dart' as http;
 
 /// Gemini implementation of [LlmProvider] using the `generateContent` REST API

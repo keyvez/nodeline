@@ -1,6 +1,6 @@
 import 'dart:collection';
 
-import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
 
 /// Result of a workflow validation pass.
 class WorkflowValidationResult {

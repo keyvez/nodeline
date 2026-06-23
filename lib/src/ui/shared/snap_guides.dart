@@ -1,6 +1,6 @@
 import 'dart:ui';
 
-import 'package:flow_draw/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
 import 'package:flutter/material.dart';
 
 /// Represents an alignment guide line for smart snapping.

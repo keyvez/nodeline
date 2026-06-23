@@ -1,9 +1,9 @@
-name: flow_draw
+name: nodeline
 description: "The open-source tldraw alternative for building infinite canvas apps in Flutter."
 version: 0.1.0
-homepage: "https://github.com/flow-draw/flow_draw"
-repository: "https://github.com/flow-draw/flow_draw"
-issue_tracker: "https://github.com/flow-draw/flow_draw/issues"
+homepage: "https://github.com/nodeline/nodeline"
+repository: "https://github.com/nodeline/nodeline"
+issue_tracker: "https://github.com/nodeline/nodeline/issues"
 
 environment:
   sdk: ^3.8.0
@@ -28,6 +28,7 @@ dependencies:
   bloc: ^9.0.0
   equatable: ^2.0.7
   flutter_bloc: ^9.1.1
+  collection: ^1.19.0
 
 dev_dependencies:
   flutter_test:

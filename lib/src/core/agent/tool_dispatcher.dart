@@ -1,12 +1,12 @@
 import 'dart:ui';
 
-import 'package:flow_draw/src/blocs/canvas/canvas_bloc.dart';
-import 'package:flow_draw/src/blocs/selection/selection_bloc.dart';
-import 'package:flow_draw/src/blocs/selection/selection_resolver.dart';
-import 'package:flow_draw/src/core/agent/tool_call.dart';
-import 'package:flow_draw/src/core/utils/guide_geometry.dart';
-import 'package:flow_draw/src/models/drawing_entities.dart';
-import 'package:flow_draw/src/models/styles.dart';
+import 'package:nodeline/src/blocs/canvas/canvas_bloc.dart';
+import 'package:nodeline/src/blocs/selection/selection_bloc.dart';
+import 'package:nodeline/src/blocs/selection/selection_resolver.dart';
+import 'package:nodeline/src/core/agent/tool_call.dart';
+import 'package:nodeline/src/core/utils/guide_geometry.dart';
+import 'package:nodeline/src/models/drawing_entities.dart';
+import 'package:nodeline/src/models/styles.dart';
 import 'package:uuid/uuid.dart';
 
 /// Executes [ToolCall]s against the canvas by translating each into BLoC events.
